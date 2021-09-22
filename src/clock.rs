@@ -135,14 +135,28 @@ impl<A: Ord> Clock<A> {
     }
 
     /// Returns the common dots for two `Clock` instances.
-    pub fn intersect(left: &Clock<A>, right: &Clock<A>) -> Clock<A>
+    pub fn intersect(&self, other: &Clock<A>) -> Clock<A>
     where
         A: Clone,
     {
         let mut dots = BTreeMap::new();
-        for (left_actor, left_counter) in left.dots.iter() {
-            if let Some(right_counter) = right.dots.get(left_actor) {
-                dots.insert(left_actor.clone(), cmp::min(*left_counter, *right_counter));
+        for (actor, counter) in self.dots.iter() {
+            if let Some(other_counter) = other.dots.get(actor) {
+                dots.insert(actor.clone(), cmp::min(*counter, *other_counter));
+            }
+        }
+        Self { dots }
+    }
+
+    /// Returns the difference for the two `Clock` instances.
+    pub fn difference(&self, other: &Clock<A>) -> Clock<A>
+    where
+        A: Clone,
+    {
+        let mut dots = BTreeMap::new();
+        for (actor, counter) in &self.dots {
+            if *counter > other.get(actor) {
+                dots.insert(actor.clone(), *counter);
             }
         }
         Self { dots }
@@ -154,14 +168,17 @@ impl<A: Ord> Clock<A> {
         A: Clone,
     {
         for dot in other.iter() {
-            self.apply(Dot::new(dot.actor.clone(), dot.counter));
+            self.apply(dot);
         }
     }
 
     /// Returns an iterator over the dots in this vclock
-    pub fn iter(&self) -> impl Iterator<Item = Dot<&A>> {
+    pub fn iter(&self) -> impl Iterator<Item = Dot<A>> + '_
+    where
+        A: Clone,
+    {
         self.dots.iter().map(|(a, c)| Dot {
-            actor: a,
+            actor: a.clone(),
             counter: *c,
         })
     }
