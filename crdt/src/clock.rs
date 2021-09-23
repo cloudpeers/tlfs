@@ -3,7 +3,7 @@
 //! # Examples
 //!
 //! ```
-//! use crdt::{Dot, Clock};
+//! use tlfs_crdt::{Dot, Clock};
 //!
 //! let mut a = Clock::new();
 //! let mut b = Clock::new();
@@ -78,7 +78,7 @@ impl<A: Ord> Clock<A> {
     ///
     /// # Examples
     /// ```
-    /// use crdt::Clock;
+    /// use tlfs_crdt::Clock;
     /// let mut a = Clock::new();
     ///
     /// // `a.inc()` does not mutate the vclock!
@@ -119,7 +119,7 @@ impl<A: Ord> Clock<A> {
     ///
     /// # Examples
     /// ```
-    /// use crdt::Clock;
+    /// use tlfs_crdt::Clock;
     /// let (mut a, mut b) = (Clock::new(), Clock::new());
     /// a.apply(a.inc("A"));
     /// b.apply(b.inc("B"));
@@ -188,7 +188,7 @@ impl<A: Ord> Clock<A> {
     ///
     /// # Examples
     /// ```
-    /// use crdt::{Clock, Dot};
+    /// use tlfs_crdt::{Clock, Dot};
     /// let mut v = Clock::new();
     ///
     /// v.apply(Dot::new("A", 2));
