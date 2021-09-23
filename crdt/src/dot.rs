@@ -18,13 +18,11 @@ impl<A> Dot<A> {
     }
 }
 
-impl<A: Clone> Dot<A> {
+impl<A> Dot<A> {
     /// Generate the successor of this dot
-    pub fn inc(&self) -> Self {
-        Self {
-            actor: self.actor.clone(),
-            counter: self.counter + 1,
-        }
+    pub fn inc(mut self) -> Self {
+        self.counter += 1;
+        self
     }
 }
 

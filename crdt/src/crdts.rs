@@ -1,17 +1,17 @@
-use crate::{Causal, CausalRef, Clock, Dot, DotMap, DotSet, DotStore};
+use crate::{Causal, CausalRef, Clock, Dot, DotFun, DotMap, DotSet, DotStore, Lattice};
 use std::collections::BTreeSet;
 use std::ops::{Deref, DerefMut};
 
-#[derive(Clone)]
-pub struct EWFlag<A: Clone + Ord>(DotSet<A>);
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EWFlag<A: Ord>(DotSet<A>);
 
-impl<A: Clone + Ord> Default for EWFlag<A> {
+impl<A: Ord> Default for EWFlag<A> {
     fn default() -> Self {
         Self(Default::default())
     }
 }
 
-impl<A: Clone + Ord> Deref for EWFlag<A> {
+impl<A: Ord> Deref for EWFlag<A> {
     type Target = DotSet<A>;
 
     fn deref(&self) -> &Self::Target {
@@ -19,7 +19,7 @@ impl<A: Clone + Ord> Deref for EWFlag<A> {
     }
 }
 
-impl<A: Clone + Ord> DerefMut for EWFlag<A> {
+impl<A: Ord> DerefMut for EWFlag<A> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
@@ -28,10 +28,6 @@ impl<A: Clone + Ord> DerefMut for EWFlag<A> {
 impl<A: Clone + Ord> DotStore<A> for EWFlag<A> {
     fn dots(&self, dots: &mut BTreeSet<Dot<A>>) {
         self.0.dots(dots)
-    }
-
-    fn clock(&self, clock: &mut Clock<A>) {
-        self.0.clock(clock)
     }
 
     fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>) {
@@ -44,14 +40,14 @@ impl<'a, A: Clone + Ord> CausalRef<'a, A, EWFlag<A>> {
         let mut delta = Causal::<_, EWFlag<_>>::new();
         delta.store.set.insert(dot.clone());
         delta.clock = self.clock.clone();
-        delta.clock.apply(dot);
+        delta.clock.insert(dot);
         delta
     }
 
     pub fn disable(self, dot: Dot<A>) -> Causal<A, EWFlag<A>> {
         let mut delta = Causal::<_, EWFlag<_>>::new();
         delta.clock = self.clock.clone();
-        delta.clock.apply(dot);
+        delta.clock.insert(dot);
         delta
     }
 
@@ -60,6 +56,54 @@ impl<'a, A: Clone + Ord> CausalRef<'a, A, EWFlag<A>> {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MVReg<A: Ord, L>(DotFun<A, L>);
+
+impl<A: Ord, L> Default for MVReg<A, L> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl<A: Ord, L> Deref for MVReg<A, L> {
+    type Target = DotFun<A, L>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<A: Ord, L> DerefMut for MVReg<A, L> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<A: Clone + Ord, L: Lattice + Clone> DotStore<A> for MVReg<A, L> {
+    fn dots(&self, dots: &mut BTreeSet<Dot<A>>) {
+        self.0.dots(dots)
+    }
+
+    fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>) {
+        self.0.join(clock, other, clock_other);
+    }
+}
+
+impl<'a, A: Clone + Ord, L: Lattice> CausalRef<'a, A, MVReg<A, L>> {
+    pub fn write(self, dot: Dot<A>, v: L) -> Causal<A, MVReg<A, L>> {
+        let mut delta = Causal::<_, MVReg<_, _>>::new();
+        delta.store.fun.insert(dot.clone(), v);
+        delta.clock = self.clock.clone();
+        delta.clock.insert(dot);
+        delta
+    }
+
+    pub fn read(self) -> impl Iterator<Item = &'a L> {
+        self.store.fun.values()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ORMap<K: Ord, V>(DotMap<K, V>);
 
 impl<K: Ord, V> Default for ORMap<K, V> {
@@ -88,10 +132,6 @@ where
 {
     fn dots(&self, dots: &mut BTreeSet<Dot<A>>) {
         self.0.dots(dots)
-    }
-
-    fn clock(&self, clock: &mut Clock<A>) {
-        self.0.clock(clock)
     }
 
     fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>) {
@@ -126,7 +166,9 @@ where
     pub fn remove(self, k: &K) -> Causal<A, ORMap<K, V>> {
         let mut delta = Causal::<_, ORMap<_, _>>::new();
         if let Some(v) = self.store.map.get(k) {
-            v.clock(&mut delta.clock);
+            let mut dots = BTreeSet::new();
+            v.dots(&mut dots);
+            delta.clock = dots.into_iter().collect();
         }
         delta
     }
@@ -153,6 +195,19 @@ mod tests {
         let op2 = flag.as_ref().disable(Dot::new(0, 2));
         flag.join(&op2);
         assert!(!flag.as_ref().value());
+    }
+
+    #[test]
+    fn test_mv_reg() {
+        let mut reg: Causal<_, MVReg<_, _>> = Causal::new();
+        let op1 = reg.as_ref().write(Dot::new(0, 1), 42);
+        let op2 = reg.as_ref().write(Dot::new(1, 1), 43);
+        reg.join(&op1);
+        reg.join(&op2);
+        let values = reg.as_ref().read().collect::<BTreeSet<_>>();
+        assert_eq!(values.len(), 2);
+        assert!(values.contains(&42));
+        assert!(values.contains(&43));
     }
 
     #[test]

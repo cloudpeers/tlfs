@@ -1,5 +1,11 @@
-use crate::{Clock, Dot, DotStore, Lattice};
+use crate::{Clock, Dot, Lattice};
 use std::collections::{BTreeMap, BTreeSet};
+
+pub trait DotStore<A: Ord> {
+    fn dots(&self, dots: &mut BTreeSet<Dot<A>>);
+    /// Joins are required to be idempotent, associative and commutative.
+    fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>);
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DotSet<A: Ord> {
@@ -18,12 +24,6 @@ impl<A: Clone + Ord> DotStore<A> for DotSet<A> {
     fn dots(&self, dots: &mut BTreeSet<Dot<A>>) {
         for dot in &self.set {
             dots.insert(dot.clone());
-        }
-    }
-
-    fn clock(&self, clock: &mut Clock<A>) {
-        for dot in &self.set {
-            clock.apply(dot.clone());
         }
     }
 
@@ -59,12 +59,6 @@ impl<A: Clone + Ord, T: Lattice + Clone> DotStore<A> for DotFun<A, T> {
         }
     }
 
-    fn clock(&self, clock: &mut Clock<A>) {
-        for dot in self.fun.keys() {
-            clock.apply(dot.clone());
-        }
-    }
-
     fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>) {
         for (dot, v) in &other.fun {
             if let Some(v2) = self.fun.get_mut(dot) {
@@ -96,12 +90,6 @@ impl<A: Clone + Ord, K: Clone + Ord, V: Clone + DotStore<A>> DotStore<A> for Dot
     fn dots(&self, dots: &mut BTreeSet<Dot<A>>) {
         for store in self.map.values() {
             store.dots(dots);
-        }
-    }
-
-    fn clock(&self, clock: &mut Clock<A>) {
-        for store in self.map.values() {
-            store.clock(clock);
         }
     }
 

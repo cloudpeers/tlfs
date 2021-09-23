@@ -8,9 +8,7 @@ mod store;
 pub use crate::clock::Clock;
 pub use crate::crdts::{EWFlag, ORMap};
 pub use crate::dot::Dot;
-pub use crate::store::{DotFun, DotMap, DotSet};
-
-use std::collections::BTreeSet;
+pub use crate::store::{DotFun, DotMap, DotSet, DotStore};
 
 /// Join semilattice.
 pub trait Lattice {
@@ -18,11 +16,12 @@ pub trait Lattice {
     fn join(&mut self, other: &Self);
 }
 
-pub trait DotStore<A: Ord> {
-    fn dots(&self, dots: &mut BTreeSet<Dot<A>>);
-    fn clock(&self, clock: &mut Clock<A>);
-    /// Joins are required to be idempotent, associative and commutative.
-    fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>);
+impl Lattice for u64 {
+    fn join(&mut self, other: &Self) {
+        if other > self {
+            *self = *other;
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

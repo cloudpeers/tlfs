@@ -1,5 +1,6 @@
 use crate::{Causal, Clock, Dot, DotStore, Lattice};
 use proptest::prelude::*;
+use std::collections::BTreeSet;
 
 pub fn arb_dot() -> impl Strategy<Value = Dot<u8>> {
     (0u8..5, 0u64..25).prop_map(|(a, c)| Dot::new(a, c))
@@ -12,8 +13,10 @@ where
     F: Fn() -> P,
 {
     s().prop_map(|store| {
-        let mut clock = Clock::new();
-        store.clock(&mut clock);
+        let mut dots = BTreeSet::new();
+        store.dots(&mut dots);
+        let mut clock = dots.into_iter().collect::<Clock<_>>();
+        clock.cloud = Default::default();
         Causal { store, clock }
     })
 }
