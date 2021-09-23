@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 3e164d2be5eea3ec734cda42e7feeba4f7b133cf2cb907d5e547517c13620f12 # shrinks to a = Causal { store: DotSet { set: {} }, clock: Clock { dots: {} } }, b = Causal { store: DotSet { set: {0.1} }, clock: Clock { dots: {0: 1} } }
+cc 11e8e40a7bf8c1c7bc5adf1e1145624ed1cb3a2261449b01f3ee256942268b87 # shrinks to a = Causal { store: DotSet { set: {0.3} }, clock: Clock { dots: {0: 3} } }, b = Causal { store: DotSet { set: {} }, clock: Clock { dots: {} } }, c = Causal { store: DotSet { set: {0.3} }, clock: Clock { dots: {0: 3} } }
+cc 2e93528a87e2d148d339f2ff557fd4600ff2c98d53f5479ce8ed2e2127c164b5 # shrinks to a = Causal { store: DotMap { map: {0: DotSet { set: {2.23} }} }, clock: Clock { dots: {2: 23} } }, b = Causal { store: DotMap { map: {7: DotSet { set: {} }} }, clock: Clock { dots: {} } }, c = Causal { store: DotMap { map: {7: DotSet { set: {2.1} }} }, clock: Clock { dots: {2: 1} } }

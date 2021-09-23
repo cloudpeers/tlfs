@@ -1,6 +1,4 @@
-use crate::clock::Clock;
-use crate::dot::Dot;
-use crate::store::{Causal, CausalLattice, CausalRef, DotMap, DotSet, DotStore};
+use crate::{Causal, CausalRef, Clock, Dot, DotMap, DotSet, DotStore};
 use std::collections::BTreeSet;
 use std::ops::{Deref, DerefMut};
 
@@ -35,11 +33,9 @@ impl<A: Clone + Ord> DotStore<A> for EWFlag<A> {
     fn clock(&self, clock: &mut Clock<A>) {
         self.0.clock(clock)
     }
-}
 
-impl<A: Clone + Ord> CausalLattice<A> for EWFlag<A> {
-    fn causal_join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>) {
-        self.0.causal_join(clock, other, clock_other);
+    fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>) {
+        self.0.join(clock, other, clock_other);
     }
 }
 
@@ -97,14 +93,9 @@ where
     fn clock(&self, clock: &mut Clock<A>) {
         self.0.clock(clock)
     }
-}
 
-impl<A: Clone + Ord, K: Clone + Ord, V> CausalLattice<A> for ORMap<K, V>
-where
-    V: CausalLattice<A> + Clone,
-{
-    fn causal_join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>) {
-        self.0.causal_join(clock, other, clock_other);
+    fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>) {
+        self.0.join(clock, other, clock_other);
     }
 }
 
@@ -151,7 +142,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::Lattice;
+    use crate::Lattice;
 
     #[test]
     fn test_ew_flag() {
