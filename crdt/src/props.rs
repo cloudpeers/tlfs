@@ -1,9 +1,9 @@
 use crate::{Causal, Clock, Dot, DotStore, Lattice};
 use proptest::prelude::*;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub fn arb_dot() -> impl Strategy<Value = Dot<u8>> {
-    (0u8..5, 0u64..25).prop_map(|(a, c)| Dot::new(a, c))
+    (0u8..5, 1u64..25).prop_map(|(a, c)| Dot::new(a, c))
 }
 
 pub fn arb_clock() -> impl Strategy<Value = Clock<u8>> {
@@ -23,8 +23,14 @@ where
     s().prop_map(|store| {
         let mut dots = BTreeSet::new();
         store.dots(&mut dots);
-        let mut clock = dots.into_iter().collect::<Clock<_>>();
-        clock.cloud = Default::default();
+        let mut present = BTreeMap::new();
+        for Dot { actor, counter } in dots {
+            if counter > 0 && counter > present.get(&actor).copied().unwrap_or_default() {
+                present.insert(actor, counter);
+            }
+        }
+        let mut clock = Clock::new();
+        clock.clock = present;
         Causal { store, clock }
     })
 }
@@ -65,6 +71,12 @@ macro_rules! lattice {
                 #[test]
                 fn commutative(a in arb_causal($arb), b in arb_causal($arb)) {
                     prop_assert_eq!(join(&a, &b), join(&b, &a));
+                }
+
+                #[test]
+                fn unjoin(a in arb_causal($arb), b in arb_clock()) {
+                    let b = a.unjoin(&b);
+                    prop_assert_eq!(join(&a, &b), a);
                 }
 
                 #[test]

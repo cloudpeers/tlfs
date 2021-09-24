@@ -2,7 +2,9 @@ use crate::{Clock, Dot, Lattice};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub trait DotStore<A: Ord> {
+    /// Returns true if there are no dots in the store.
     fn is_empty(&self) -> bool;
+    /// Returns the set of dots in the store.
     fn dots(&self, dots: &mut BTreeSet<Dot<A>>);
     /// Joins are required to be idempotent, associative and commutative.
     fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>);
@@ -47,8 +49,8 @@ impl<A: Clone + Ord> DotStore<A> for DotSet<A> {
 
     fn unjoin(&self, diff: &Clock<A>) -> Self {
         let mut set = BTreeSet::new();
-        for dot in &diff.cloud {
-            if self.set.contains(dot) {
+        for dot in &self.set {
+            if diff.contains(dot) {
                 set.insert(dot.clone());
             }
         }
@@ -95,8 +97,8 @@ impl<A: Clone + Ord, T: Lattice + Clone> DotStore<A> for DotFun<A, T> {
 
     fn unjoin(&self, diff: &Clock<A>) -> Self {
         let mut fun = BTreeMap::new();
-        for dot in &diff.cloud {
-            if let Some(v) = self.fun.get(dot) {
+        for (dot, v) in &self.fun {
+            if self.fun.contains_key(dot) {
                 fun.insert(dot.clone(), v.clone());
             }
         }
@@ -177,6 +179,6 @@ mod tests {
     }
 
     crate::lattice!(dotset, arb_dotset);
-    crate::lattice!(dotfun, || arb_dotfun(arb_causal(arb_dotset)));
+    crate::lattice!(dotfun, || arb_dotfun(any::<u64>()));
     crate::lattice!(dotmap, || arb_dotmap(arb_dotset()));
 }
