@@ -1,0 +1,15 @@
+[package]
+name = "tlfs-cambria"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+aligned = "0.4.0"
+anyhow = "1.0.43"
+heck = "0.3.3"
+proc-macro2 = "1.0.29"
+quote = "1.0.9"
+rkyv = "0.7.14"
+
+[dev-dependencies]
+proptest = "1.0.0"

@@ -1,0 +1,109 @@
+on:
+  push:
+    branches:
+    - master
+  pull_request:
+
+name: tlfs
+
+jobs:
+  ci:
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain:
+        - rust: stable
+        platform:
+        - target: x86_64-unknown-linux-gnu
+          host: ubuntu-latest
+          cross: false
+
+        - target: x86_64-apple-darwin
+          host: macos-latest
+          cross: false
+
+        - target: x86_64-pc-windows-msvc
+          host: windows-latest
+          cross: false
+
+        - target: armv7-linux-androideabi
+          host: ubuntu-latest
+          cross: true
+        - target: aarch64-linux-android
+          host: ubuntu-latest
+          cross: true
+
+        - target: aarch64-apple-ios
+          host: macos-latest
+          cross: true
+
+        - target: wasm32-unknown-unknown
+          host: ubuntu-latest
+          cross: true
+    env:
+      RUST_BACKTRACE: 1
+      CARGO_INCREMENTAL: 0
+      NDK_HOME: /usr/local/lib/android/sdk/ndk-bundle
+
+    runs-on: ${{ matrix.platform.host }}
+    steps:
+    - name: Checkout sources
+      uses: actions/checkout@v2
+
+    - name: Cache cargo folder
+      uses: actions/cache@v1
+      with:
+        path: ~/.cargo
+        key: ${{ matrix.platform.target }}-cargo-${{ matrix.toolchain.rust }}
+
+    - name: Install rust toolchain
+      uses: hecrj/setup-rust-action@v1
+      with:
+        rust-version: ${{ matrix.toolchain.rust }}
+        targets: ${{ matrix.platform.target }}
+
+    - name: Install cargo-apk
+      if: contains(matrix.platform.target, 'android')
+      run: cargo install cargo-apk
+
+    - name: Build
+      if: contains(matrix.platform.target, 'android') == false
+      run: cargo build --all-features --target ${{ matrix.platform.target }}
+
+    - name: Build android
+      if: contains(matrix.platform.target, 'android')
+      run: |
+        (cd cambria && cargo apk check --all-features --target ${{ matrix.platform.target }})
+        (cd crdt && cargo apk check --all-features --target ${{ matrix.platform.target }})
+
+    - name: Rust tests
+      if: matrix.platform.cross == false
+      run: cargo test --all-features
+
+    - name: Run example
+      if: matrix.platform.cross == false
+      run: cargo run -p tlfs-cambria-example
+
+  lint-rust:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout sources
+      uses: actions/checkout@v2
+
+    - name: Cache cargo folder
+      uses: actions/cache@v1
+      with:
+        path: ~/.cargo
+        key: lint-cargo
+
+    - name: Install rust toolchain
+      uses: hecrj/setup-rust-action@v1
+      with:
+        rust-version: stable
+        components: clippy, rustfmt
+
+    - name: cargo fmt
+      run: cargo fmt --all -- --check
+
+    - name: cargo clippy
+      run: cargo clippy --workspace --examples --tests --all-features -- -D warnings

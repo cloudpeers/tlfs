@@ -98,7 +98,7 @@ impl<A: Clone + Ord, T: Lattice + Clone> DotStore<A> for DotFun<A, T> {
     fn unjoin(&self, diff: &Clock<A>) -> Self {
         let mut fun = BTreeMap::new();
         for (dot, v) in &self.fun {
-            if self.fun.contains_key(dot) {
+            if diff.contains(dot) {
                 fun.insert(dot.clone(), v.clone());
             }
         }

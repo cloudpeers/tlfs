@@ -177,7 +177,7 @@ where
             let v = V::default();
             let vref = CausalRef {
                 store: &v,
-                clock: &self.clock,
+                clock: self.clock,
             };
             f(vref)
         };
@@ -201,7 +201,7 @@ where
     pub fn get(self, k: &'a K) -> Option<CausalRef<'a, A, V>> {
         self.store.map.get(k).map(|v| CausalRef {
             store: v,
-            clock: &self.clock,
+            clock: self.clock,
         })
     }
 }
