@@ -3,13 +3,21 @@ name = "tlfs-cambria"
 version = "0.1.0"
 edition = "2018"
 
+[features]
+arb = ["proptest", "proptest-derive"]
+
 [dependencies]
 aligned = "0.4.0"
 anyhow = "1.0.43"
 heck = "0.3.3"
 proc-macro2 = "1.0.29"
+proptest = { version = "1.0.0", optional = true }
+proptest-derive = { version = "0.3.0", optional = true }
 quote = "1.0.9"
 rkyv = "0.7.14"
+tlfs-crdt = { version = "0.1.0", path = "../crdt" }
 
 [dev-dependencies]
 proptest = "1.0.0"
+proptest-derive = "0.3.0"
+tlfs-crdt = { version = "0.1.0", path = "../crdt", features = ["proptest"] }

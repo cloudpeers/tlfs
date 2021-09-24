@@ -1,17 +1,19 @@
-use crate::{Causal, CausalRef, Clock, Dot, DotFun, DotMap, DotSet, DotStore, Lattice};
+use crate::{Actor, Causal, CausalRef, Clock, Dot, DotFun, DotMap, DotSet, DotStore, Lattice};
+use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::ops::{Deref, DerefMut};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct EWFlag<A: Ord>(DotSet<A>);
+#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[repr(C)]
+pub struct EWFlag<A: Actor>(DotSet<A>);
 
-impl<A: Ord> Default for EWFlag<A> {
+impl<A: Actor> Default for EWFlag<A> {
     fn default() -> Self {
         Self(Default::default())
     }
 }
 
-impl<A: Ord> Deref for EWFlag<A> {
+impl<A: Actor> Deref for EWFlag<A> {
     type Target = DotSet<A>;
 
     fn deref(&self) -> &Self::Target {
@@ -19,13 +21,13 @@ impl<A: Ord> Deref for EWFlag<A> {
     }
 }
 
-impl<A: Ord> DerefMut for EWFlag<A> {
+impl<A: Actor> DerefMut for EWFlag<A> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl<A: Clone + Ord> DotStore<A> for EWFlag<A> {
+impl<A: Actor> DotStore<A> for EWFlag<A> {
     fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -43,10 +45,10 @@ impl<A: Clone + Ord> DotStore<A> for EWFlag<A> {
     }
 }
 
-impl<'a, A: Clone + Ord> CausalRef<'a, A, EWFlag<A>> {
+impl<'a, A: Actor> CausalRef<'a, A, EWFlag<A>> {
     pub fn enable(self, dot: Dot<A>) -> Causal<A, EWFlag<A>> {
         let mut delta = Causal::<_, EWFlag<_>>::new();
-        delta.store.set.insert(dot.clone());
+        delta.store.set.insert(dot);
         delta.clock = self.clock.clone();
         delta.clock.insert(dot);
         delta
@@ -64,16 +66,17 @@ impl<'a, A: Clone + Ord> CausalRef<'a, A, EWFlag<A>> {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MVReg<A: Ord, L>(DotFun<A, L>);
+#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[repr(C)]
+pub struct MVReg<A: Actor, L>(DotFun<A, L>);
 
-impl<A: Ord, L> Default for MVReg<A, L> {
+impl<A: Actor, L> Default for MVReg<A, L> {
     fn default() -> Self {
         Self(Default::default())
     }
 }
 
-impl<A: Ord, L> Deref for MVReg<A, L> {
+impl<A: Actor, L> Deref for MVReg<A, L> {
     type Target = DotFun<A, L>;
 
     fn deref(&self) -> &Self::Target {
@@ -81,13 +84,13 @@ impl<A: Ord, L> Deref for MVReg<A, L> {
     }
 }
 
-impl<A: Ord, L> DerefMut for MVReg<A, L> {
+impl<A: Actor, L> DerefMut for MVReg<A, L> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl<A: Clone + Ord, L: Lattice + Clone> DotStore<A> for MVReg<A, L> {
+impl<A: Actor, L: Lattice + Clone> DotStore<A> for MVReg<A, L> {
     fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -105,10 +108,10 @@ impl<A: Clone + Ord, L: Lattice + Clone> DotStore<A> for MVReg<A, L> {
     }
 }
 
-impl<'a, A: Clone + Ord, L: Lattice> CausalRef<'a, A, MVReg<A, L>> {
+impl<'a, A: Actor, L: Lattice> CausalRef<'a, A, MVReg<A, L>> {
     pub fn write(self, dot: Dot<A>, v: L) -> Causal<A, MVReg<A, L>> {
         let mut delta = Causal::<_, MVReg<_, _>>::new();
-        delta.store.fun.insert(dot.clone(), v);
+        delta.store.fun.insert(dot, v);
         delta.clock = self.clock.clone();
         delta.clock.insert(dot);
         delta
@@ -119,7 +122,8 @@ impl<'a, A: Clone + Ord, L: Lattice> CausalRef<'a, A, MVReg<A, L>> {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[repr(C)]
 pub struct ORMap<K: Ord, V>(DotMap<K, V>);
 
 impl<K: Ord, V> Default for ORMap<K, V> {
@@ -142,7 +146,7 @@ impl<K: Ord, V> DerefMut for ORMap<K, V> {
     }
 }
 
-impl<A: Clone + Ord, K: Clone + Ord, V> DotStore<A> for ORMap<K, V>
+impl<A: Actor, K: Clone + Ord, V> DotStore<A> for ORMap<K, V>
 where
     V: DotStore<A> + Clone,
 {
@@ -163,10 +167,7 @@ where
     }
 }
 
-impl<'a, A: Clone + Ord, K: Ord, V> CausalRef<'a, A, ORMap<K, V>>
-where
-    V: DotStore<A> + Default,
-{
+impl<'a, A: Actor, K: Ord, V: DotStore<A>> CausalRef<'a, A, ORMap<K, V>> {
     pub fn apply<F>(self, k: K, f: F) -> Causal<A, ORMap<K, V>>
     where
         F: Fn(CausalRef<'_, A, V>) -> Causal<A, V>,

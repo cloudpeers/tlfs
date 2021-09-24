@@ -1,7 +1,8 @@
-use crate::{Clock, Dot, Lattice};
+use crate::{Actor, Clock, Dot, Lattice};
+use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub trait DotStore<A: Ord> {
+pub trait DotStore<A: Actor>: Clone + Default {
     /// Returns true if there are no dots in the store.
     fn is_empty(&self) -> bool;
     /// Returns the set of dots in the store.
@@ -12,12 +13,13 @@ pub trait DotStore<A: Ord> {
     fn unjoin(&self, diff: &Clock<A>) -> Self;
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DotSet<A: Ord> {
+#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[repr(C)]
+pub struct DotSet<A: Actor> {
     pub set: BTreeSet<Dot<A>>,
 }
 
-impl<A: Ord> Default for DotSet<A> {
+impl<A: Actor> Default for DotSet<A> {
     fn default() -> Self {
         Self {
             set: Default::default(),
@@ -25,21 +27,21 @@ impl<A: Ord> Default for DotSet<A> {
     }
 }
 
-impl<A: Clone + Ord> DotStore<A> for DotSet<A> {
+impl<A: Actor> DotStore<A> for DotSet<A> {
     fn is_empty(&self) -> bool {
         self.set.is_empty()
     }
 
     fn dots(&self, dots: &mut BTreeSet<Dot<A>>) {
         for dot in &self.set {
-            dots.insert(dot.clone());
+            dots.insert(*dot);
         }
     }
 
     fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>) {
         for dot in &other.set {
             if clock_other.get(&dot.actor) > clock.get(&dot.actor) {
-                self.set.insert(dot.clone());
+                self.set.insert(*dot);
             }
         }
         self.set.retain(|dot| {
@@ -51,19 +53,20 @@ impl<A: Clone + Ord> DotStore<A> for DotSet<A> {
         let mut set = BTreeSet::new();
         for dot in &self.set {
             if diff.contains(dot) {
-                set.insert(dot.clone());
+                set.insert(*dot);
             }
         }
         Self { set }
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DotFun<A: Ord, T> {
+#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[repr(C)]
+pub struct DotFun<A: Actor, T> {
     pub fun: BTreeMap<Dot<A>, T>,
 }
 
-impl<A: Ord, T> Default for DotFun<A, T> {
+impl<A: Actor, T> Default for DotFun<A, T> {
     fn default() -> Self {
         Self {
             fun: Default::default(),
@@ -71,14 +74,14 @@ impl<A: Ord, T> Default for DotFun<A, T> {
     }
 }
 
-impl<A: Clone + Ord, T: Lattice + Clone> DotStore<A> for DotFun<A, T> {
+impl<A: Actor, T: Lattice + Clone> DotStore<A> for DotFun<A, T> {
     fn is_empty(&self) -> bool {
         self.fun.is_empty()
     }
 
     fn dots(&self, dots: &mut BTreeSet<Dot<A>>) {
         for dot in self.fun.keys() {
-            dots.insert(dot.clone());
+            dots.insert(*dot);
         }
     }
 
@@ -87,7 +90,7 @@ impl<A: Clone + Ord, T: Lattice + Clone> DotStore<A> for DotFun<A, T> {
             if let Some(v2) = self.fun.get_mut(dot) {
                 v2.join(v);
             } else if clock_other.get(&dot.actor) > clock.get(&dot.actor) {
-                self.fun.insert(dot.clone(), v.clone());
+                self.fun.insert(*dot, v.clone());
             }
         }
         self.fun.retain(|dot, _| {
@@ -99,14 +102,15 @@ impl<A: Clone + Ord, T: Lattice + Clone> DotStore<A> for DotFun<A, T> {
         let mut fun = BTreeMap::new();
         for (dot, v) in &self.fun {
             if diff.contains(dot) {
-                fun.insert(dot.clone(), v.clone());
+                fun.insert(*dot, v.clone());
             }
         }
         Self { fun }
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[repr(C)]
 pub struct DotMap<K: Ord, V> {
     pub map: BTreeMap<K, V>,
 }
@@ -119,7 +123,7 @@ impl<K: Ord, V> Default for DotMap<K, V> {
     }
 }
 
-impl<A: Clone + Ord, K: Clone + Ord, V: Clone + DotStore<A>> DotStore<A> for DotMap<K, V> {
+impl<A: Actor, K: Clone + Ord, V: DotStore<A>> DotStore<A> for DotMap<K, V> {
     fn is_empty(&self) -> bool {
         self.map.is_empty()
     }
@@ -154,29 +158,7 @@ impl<A: Clone + Ord, K: Clone + Ord, V: Clone + DotStore<A>> DotStore<A> for Dot
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::props::arb_dot;
     use proptest::prelude::*;
-
-    fn arb_dotset() -> impl Strategy<Value = DotSet<u8>> {
-        prop::collection::btree_set(arb_dot(), 0..50).prop_map(|set| DotSet { set })
-    }
-
-    fn arb_dotfun<L, P>(s: P) -> impl Strategy<Value = DotFun<u8, L>>
-    where
-        L: Lattice + std::fmt::Debug,
-        P: Strategy<Value = L>,
-    {
-        prop::collection::btree_map(arb_dot(), s, 0..10).prop_map(|fun| DotFun { fun })
-    }
-
-    fn arb_dotmap<S, P>(s: P) -> impl Strategy<Value = DotMap<u8, S>>
-    where
-        S: DotStore<u8> + std::fmt::Debug,
-        P: Strategy<Value = S>,
-    {
-        prop::collection::btree_map(0u8..10, s, 0..5).prop_map(|map| DotMap { map })
-    }
 
     crate::lattice!(dotset, arb_dotset);
     crate::lattice!(dotfun, || arb_dotfun(any::<u64>()));

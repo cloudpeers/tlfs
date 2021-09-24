@@ -1,13 +1,20 @@
+mod crdt;
 mod layout;
 mod lens;
 mod precompile;
 #[cfg(test)]
 mod test;
 
+pub use crdt::Crdt;
 pub use layout::{Bool, Number, Ptr};
 pub use lens::{ArchivedSchema, Kind, Lens, Lenses, PrimitiveKind, PrimitiveValue, Schema, Value};
 pub use precompile::{precompile, write_tokens};
 pub use {aligned, anyhow, rkyv};
+
+#[cfg(feature = "arb")]
+pub mod arb {
+    pub use crdt::arb::*;
+}
 
 use anyhow::Result;
 use rkyv::archived_root;

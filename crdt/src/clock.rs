@@ -1,14 +1,58 @@
 //! This module contains a generic vector clock implementation.
-use crate::Dot;
+use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Clock<A: Ord> {
+pub trait Actor: Copy + std::fmt::Debug + Ord + rkyv::Archive<Archived = Self> {}
+
+impl<T: Copy + std::fmt::Debug + Ord + rkyv::Archive<Archived = Self>> Actor for T {}
+
+/// Dot is a version marker for a single actor.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Archive, Deserialize, Serialize)]
+#[archive(as = "Dot<A>")]
+#[repr(C)]
+pub struct Dot<A: Actor> {
+    /// The actor identifier.
+    pub actor: A,
+    /// The current version of this actor.
+    pub counter: u64,
+}
+
+impl<A: Actor> Dot<A> {
+    /// Build a Dot from an actor and counter.
+    pub fn new(actor: A, counter: u64) -> Self {
+        Self { actor, counter }
+    }
+
+    /// Generate the successor of this dot
+    pub fn inc(mut self) -> Self {
+        self.counter += 1;
+        self
+    }
+}
+
+impl<A: Actor + std::fmt::Display> std::fmt::Display for Dot<A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}.{}", self.actor, self.counter)
+    }
+}
+
+impl<A: Actor> From<(A, u64)> for Dot<A> {
+    fn from(dot: (A, u64)) -> Self {
+        Self {
+            actor: dot.0,
+            counter: dot.1,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[repr(C)]
+pub struct Clock<A: Actor> {
     pub(crate) clock: BTreeMap<A, u64>,
     pub(crate) cloud: BTreeSet<Dot<A>>,
 }
 
-impl<A: Ord> Default for Clock<A> {
+impl<A: Actor> Default for Clock<A> {
     fn default() -> Self {
         Self {
             clock: Default::default(),
@@ -17,7 +61,7 @@ impl<A: Ord> Default for Clock<A> {
     }
 }
 
-impl<A: Ord> Clock<A> {
+impl<A: Actor> Clock<A> {
     /// Returns a new instance.
     pub fn new() -> Self {
         Self::default()
@@ -74,7 +118,7 @@ impl<A: Ord> Clock<A> {
         for (actor, counter) in &self.clock {
             let counter = std::cmp::min(*counter, other.get(actor));
             if counter > 0 {
-                clock.clock.insert(actor.clone(), counter);
+                clock.clock.insert(*actor, counter);
             }
         }
         clock.cloud = self.cloud.intersection(&other.cloud).cloned().collect();
@@ -89,12 +133,12 @@ impl<A: Ord> Clock<A> {
         let mut clock = Clock::new();
         for (actor, counter) in &self.clock {
             if *counter > other.get(actor) {
-                clock.clock.insert(actor.clone(), *counter);
+                clock.clock.insert(*actor, *counter);
             }
         }
         for dot in &self.cloud {
             if !other.contains(dot) {
-                clock.cloud.insert(dot.clone());
+                clock.cloud.insert(*dot);
             }
         }
         clock
@@ -107,12 +151,12 @@ impl<A: Ord> Clock<A> {
     {
         for (actor, counter) in &other.clock {
             if *counter > self.get(actor) {
-                self.clock.insert(actor.clone(), *counter);
+                self.clock.insert(*actor, *counter);
             }
         }
         self.compact();
         for dot in &other.cloud {
-            self.insert(dot.clone());
+            self.insert(*dot);
         }
     }
 
@@ -139,7 +183,7 @@ impl<A: Ord> Clock<A> {
     }
 }
 
-impl<A: Ord> std::iter::FromIterator<Dot<A>> for Clock<A> {
+impl<A: Actor> std::iter::FromIterator<Dot<A>> for Clock<A> {
     fn from_iter<I: IntoIterator<Item = Dot<A>>>(iter: I) -> Self {
         let mut clock = Clock::new();
         for dot in iter {
