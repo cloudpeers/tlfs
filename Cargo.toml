@@ -1,4 +1,6 @@
 [workspace]
 members = [
+    "cambria",
+    "cambria/example",
     "crdt",
 ]
