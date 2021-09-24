@@ -69,11 +69,31 @@ impl<A: Ord, S> Causal<A, S> {
             clock: &self.clock,
         }
     }
+
+    pub fn join(&mut self, other: &Self)
+    where
+        A: Clone,
+        S: DotStore<A>,
+    {
+        self.store.join(&self.clock, &other.store, &other.clock);
+        self.clock.union(&other.clock);
+    }
+
+    pub fn unjoin(&self, other: &Clock<A>) -> Self
+    where
+        A: Clone,
+        S: DotStore<A>,
+    {
+        let diff = self.clock.difference(other);
+        Self {
+            store: self.store.unjoin(&diff),
+            clock: diff,
+        }
+    }
 }
 
 impl<A: Clone + Ord, S: DotStore<A>> Lattice for Causal<A, S> {
     fn join(&mut self, other: &Self) {
-        self.store.join(&self.clock, &other.store, &other.clock);
-        self.clock.union(&other.clock);
+        self.join(other);
     }
 }

@@ -2,9 +2,12 @@ use crate::{Clock, Dot, Lattice};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub trait DotStore<A: Ord> {
+    fn is_empty(&self) -> bool;
     fn dots(&self, dots: &mut BTreeSet<Dot<A>>);
     /// Joins are required to be idempotent, associative and commutative.
     fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>);
+    /// Unjoin a state based on a clock (clock \ other_clock).
+    fn unjoin(&self, diff: &Clock<A>) -> Self;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -21,6 +24,10 @@ impl<A: Ord> Default for DotSet<A> {
 }
 
 impl<A: Clone + Ord> DotStore<A> for DotSet<A> {
+    fn is_empty(&self) -> bool {
+        self.set.is_empty()
+    }
+
     fn dots(&self, dots: &mut BTreeSet<Dot<A>>) {
         for dot in &self.set {
             dots.insert(dot.clone());
@@ -36,6 +43,16 @@ impl<A: Clone + Ord> DotStore<A> for DotSet<A> {
         self.set.retain(|dot| {
             other.set.contains(dot) || clock.get(&dot.actor) > clock_other.get(&dot.actor)
         });
+    }
+
+    fn unjoin(&self, diff: &Clock<A>) -> Self {
+        let mut set = BTreeSet::new();
+        for dot in &diff.cloud {
+            if self.set.contains(dot) {
+                set.insert(dot.clone());
+            }
+        }
+        Self { set }
     }
 }
 
@@ -53,6 +70,10 @@ impl<A: Ord, T> Default for DotFun<A, T> {
 }
 
 impl<A: Clone + Ord, T: Lattice + Clone> DotStore<A> for DotFun<A, T> {
+    fn is_empty(&self) -> bool {
+        self.fun.is_empty()
+    }
+
     fn dots(&self, dots: &mut BTreeSet<Dot<A>>) {
         for dot in self.fun.keys() {
             dots.insert(dot.clone());
@@ -71,6 +92,16 @@ impl<A: Clone + Ord, T: Lattice + Clone> DotStore<A> for DotFun<A, T> {
             other.fun.contains_key(dot) || clock.get(&dot.actor) > clock_other.get(&dot.actor)
         });
     }
+
+    fn unjoin(&self, diff: &Clock<A>) -> Self {
+        let mut fun = BTreeMap::new();
+        for dot in &diff.cloud {
+            if let Some(v) = self.fun.get(dot) {
+                fun.insert(dot.clone(), v.clone());
+            }
+        }
+        Self { fun }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -87,6 +118,10 @@ impl<K: Ord, V> Default for DotMap<K, V> {
 }
 
 impl<A: Clone + Ord, K: Clone + Ord, V: Clone + DotStore<A>> DotStore<A> for DotMap<K, V> {
+    fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
+
     fn dots(&self, dots: &mut BTreeSet<Dot<A>>) {
         for store in self.map.values() {
             store.dots(dots);
@@ -101,6 +136,17 @@ impl<A: Clone + Ord, K: Clone + Ord, V: Clone + DotStore<A>> DotStore<A> for Dot
                 self.map.insert(k.clone(), v.clone());
             }
         }
+    }
+
+    fn unjoin(&self, diff: &Clock<A>) -> Self {
+        let mut map = BTreeMap::new();
+        for (k, v) in &self.map {
+            let v = v.unjoin(diff);
+            if !v.is_empty() {
+                map.insert(k.clone(), v);
+            }
+        }
+        Self { map }
     }
 }
 

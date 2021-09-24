@@ -26,12 +26,20 @@ impl<A: Ord> DerefMut for EWFlag<A> {
 }
 
 impl<A: Clone + Ord> DotStore<A> for EWFlag<A> {
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     fn dots(&self, dots: &mut BTreeSet<Dot<A>>) {
         self.0.dots(dots)
     }
 
     fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>) {
         self.0.join(clock, other, clock_other);
+    }
+
+    fn unjoin(&self, diff: &Clock<A>) -> Self {
+        Self(self.0.unjoin(diff))
     }
 }
 
@@ -80,12 +88,20 @@ impl<A: Ord, L> DerefMut for MVReg<A, L> {
 }
 
 impl<A: Clone + Ord, L: Lattice + Clone> DotStore<A> for MVReg<A, L> {
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     fn dots(&self, dots: &mut BTreeSet<Dot<A>>) {
         self.0.dots(dots)
     }
 
     fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>) {
         self.0.join(clock, other, clock_other);
+    }
+
+    fn unjoin(&self, diff: &Clock<A>) -> Self {
+        Self(self.0.unjoin(diff))
     }
 }
 
@@ -130,12 +146,20 @@ impl<A: Clone + Ord, K: Clone + Ord, V> DotStore<A> for ORMap<K, V>
 where
     V: DotStore<A> + Clone,
 {
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     fn dots(&self, dots: &mut BTreeSet<Dot<A>>) {
         self.0.dots(dots)
     }
 
     fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>) {
         self.0.join(clock, other, clock_other);
+    }
+
+    fn unjoin(&self, diff: &Clock<A>) -> Self {
+        Self(self.0.unjoin(diff))
     }
 }
 
@@ -163,12 +187,13 @@ where
         delta
     }
 
-    pub fn remove(self, k: &K) -> Causal<A, ORMap<K, V>> {
+    pub fn remove(self, dot: Dot<A>, k: &K) -> Causal<A, ORMap<K, V>> {
         let mut delta = Causal::<_, ORMap<_, _>>::new();
         if let Some(v) = self.store.map.get(k) {
             let mut dots = BTreeSet::new();
             v.dots(&mut dots);
             delta.clock = dots.into_iter().collect();
+            delta.clock.insert(dot);
         }
         delta
     }
@@ -184,7 +209,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Lattice;
 
     #[test]
     fn test_ew_flag() {
@@ -221,7 +245,9 @@ mod tests {
         let op2 = map
             .as_ref()
             .apply("flag", |flag| flag.disable(Dot::new(1, 1)));
+        let op3 = map.as_ref().remove(Dot::new(0, 2), &"flag");
         map.join(&op2);
+        map.join(&op3);
         assert!(!map.as_ref().get(&"flag").unwrap().value());
     }
 }

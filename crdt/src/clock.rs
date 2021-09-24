@@ -151,30 +151,8 @@ impl<A: Ord> std::iter::FromIterator<Dot<A>> for Clock<A> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::props::*;
     use proptest::prelude::*;
-
-    fn arb_clock() -> impl Strategy<Value = Clock<u8>> {
-        (
-            prop::collection::btree_map(0u8..5, 1u64..5, 0..5),
-            prop::collection::btree_set((0u8..5, 6u64..10).prop_map(|(a, c)| Dot::new(a, c)), 0..5),
-        )
-            .prop_map(|(clock, cloud)| Clock { clock, cloud })
-    }
-
-    fn union(a: &Clock<u8>, b: &Clock<u8>) -> Clock<u8> {
-        let mut a = a.clone();
-        a.union(b);
-        a
-    }
-
-    fn intersect(a: &Clock<u8>, b: &Clock<u8>) -> Clock<u8> {
-        a.intersect(b)
-    }
-
-    fn difference(a: &Clock<u8>, b: &Clock<u8>) -> Clock<u8> {
-        a.difference(b)
-    }
 
     proptest! {
         #[test]

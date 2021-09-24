@@ -6,6 +6,14 @@ pub fn arb_dot() -> impl Strategy<Value = Dot<u8>> {
     (0u8..5, 0u64..25).prop_map(|(a, c)| Dot::new(a, c))
 }
 
+pub fn arb_clock() -> impl Strategy<Value = Clock<u8>> {
+    (
+        prop::collection::btree_map(0u8..5, 1u64..5, 0..5),
+        prop::collection::btree_set((0u8..5, 6u64..10).prop_map(|(a, c)| Dot::new(a, c)), 0..5),
+    )
+        .prop_map(|(clock, cloud)| Clock { clock, cloud })
+}
+
 pub fn arb_causal<S, P, F>(s: F) -> impl Strategy<Value = Causal<u8, S>>
 where
     S: DotStore<u8> + std::fmt::Debug,
@@ -19,6 +27,20 @@ where
         clock.cloud = Default::default();
         Causal { store, clock }
     })
+}
+
+pub fn union(a: &Clock<u8>, b: &Clock<u8>) -> Clock<u8> {
+    let mut a = a.clone();
+    a.union(b);
+    a
+}
+
+pub fn intersect(a: &Clock<u8>, b: &Clock<u8>) -> Clock<u8> {
+    a.intersect(b)
+}
+
+pub fn difference(a: &Clock<u8>, b: &Clock<u8>) -> Clock<u8> {
+    a.difference(b)
 }
 
 pub fn join<L: Lattice + Clone>(a: &L, b: &L) -> L {
@@ -46,7 +68,10 @@ macro_rules! lattice {
                 }
 
                 #[test]
-                fn associative(a in arb_causal($arb), b in arb_causal($arb), c in arb_causal($arb)) {
+                fn associative(dots in arb_causal($arb), a in arb_clock(), b in arb_clock(), c in arb_clock()) {
+                    let a = dots.unjoin(&a);
+                    let b = dots.unjoin(&b);
+                    let c = dots.unjoin(&c);
                     prop_assert_eq!(join(&join(&a, &b), &c), join(&a, &join(&b, &c)));
                 }
             }
