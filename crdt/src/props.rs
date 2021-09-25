@@ -41,7 +41,7 @@ where
 }
 
 pub fn arb_dotset() -> impl Strategy<Value = DotSet<u8>> {
-    prop::collection::btree_set(arb_dot(), 0..50).prop_map(|set| DotSet { set })
+    prop::collection::btree_set(arb_dot(), 0..50).prop_map(DotSet::new)
 }
 
 pub fn arb_dotfun<L, P>(s: P) -> impl Strategy<Value = DotFun<u8, L>>
@@ -49,7 +49,7 @@ where
     L: Lattice + std::fmt::Debug,
     P: Strategy<Value = L>,
 {
-    prop::collection::btree_map(arb_dot(), s, 0..10).prop_map(|fun| DotFun { fun })
+    prop::collection::btree_map(arb_dot(), s, 0..10).prop_map(DotFun::new)
 }
 
 pub fn arb_dotmap<S, P>(s: P) -> impl Strategy<Value = DotMap<u8, S>>
@@ -57,7 +57,7 @@ where
     S: DotStore<u8> + std::fmt::Debug,
     P: Strategy<Value = S>,
 {
-    prop::collection::btree_map(0u8..10, s, 0..5).prop_map(|map| DotMap { map })
+    prop::collection::btree_map(0u8..10, s, 0..5).prop_map(DotMap::new)
 }
 
 pub fn arb_ewflag() -> impl Strategy<Value = EWFlag<u8>> {

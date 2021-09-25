@@ -1,6 +1,8 @@
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use tlfs_crdt::{Actor, Clock, Dot, DotStore, EWFlag, Lattice, MVReg, ORMap};
+use tlfs_crdt::{Clock, DotStore, EWFlag, Lattice, MVReg, ORMap};
+
+pub use tlfs_crdt::{Actor, Dot};
 
 pub type Prop = String;
 

@@ -7,24 +7,7 @@ use std::collections::BTreeMap;
 
 pub type Prop = String;
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Archive, Serialize)]
-#[archive(as = "PrimitiveKind")]
-#[repr(C)]
-pub enum PrimitiveKind {
-    Boolean,
-    Number,
-    Text,
-}
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Archive, Serialize)]
-#[archive(as = "Kind")]
-#[repr(C)]
-pub enum Kind {
-    Null,
-    Primitive(PrimitiveKind),
-    Array,
-    Object,
-}
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(Debug, Eq, Hash, PartialEq))]
@@ -55,60 +38,6 @@ pub enum Value {
     Primitive(PrimitiveValue),
     Array(#[omit_bounds] Vec<Value>),
     Object(#[omit_bounds] BTreeMap<Prop, Value>),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Archive, Serialize)]
-#[archive_attr(derive(Debug, Eq, PartialEq))]
-#[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
-#[repr(C)]
-pub enum Schema {
-    Null,
-    Boolean,
-    Number,
-    Text,
-    Array(bool, #[omit_bounds] Box<Schema>),
-    Object(#[omit_bounds] BTreeMap<Prop, Schema>),
-}
-
-impl ArchivedSchema {
-    pub fn validate(&self, v: &Value) -> bool {
-        match (self, v) {
-            (Self::Null, Value::Null) => true,
-            (Self::Boolean, Value::Primitive(PrimitiveValue::Boolean(_))) => true,
-            (Self::Number, Value::Primitive(PrimitiveValue::Number(_))) => true,
-            (Self::Text, Value::Primitive(PrimitiveValue::Text(_))) => true,
-            (Self::Array(e, s), Value::Array(vs)) => {
-                if vs.is_empty() {
-                    *e
-                } else {
-                    for v in vs {
-                        if !s.validate(v) {
-                            return false;
-                        }
-                    }
-                    true
-                }
-            }
-            (Self::Object(sm), Value::Object(vm)) => {
-                for k in sm.keys() {
-                    if !vm.contains_key(k.as_str()) {
-                        return false;
-                    }
-                }
-                for (k, v) in vm {
-                    if let Some(s) = sm.get(k.as_str()) {
-                        if !s.validate(v) {
-                            return false;
-                        }
-                    } else {
-                        return false;
-                    }
-                }
-                true
-            }
-            _ => false,
-        }
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Serialize)]

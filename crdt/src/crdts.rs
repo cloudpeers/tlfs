@@ -48,7 +48,7 @@ impl<A: Actor> DotStore<A> for EWFlag<A> {
 impl<'a, A: Actor> CausalRef<'a, A, EWFlag<A>> {
     pub fn enable(self, dot: Dot<A>) -> Causal<A, EWFlag<A>> {
         let mut delta = Causal::<_, EWFlag<_>>::new();
-        delta.store.set.insert(dot);
+        delta.store.insert(dot);
         delta.clock = self.clock.clone();
         delta.clock.insert(dot);
         delta
@@ -62,7 +62,7 @@ impl<'a, A: Actor> CausalRef<'a, A, EWFlag<A>> {
     }
 
     pub fn value(self) -> bool {
-        !self.store.set.is_empty()
+        !self.store.is_empty()
     }
 }
 
@@ -111,14 +111,14 @@ impl<A: Actor, L: Lattice + Clone> DotStore<A> for MVReg<A, L> {
 impl<'a, A: Actor, L: Lattice> CausalRef<'a, A, MVReg<A, L>> {
     pub fn write(self, dot: Dot<A>, v: L) -> Causal<A, MVReg<A, L>> {
         let mut delta = Causal::<_, MVReg<_, _>>::new();
-        delta.store.fun.insert(dot, v);
+        delta.store.insert(dot, v);
         delta.clock = self.clock.clone();
         delta.clock.insert(dot);
         delta
     }
 
     pub fn read(self) -> impl Iterator<Item = &'a L> {
-        self.store.fun.values()
+        self.store.values()
     }
 }
 
@@ -183,14 +183,14 @@ impl<'a, A: Actor, K: Ord, V: DotStore<A>> CausalRef<'a, A, ORMap<K, V>> {
             f(vref)
         };
         let mut delta = Causal::<_, ORMap<_, _>>::new();
-        delta.store.map.insert(k, inner_delta.store);
+        delta.store.insert(k, inner_delta.store);
         delta.clock = inner_delta.clock;
         delta
     }
 
     pub fn remove(self, dot: Dot<A>, k: &K) -> Causal<A, ORMap<K, V>> {
         let mut delta = Causal::<_, ORMap<_, _>>::new();
-        if let Some(v) = self.store.map.get(k) {
+        if let Some(v) = self.store.get(k) {
             let mut dots = BTreeSet::new();
             v.dots(&mut dots);
             delta.clock = dots.into_iter().collect();
@@ -200,7 +200,7 @@ impl<'a, A: Actor, K: Ord, V: DotStore<A>> CausalRef<'a, A, ORMap<K, V>> {
     }
 
     pub fn get(self, k: &'a K) -> Option<CausalRef<'a, A, V>> {
-        self.store.map.get(k).map(|v| CausalRef {
+        self.store.get(k).map(|v| CausalRef {
             store: v,
             clock: self.clock,
         })

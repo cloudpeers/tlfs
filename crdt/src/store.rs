@@ -1,6 +1,7 @@
 use crate::{Actor, Clock, Dot, Lattice};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::{Deref, DerefMut};
 
 pub trait DotStore<A: Actor>: Clone + Default {
     /// Returns true if there are no dots in the store.
@@ -16,14 +17,32 @@ pub trait DotStore<A: Actor>: Clone + Default {
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[repr(C)]
 pub struct DotSet<A: Actor> {
-    pub set: BTreeSet<Dot<A>>,
+    set: BTreeSet<Dot<A>>,
+}
+
+impl<A: Actor> DotSet<A> {
+    pub fn new(set: BTreeSet<Dot<A>>) -> Self {
+        Self { set }
+    }
 }
 
 impl<A: Actor> Default for DotSet<A> {
     fn default() -> Self {
-        Self {
-            set: Default::default(),
-        }
+        Self::new(Default::default())
+    }
+}
+
+impl<A: Actor> Deref for DotSet<A> {
+    type Target = BTreeSet<Dot<A>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.set
+    }
+}
+
+impl<A: Actor> DerefMut for DotSet<A> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.set
     }
 }
 
@@ -63,14 +82,32 @@ impl<A: Actor> DotStore<A> for DotSet<A> {
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[repr(C)]
 pub struct DotFun<A: Actor, T> {
-    pub fun: BTreeMap<Dot<A>, T>,
+    fun: BTreeMap<Dot<A>, T>,
+}
+
+impl<A: Actor, T> DotFun<A, T> {
+    pub fn new(fun: BTreeMap<Dot<A>, T>) -> Self {
+        Self { fun }
+    }
 }
 
 impl<A: Actor, T> Default for DotFun<A, T> {
     fn default() -> Self {
-        Self {
-            fun: Default::default(),
-        }
+        Self::new(Default::default())
+    }
+}
+
+impl<A: Actor, T> Deref for DotFun<A, T> {
+    type Target = BTreeMap<Dot<A>, T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.fun
+    }
+}
+
+impl<A: Actor, T> DerefMut for DotFun<A, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.fun
     }
 }
 
@@ -112,14 +149,32 @@ impl<A: Actor, T: Lattice + Clone> DotStore<A> for DotFun<A, T> {
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[repr(C)]
 pub struct DotMap<K: Ord, V> {
-    pub map: BTreeMap<K, V>,
+    map: BTreeMap<K, V>,
+}
+
+impl<K: Ord, V> DotMap<K, V> {
+    pub fn new(map: BTreeMap<K, V>) -> Self {
+        Self { map }
+    }
 }
 
 impl<K: Ord, V> Default for DotMap<K, V> {
     fn default() -> Self {
-        Self {
-            map: Default::default(),
-        }
+        Self::new(Default::default())
+    }
+}
+
+impl<K: Ord, V> Deref for DotMap<K, V> {
+    type Target = BTreeMap<K, V>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.map
+    }
+}
+
+impl<K: Ord, V> DerefMut for DotMap<K, V> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.map
     }
 }
 
