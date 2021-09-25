@@ -80,10 +80,6 @@ jobs:
       if: matrix.platform.cross == false
       run: cargo test --all-features
 
-    - name: Run example
-      if: matrix.platform.cross == false
-      run: cargo run -p tlfs-cambria-example
-
   lint-rust:
     runs-on: ubuntu-latest
     steps:

@@ -14,13 +14,13 @@ pub enum PrimitiveKind {
 
 impl PrimitiveKind {
     pub fn validate(self, v: &Primitive) -> bool {
-        match (self, v) {
-            (Self::Bool, Primitive::Bool(_)) => true,
-            (Self::U64, Primitive::U64(_)) => true,
-            (Self::I64, Primitive::I64(_)) => true,
-            (Self::Str, Primitive::Str(_)) => true,
-            _ => false,
-        }
+        matches!(
+            (self, v),
+            (Self::Bool, Primitive::Bool(_))
+                | (Self::U64, Primitive::U64(_))
+                | (Self::I64, Primitive::I64(_))
+                | (Self::Str, Primitive::Str(_))
+        )
     }
 }
 
