@@ -71,17 +71,25 @@ pub fn arb_ewflag() -> impl Strategy<Value = EWFlag<u8>> {
     })
 }
 
-pub fn arb_mvreg<L: Lattice + Arbitrary>() -> impl Strategy<Value = MVReg<u8, L>> {
-    (arb_dot(), L::arbitrary()).prop_map(|(dot, v)| {
+pub fn arb_mvreg<L>(v: impl Strategy<Value = L>) -> impl Strategy<Value = MVReg<u8, L>>
+where
+    L: Lattice + std::fmt::Debug,
+{
+    (arb_dot(), v).prop_map(|(dot, v)| {
         let reg = Causal::<_, MVReg<_, _>>::new();
         reg.as_ref().write(dot, v).store
     })
 }
 
-pub fn arb_ormap<K: Ord + Arbitrary, V: DotStore<u8> + std::fmt::Debug>(
+pub fn arb_ormap<K, V>(
+    k: impl Strategy<Value = K>,
     v: impl Strategy<Value = V>,
-) -> impl Strategy<Value = ORMap<K, V>> {
-    (K::arbitrary(), v).prop_map(|(k, v)| {
+) -> impl Strategy<Value = ORMap<K, V>>
+where
+    K: Ord + std::fmt::Debug,
+    V: DotStore<u8> + std::fmt::Debug,
+{
+    (k, v).prop_map(|(k, v)| {
         let map = Causal::<_, ORMap<_, _>>::new();
         map.as_ref()
             .apply(k, |_| Causal {

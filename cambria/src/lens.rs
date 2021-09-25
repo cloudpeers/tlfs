@@ -1,43 +1,20 @@
+use crate::crdt::{Actor, Crdt, Prop};
+use crate::schema::{PrimitiveKind, Schema};
 use anyhow::{anyhow, Result};
 use rkyv::ser::serializers::AllocSerializer;
 use rkyv::ser::Serializer;
 use rkyv::string::ArchivedString;
-use rkyv::{Archive, Deserialize, Infallible, Serialize};
-use std::collections::BTreeMap;
+use rkyv::{Archive, Serialize};
 
-pub type Prop = String;
-
-
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Archive, Deserialize, Serialize)]
-#[archive_attr(derive(Debug, Eq, Hash, PartialEq))]
-#[archive(compare(PartialEq))]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Archive, Serialize)]
+#[archive(as = "Kind")]
 #[repr(C)]
-pub enum PrimitiveValue {
-    Boolean(bool),
-    Number(i64),
-    Text(String),
-}
-
-impl ArchivedPrimitiveValue {
-    pub fn kind_of(&self) -> PrimitiveKind {
-        match self {
-            Self::Boolean(_) => PrimitiveKind::Boolean,
-            Self::Number(_) => PrimitiveKind::Number,
-            Self::Text(_) => PrimitiveKind::Text,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
-#[archive_attr(derive(Debug, Eq, PartialEq))]
-#[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
-#[repr(C)]
-pub enum Value {
+pub enum Kind {
     Null,
-    Primitive(PrimitiveValue),
-    Array(#[omit_bounds] Vec<Value>),
-    Object(#[omit_bounds] BTreeMap<Prop, Value>),
+    Flag,
+    Reg(PrimitiveKind),
+    Table(PrimitiveKind),
+    Struct,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Serialize)]
@@ -52,15 +29,8 @@ pub enum Lens {
     RenameProperty(Prop, Prop),
     HoistProperty(Prop, Prop),
     PlungeProperty(Prop, Prop),
-    Wrap,
-    Head,
     LensIn(Prop, #[omit_bounds] Box<Lens>),
-    LensMap(#[omit_bounds] Box<Lens>),
-    Convert(
-        PrimitiveKind,
-        PrimitiveKind,
-        Vec<(PrimitiveValue, PrimitiveValue)>,
-    ),
+    LensMapValue(#[omit_bounds] Box<Lens>),
 }
 
 impl ArchivedLens {
@@ -73,11 +43,8 @@ impl ArchivedLens {
             Self::RenameProperty(p1, p2) => LensRef::RenameProperty(p1, p2),
             Self::HoistProperty(h, t) => LensRef::HoistProperty(h, t),
             Self::PlungeProperty(h, t) => LensRef::PlungeProperty(h, t),
-            Self::Wrap => LensRef::Wrap,
-            Self::Head => LensRef::Head,
             Self::LensIn(k, l) => LensRef::LensIn(false, k, l),
-            Self::LensMap(l) => LensRef::LensMap(false, l),
-            Self::Convert(k1, k2, m) => LensRef::Convert(false, *k1, *k2, m.as_ref()),
+            Self::LensMapValue(l) => LensRef::LensMapValue(false, l),
         }
     }
 }
@@ -91,16 +58,8 @@ pub enum LensRef<'a> {
     RenameProperty(&'a ArchivedString, &'a ArchivedString),
     HoistProperty(&'a ArchivedString, &'a ArchivedString),
     PlungeProperty(&'a ArchivedString, &'a ArchivedString),
-    Wrap,
-    Head,
     LensIn(bool, &'a ArchivedString, &'a ArchivedLens),
-    LensMap(bool, &'a ArchivedLens),
-    Convert(
-        bool,
-        PrimitiveKind,
-        PrimitiveKind,
-        &'a [(ArchivedPrimitiveValue, ArchivedPrimitiveValue)],
-    ),
+    LensMapValue(bool, &'a ArchivedLens),
 }
 
 impl<'a> LensRef<'a> {
@@ -113,11 +72,8 @@ impl<'a> LensRef<'a> {
             Self::RenameProperty(from, to) => Self::RenameProperty(to, from),
             Self::HoistProperty(host, target) => Self::PlungeProperty(host, target),
             Self::PlungeProperty(host, target) => Self::HoistProperty(host, target),
-            Self::Wrap => Self::Head,
-            Self::Head => Self::Wrap,
             Self::LensIn(rev, key, lens) => Self::LensIn(!rev, key, lens),
-            Self::LensMap(rev, lens) => Self::LensMap(!rev, lens),
-            Self::Convert(rev, from, to, map) => Self::Convert(!rev, from, to, map),
+            Self::LensMapValue(rev, lens) => Self::LensMapValue(!rev, lens),
         }
     }
 
@@ -137,24 +93,29 @@ impl<'a> LensRef<'a> {
                 }
                 *s = match k {
                     Kind::Null => return Err(anyhow!("cannot make a null schema")),
-                    Kind::Primitive(PrimitiveKind::Boolean) => Schema::Boolean,
-                    Kind::Primitive(PrimitiveKind::Number) => Schema::Number,
-                    Kind::Primitive(PrimitiveKind::Text) => Schema::Text,
-                    Kind::Array => Schema::Array(true, Box::new(Schema::Null)),
-                    Kind::Object => Schema::Object(Default::default()),
+                    Kind::Flag => Schema::Flag,
+                    Kind::Reg(kind) => Schema::Reg(*kind),
+                    Kind::Table(kind) => Schema::Table(*kind, Box::new(Schema::Null)),
+                    Kind::Struct => Schema::Struct(Default::default()),
                 }
             }
             (Self::Destroy(k), s) => {
                 match (k, &s) {
-                    (Kind::Primitive(PrimitiveKind::Boolean), Schema::Boolean) => {}
-                    (Kind::Primitive(PrimitiveKind::Number), Schema::Number) => {}
-                    (Kind::Primitive(PrimitiveKind::Text), Schema::Text) => {}
-                    (Kind::Array, Schema::Array(true, s)) => {
-                        if **s != Schema::Null {
-                            return Err(anyhow!("can't destroy non empty array"));
+                    (Kind::Flag, Schema::Flag) => {}
+                    (Kind::Reg(k1), Schema::Reg(k2)) => {
+                        if k1 != k2 {
+                            return Err(anyhow!("can't destroy different kind"));
                         }
                     }
-                    (Kind::Object, Schema::Object(m)) => {
+                    (Kind::Table(k1), Schema::Table(k2, s)) => {
+                        if k1 != k2 {
+                            return Err(anyhow!("can't destroy different kind"));
+                        }
+                        if **s != Schema::Null {
+                            return Err(anyhow!("can't destroy table with non null schema"));
+                        }
+                    }
+                    (Kind::Struct, Schema::Struct(m)) => {
                         if !m.is_empty() {
                             return Err(anyhow!("can't destroy non empty object"));
                         }
@@ -165,13 +126,13 @@ impl<'a> LensRef<'a> {
                 }
                 *s = Schema::Null;
             }
-            (Self::AddProperty(key), Schema::Object(m)) => {
+            (Self::AddProperty(key), Schema::Struct(m)) => {
                 if m.contains_key(key.as_str()) {
                     return Err(anyhow!("property {} already exists in schema", key));
                 }
                 m.insert(key.to_string(), Schema::Null);
             }
-            (Self::RemoveProperty(key), Schema::Object(m)) => {
+            (Self::RemoveProperty(key), Schema::Struct(m)) => {
                 match m.get(key.as_str()) {
                     Some(Schema::Null) => {}
                     Some(_) => return Err(anyhow!("property {} cannot be removed", key)),
@@ -179,7 +140,7 @@ impl<'a> LensRef<'a> {
                 }
                 m.remove(key.as_str());
             }
-            (Self::RenameProperty(from, to), Schema::Object(m)) => {
+            (Self::RenameProperty(from, to), Schema::Struct(m)) => {
                 if m.contains_key(to.as_str()) {
                     return Err(anyhow!("trying to rename to existing property: {}", to));
                 }
@@ -192,11 +153,11 @@ impl<'a> LensRef<'a> {
                     ));
                 }
             }
-            (Self::HoistProperty(host, target), Schema::Object(m)) => {
+            (Self::HoistProperty(host, target), Schema::Struct(m)) => {
                 if m.contains_key(target.as_str()) {
                     return Err(anyhow!("target property {} already exists", target));
                 }
-                if let Some(Schema::Object(host)) = m.get_mut(host.as_str()) {
+                if let Some(Schema::Struct(host)) = m.get_mut(host.as_str()) {
                     if let Some(s) = host.remove(target.as_str()) {
                         m.insert(target.to_string(), s);
                     } else {
@@ -206,7 +167,7 @@ impl<'a> LensRef<'a> {
                     return Err(anyhow!("host property {} doesn't exist", host));
                 }
             }
-            (Self::PlungeProperty(host, target), Schema::Object(m)) => {
+            (Self::PlungeProperty(host, target), Schema::Struct(m)) => {
                 if host == target {
                     return Err(anyhow!("host and target property are the same"));
                 }
@@ -215,7 +176,7 @@ impl<'a> LensRef<'a> {
                 } else {
                     return Err(anyhow!("target property {} doesn't exist", target));
                 };
-                if let Some(Schema::Object(host)) = m.get_mut(host.as_str()) {
+                if let Some(Schema::Struct(host)) = m.get_mut(host.as_str()) {
                     if host.contains_key(target.as_str()) {
                         return Err(anyhow!("host already contains target property {}", target));
                     }
@@ -224,127 +185,69 @@ impl<'a> LensRef<'a> {
                     return Err(anyhow!("host property doesn't exist"));
                 }
             }
-            (Self::Wrap, s) => *s = Schema::Array(false, Box::new(s.clone())),
-            (Self::Head, s) => {
-                if let Schema::Array(false, s2) = s {
-                    *s = (**s2).clone();
-                } else {
-                    return Err(anyhow!("cannot apply head to {:?}", s));
-                }
-            }
-            (Self::LensIn(rev, key, lens), Schema::Object(m)) if m.contains_key(key.as_str()) => {
+            (Self::LensIn(rev, key, lens), Schema::Struct(m)) if m.contains_key(key.as_str()) => {
                 lens.to_ref()
                     .maybe_reverse(*rev)
                     .transform_schema(m.get_mut(key.as_str()).unwrap())?;
             }
-            (Self::LensMap(rev, lens), Schema::Array(_, s)) => {
-                lens.to_ref().maybe_reverse(*rev).transform_schema(s)?
-            }
-            (Self::Convert(rev, from, to, map), s) => {
-                for (va, vb) in map.iter() {
-                    if va.kind_of() != *from || vb.kind_of() != *to {
-                        return Err(anyhow::anyhow!("invalid map"));
-                    }
-                }
-                let (from, to) = if *rev { (to, from) } else { (from, to) };
-                match (from, &s) {
-                    (PrimitiveKind::Boolean, Schema::Boolean) => {}
-                    (PrimitiveKind::Number, Schema::Number) => {}
-                    (PrimitiveKind::Text, Schema::Text) => {}
-                    _ => return Err(anyhow!("kind doesn't match schema")),
-                }
-                *s = match to {
-                    PrimitiveKind::Boolean => Schema::Boolean,
-                    PrimitiveKind::Number => Schema::Number,
-                    PrimitiveKind::Text => Schema::Text,
-                }
+            (Self::LensMapValue(rev, lens), Schema::Table(_, schema)) => {
+                lens.to_ref().maybe_reverse(*rev).transform_schema(schema)?
             }
             (_, s) => return Err(anyhow!("invalid lens for schema: {:?} {:?}", self, s)),
         }
         Ok(())
     }
 
-    pub fn transform_value(&self, v: &mut Value) {
-        match (self, v) {
+    pub fn transform_crdt<A: Actor>(&self, c: &mut Crdt<A>) {
+        match (self, c) {
             (Self::Make(k), v) => {
                 *v = match k {
-                    Kind::Null => Value::Null,
-                    Kind::Primitive(PrimitiveKind::Boolean) => {
-                        Value::Primitive(PrimitiveValue::Boolean(false))
-                    }
-                    Kind::Primitive(PrimitiveKind::Number) => {
-                        Value::Primitive(PrimitiveValue::Number(0))
-                    }
-                    Kind::Primitive(PrimitiveKind::Text) => {
-                        Value::Primitive(PrimitiveValue::Text("".into()))
-                    }
-                    Kind::Array => Value::Array(vec![]),
-                    Kind::Object => Value::Object(Default::default()),
+                    Kind::Null => Crdt::Null,
+                    Kind::Flag => Crdt::Flag(Default::default()),
+                    Kind::Reg(_) => Crdt::Reg(Default::default()),
+                    Kind::Table(_) => Crdt::Table(Default::default()),
+                    Kind::Struct => Crdt::Struct(Default::default()),
                 };
             }
             (Self::Destroy(_), v) => {
-                *v = Value::Null;
+                *v = Crdt::Null;
             }
-            (Self::AddProperty(key), Value::Object(m)) => {
-                m.insert(key.to_string(), Value::Null);
+            (Self::AddProperty(key), Crdt::Struct(m)) => {
+                m.insert(key.to_string(), Crdt::Null);
             }
-            (Self::RemoveProperty(key), Value::Object(m)) => {
+            (Self::RemoveProperty(key), Crdt::Struct(m)) => {
                 m.remove(key.as_str());
             }
-            (Self::RenameProperty(from, to), Value::Object(m)) => {
+            (Self::RenameProperty(from, to), Crdt::Struct(m)) => {
                 if let Some(v) = m.remove(from.as_str()) {
                     m.insert(to.to_string(), v);
                 }
             }
-            (Self::HoistProperty(host, target), Value::Object(m)) => {
-                if let Some(Value::Object(host)) = m.get_mut(host.as_str()) {
+            (Self::HoistProperty(host, target), Crdt::Struct(m)) => {
+                if let Some(Crdt::Struct(host)) = m.get_mut(host.as_str()) {
                     if let Some(v) = host.remove(target.as_str()) {
                         m.insert(target.to_string(), v);
                     }
                 }
             }
-            (Self::PlungeProperty(host, target), Value::Object(m)) => {
+            (Self::PlungeProperty(host, target), Crdt::Struct(m)) => {
                 if let Some(v) = m.remove(target.as_str()) {
-                    if let Some(Value::Object(host)) = m.get_mut(host.as_str()) {
+                    if let Some(Crdt::Struct(host)) = m.get_mut(host.as_str()) {
                         host.insert(target.to_string(), v);
                     } else {
                         m.insert(target.to_string(), v);
                     }
                 }
             }
-            (Self::Wrap, v) => {
-                *v = Value::Array(vec![v.clone()]);
-            }
-            (Self::Head, v) => {
-                if let Value::Array(vs) = &v {
-                    if let Some(head) = vs.get(0) {
-                        *v = head.clone();
-                    }
-                }
-            }
-            (Self::LensIn(rev, key, lens), Value::Object(m)) => {
+            (Self::LensIn(rev, key, lens), Crdt::Struct(m)) => {
                 if let Some(v) = m.get_mut(key.as_str()) {
-                    lens.to_ref().maybe_reverse(*rev).transform_value(v);
+                    lens.to_ref().maybe_reverse(*rev).transform_crdt(v);
                 }
             }
-            (Self::LensMap(rev, lens), Value::Array(vs)) => {
-                for v in vs.iter_mut() {
-                    lens.to_ref().maybe_reverse(*rev).transform_value(v);
+            (Self::LensMapValue(rev, lens), Crdt::Table(vs)) => {
+                for v in vs.values_mut() {
+                    lens.to_ref().maybe_reverse(*rev).transform_crdt(v);
                 }
-            }
-            (Self::Convert(rev, from, to, map), Value::Primitive(p)) => {
-                for (k, v) in map.iter() {
-                    if k == p {
-                        *p = v.deserialize(&mut Infallible).unwrap();
-                        break;
-                    }
-                }
-                let k = if *rev { to } else { from };
-                *p = match k {
-                    PrimitiveKind::Boolean => PrimitiveValue::Boolean(false),
-                    PrimitiveKind::Number => PrimitiveValue::Number(0),
-                    PrimitiveKind::Text => PrimitiveValue::Text("".into()),
-                };
             }
             _ => {}
         }

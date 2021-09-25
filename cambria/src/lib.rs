@@ -1,116 +1,61 @@
 mod crdt;
+mod lens;
+mod precompile;
+#[cfg(any(test, feature = "proptest"))]
+pub mod props;
 mod schema;
-//mod layout;
-//mod lens;
-//mod precompile;
-//#[cfg(test)]
-//mod test;
 
-pub use crdt::Crdt;
-pub use schema::Schema;
-/*pub use layout::{Bool, Number, Ptr};
-pub use lens::{ArchivedSchema, Kind, Lens, Lenses, PrimitiveKind, PrimitiveValue, Schema, Value};
+pub use crdt::{Actor, ArchivedCrdt, ArchivedPrimitive, Crdt, Primitive, Prop};
+pub use lens::{ArchivedLens, ArchivedLenses, Lens, LensRef, Lenses};
 pub use precompile::{precompile, write_tokens};
-pub use {aligned, anyhow, rkyv};*/
+pub use schema::{ArchivedSchema, PrimitiveKind, Schema};
+pub use {aligned, anyhow, rkyv};
 
-#[cfg(feature = "arb")]
-pub mod arb {
-    pub use crdt::arb::*;
-}
-
-/*use anyhow::Result;
+use anyhow::Result;
 use rkyv::archived_root;
 
-pub trait ArchivedCambria {
+pub trait Cambria<A: Actor> {
     fn lenses() -> &'static [u8];
 
     fn schema() -> &'static ArchivedSchema;
 
-    fn ptr(&self) -> Ptr<'_>
-    where
-        Self: Sized,
-    {
-        Ptr::from_ref(self, unsafe { &*(Self::schema() as *const _) })
-    }
-}
-
-pub trait Cambria: FromValue {
-    fn lenses() -> &'static [u8];
-
-    fn schema() -> &'static ArchivedSchema;
-
-    fn transform(lenses: &[u8], bytes: &[u8]) -> Result<Self>
-    where
-        Self: Sized,
-    {
+    fn transform(lenses: &[u8], crdt: &mut Crdt<A>) -> Result<()> {
         let a = unsafe { archived_root::<Lenses>(lenses) };
         let b = unsafe { archived_root::<Lenses>(Self::lenses()) };
-        let sa = a.to_schema()?;
-        let sa = unsafe { archived_root::<Schema>(&sa[..]) };
-        let mut value = Ptr::new(bytes, sa).to_value();
         for lens in a.transform(b) {
-            lens.transform_value(&mut value);
+            lens.transform_crdt(crdt);
         }
-        Self::from_value(&value)
+        Ok(())
     }
 }
 
-pub trait FromValue {
-    fn from_value(value: &Value) -> Result<Self>
-    where
-        Self: Sized;
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::props::*;
+    use proptest::prelude::*;
 
-impl FromValue for () {
-    fn from_value(value: &Value) -> Result<Self> {
-        if let Value::Null = value {
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!("expected null"))
+    tlfs_crdt::lattice!(crdt, arb_crdt);
+
+    proptest! {
+        #[test]
+        fn reversible((lens, schema) in lens_and_schema()) {
+            let lens = archive(&lens);
+            let lens = unsafe { archived_root::<Lens>(&lens) };
+            let mut schema2 = schema.clone();
+            prop_assume!(lens.to_ref().transform_schema(&mut schema2).is_ok());
+            lens.to_ref().reverse().transform_schema(&mut schema2).unwrap();
+            prop_assert_eq!(schema, schema2);
+        }
+
+        #[test]
+        fn preserves_validity((lens, mut schema, mut crdt) in lens_schema_and_crdt()) {
+            let lens = archive(&lens);
+            let lens = unsafe { archived_root::<Lens>(&lens) };
+            prop_assume!(validate(&schema, &crdt));
+            prop_assume!(lens.to_ref().transform_schema(&mut schema).is_ok());
+            lens.to_ref().transform_crdt(&mut crdt);
+            prop_assert!(validate(&schema, &crdt));
         }
     }
 }
-
-impl FromValue for bool {
-    fn from_value(value: &Value) -> Result<Self> {
-        if let Value::Primitive(PrimitiveValue::Boolean(b)) = value {
-            Ok(*b)
-        } else {
-            Err(anyhow::anyhow!("expected boolean"))
-        }
-    }
-}
-
-impl FromValue for i64 {
-    fn from_value(value: &Value) -> Result<Self> {
-        if let Value::Primitive(PrimitiveValue::Number(n)) = value {
-            Ok(*n)
-        } else {
-            Err(anyhow::anyhow!("expected number"))
-        }
-    }
-}
-
-impl FromValue for String {
-    fn from_value(value: &Value) -> Result<Self> {
-        if let Value::Primitive(PrimitiveValue::Text(s)) = value {
-            Ok(s.clone())
-        } else {
-            Err(anyhow::anyhow!("expected text"))
-        }
-    }
-}
-
-impl<T: FromValue> FromValue for Vec<T> {
-    fn from_value(value: &Value) -> Result<Self> {
-        if let Value::Array(a) = value {
-            let mut arr = Vec::with_capacity(a.len());
-            for v in a {
-                arr.push(T::from_value(v)?);
-            }
-            Ok(arr)
-        } else {
-            Err(anyhow::anyhow!("expected array"))
-        }
-    }
-}*/

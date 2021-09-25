@@ -2,12 +2,11 @@ use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use tlfs_crdt::{Clock, DotStore, EWFlag, Lattice, MVReg, ORMap};
 
-pub use tlfs_crdt::{Actor, Dot};
+pub use tlfs_crdt::{Actor, Causal, CausalRef, Dot};
 
 pub type Prop = String;
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Archive, Deserialize, Serialize)]
-#[cfg_attr(any(test, feature = "arb"), derive(proptest_derive::Arbitrary))]
 #[repr(C)]
 pub enum Primitive {
     Bool(bool),
@@ -99,33 +98,4 @@ impl<A: Actor> DotStore<A> for Crdt<A> {
             }
         }
     }
-}
-
-#[cfg(any(test, feature = "proptest"))]
-pub mod arb {
-    use super::*;
-    use proptest::prelude::*;
-    use tlfs_crdt::props::*;
-
-    pub fn arb_crdt() -> impl Strategy<Value = Crdt<u8>> {
-        let leaf = prop_oneof![
-            Just(Crdt::Null),
-            arb_ewflag().prop_map(Crdt::Flag),
-            arb_mvreg().prop_map(Crdt::Reg),
-        ];
-        leaf.prop_recursive(8, 256, 10, |inner| {
-            prop_oneof![
-                arb_ormap(inner.clone()).prop_map(Crdt::Table),
-                prop::collection::btree_map("[^/ ][^/ ]*", inner, 0..10).prop_map(Crdt::Struct),
-            ]
-        })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use proptest::prelude::*;
-
-    tlfs_crdt::lattice!(crdt, arb::arb_crdt);
 }
