@@ -34,6 +34,7 @@ mod tests {
     use super::*;
     use crate::props::*;
     use proptest::prelude::*;
+    use tlfs_crdt::props::to_causal;
 
     tlfs_crdt::lattice!(crdt, arb_crdt);
 
@@ -49,13 +50,23 @@ mod tests {
         }
 
         #[test]
-        fn preserves_validity((lens, mut schema, mut crdt) in lens_schema_and_crdt()) {
+        fn transform_preserves_validity((lens, mut schema, mut crdt) in lens_schema_and_crdt()) {
             let lens = archive(&lens);
             let lens = unsafe { archived_root::<Lens>(&lens) };
             prop_assume!(validate(&schema, &crdt));
             prop_assume!(lens.to_ref().transform_schema(&mut schema).is_ok());
             lens.to_ref().transform_crdt(&mut crdt);
             prop_assert!(validate(&schema, &crdt));
+        }
+
+        #[test]
+        fn join_preserves_validity((schema, crdt1, crdt2) in schema_and_crdt2()) {
+            prop_assume!(validate(&schema, &crdt1));
+            prop_assume!(validate(&schema, &crdt2));
+            let mut crdt1 = to_causal(crdt1);
+            let crdt2 = to_causal(crdt2);
+            crdt1.join(&crdt2);
+            prop_assert!(validate(&schema, &crdt1.store));
         }
     }
 }

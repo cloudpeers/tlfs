@@ -242,6 +242,15 @@ prop_compose! {
 }
 
 prop_compose! {
+    pub fn schema_and_crdt2()
+        (schema in arb_schema())
+        (schema in Just(schema.clone()), crdt1 in arb_crdt_for_schema(schema.clone()), crdt2 in arb_crdt_for_schema(schema)) -> (Schema, Crdt<u8>, Crdt<u8>)
+    {
+        (schema, crdt1, crdt2)
+    }
+}
+
+prop_compose! {
     pub fn lens_schema_and_crdt()
         ((lens, schema) in lens_and_schema())
         (lens in Just(lens), schema in Just(schema.clone()), crdt in arb_crdt_for_schema(schema)) -> (Lens, Schema, Crdt<u8>)

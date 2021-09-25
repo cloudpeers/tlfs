@@ -19,13 +19,7 @@ pub fn arb_clock() -> impl Strategy<Value = Clock<u8>> {
         .prop_map(|(clock, cloud)| Clock { clock, cloud })
 }
 
-pub fn arb_causal<S, P, F>(s: F) -> impl Strategy<Value = Causal<u8, S>>
-where
-    S: DotStore<u8> + std::fmt::Debug,
-    P: Strategy<Value = S>,
-    F: Fn() -> P,
-{
-    s().prop_map(|store| {
+pub fn to_causal<S: DotStore<u8>>(store: S) -> Causal<u8, S> {
         let mut dots = BTreeSet::new();
         store.dots(&mut dots);
         let mut present = BTreeMap::new();
@@ -37,7 +31,15 @@ where
         let mut clock = Clock::new();
         clock.clock = present;
         Causal { store, clock }
-    })
+}
+
+pub fn arb_causal<S, P, F>(s: F) -> impl Strategy<Value = Causal<u8, S>>
+where
+    S: DotStore<u8> + std::fmt::Debug,
+    P: Strategy<Value = S>,
+    F: Fn() -> P,
+{
+    s().prop_map(to_causal)
 }
 
 pub fn arb_dotset() -> impl Strategy<Value = DotSet<u8>> {
