@@ -3,4 +3,5 @@ members = [
     "acl",
     "cambria",
     "crdt",
+    "wasm-ffi"
 ]

@@ -105,3 +105,16 @@ jobs:
 
     - name: cargo clippy
       run: cargo clippy --workspace --examples --tests --all-features -- -D warnings
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+    - name: build
+      working-directory: wasm-ffi
+      run: ./build.sh
+
+    - name: install wasm-pack
+      run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+    - name: wasm-pack test
+      working-directory: wasm-ffi
+      run: wasm-pack test --headless --chrome --firefox
