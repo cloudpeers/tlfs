@@ -58,14 +58,15 @@ impl<A: Actor> DotStore<A> for DotSet<A> {
     }
 
     fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>) {
+        // intersection of the two sets, and keep elements that are not in the other clock
+        self.set
+            .retain(|dot| other.set.contains(dot) || !clock_other.contains(dot));
+        // add all elements of the other set which are not in our clock
         for dot in &other.set {
-            if clock_other.get(&dot.actor) > clock.get(&dot.actor) {
-                self.set.insert(*dot);
+            if !clock.contains(&dot) {
+                self.set.insert(dot.clone());
             }
         }
-        self.set.retain(|dot| {
-            other.set.contains(dot) || clock.get(&dot.actor) > clock_other.get(&dot.actor)
-        });
     }
 
     fn unjoin(&self, diff: &Clock<A>) -> Self {
@@ -122,17 +123,25 @@ impl<A: Actor, T: Lattice + Clone> DotStore<A> for DotFun<A, T> {
         }
     }
 
+    /// from the paper
+    /// (m, c) ∐ (m', c') = ({ k -> m(k) ∐ m'(k), k ∈ dom m ∩ dom m' } ∪ { (d, v) ∊ m | d ∉ c' } ∪ { (d, v) ∊ m' | d ∉ c }, c ∪ c')
     fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>) {
-        for (dot, v) in &other.fun {
-            if let Some(v2) = self.fun.get_mut(dot) {
-                v2.join(v);
-            } else if clock_other.get(&dot.actor) > clock.get(&dot.actor) {
-                self.fun.insert(*dot, v.clone());
+        self.fun.retain(|dot, v| {
+            if let Some(v2) = other.fun.get(dot) {
+                // { k -> m(k) ∐ m'(k), k ∈ dom m ∩ dom m' }
+                v.join(v2);
+                true
+            } else {
+                // { (d, v) ∊ m | d ∉ c' }
+                !clock_other.contains(dot)
+            }
+        });
+        // { (d, v) ∊ m' | d ∉ c }
+        for (d, v) in &other.fun {
+            if !clock.contains(&d) {
+                self.fun.insert(d.clone(), v.clone());
             }
         }
-        self.fun.retain(|dot, _| {
-            other.fun.contains_key(dot) || clock.get(&dot.actor) > clock_other.get(&dot.actor)
-        });
     }
 
     fn unjoin(&self, diff: &Clock<A>) -> Self {

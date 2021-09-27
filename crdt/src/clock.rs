@@ -7,19 +7,20 @@ pub trait Actor: Copy + std::fmt::Debug + Ord + rkyv::Archive<Archived = Self> {
 impl<T: Copy + std::fmt::Debug + Ord + rkyv::Archive<Archived = Self>> Actor for T {}
 
 /// Dot is a version marker for a single actor.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Archive, Deserialize, Serialize)]
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Archive, Deserialize, Serialize)]
 #[archive(as = "Dot<A>")]
 #[repr(C)]
 pub struct Dot<A: Actor> {
     /// The actor identifier.
     pub actor: A,
     /// The current version of this actor.
-    pub counter: u64,
+    counter: u64,
 }
 
 impl<A: Actor> Dot<A> {
     /// Build a Dot from an actor and counter.
     pub fn new(actor: A, counter: u64) -> Self {
+        assert!(counter > 0);
         Self { actor, counter }
     }
 
@@ -28,11 +29,21 @@ impl<A: Actor> Dot<A> {
         self.counter += 1;
         self
     }
+
+    pub fn counter(&self) -> u64 {
+        self.counter
+    }
 }
 
 impl<A: Actor + std::fmt::Display> std::fmt::Display for Dot<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}.{}", self.actor, self.counter)
+    }
+}
+
+impl<A: Actor + std::fmt::Debug> std::fmt::Debug for Dot<A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "({:?},{})", self.actor, self.counter)
     }
 }
 
@@ -63,6 +74,16 @@ impl<A: Actor> Clock<A> {
     /// Returns a new instance.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn from_map(x: BTreeMap<A, u64>) -> Self {
+        let mut cloud = BTreeSet::new();
+        for (actor, max) in x {
+            for i in 1..=max {
+                cloud.insert(Dot::new(actor, i));
+            }
+        }
+        Self { cloud }
     }
 
     /// Checks if the clock is causally consistent.
@@ -142,8 +163,6 @@ impl<A: Actor> Clock<A> {
             self.insert(*dot);
         }
     }
-
-    fn compact(&mut self) {}
 }
 
 impl<A: Actor> std::iter::FromIterator<Dot<A>> for Clock<A> {
@@ -158,9 +177,7 @@ impl<A: Actor> std::iter::FromIterator<Dot<A>> for Clock<A> {
 
 #[cfg(test)]
 mod tests {
-    use std::iter::FromIterator;
-
-    use crate::{Clock, Dot, props::*};
+    use crate::props::*;
     use proptest::prelude::*;
 
     proptest! {
@@ -208,12 +225,5 @@ mod tests {
         fn union_difference_and_intersect(s1 in arb_clock(), s2 in arb_clock()) {
             prop_assert_eq!(union(&difference(&s1, &s2), &intersect(&s1, &s2)), s1);
         }
-    }
-
-    #[test]
-    fn union_difference_and_intersect_1() {
-        let s1 = Clock::from_iter(vec![]);
-        let s2 = Clock::from_iter(vec![Dot { actor: 1, counter: 0 }]);
-        assert_eq!(union(&difference(&s1, &s2), &intersect(&s1, &s2)), s1);
     }
 }
