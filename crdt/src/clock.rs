@@ -1,13 +1,16 @@
 //! This module contains a generic vector clock implementation.
+use bytecheck::CheckBytes;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub trait Actor: Copy + std::fmt::Debug + Ord + rkyv::Archive<Archived = Self> {}
+pub trait Actor: Copy + std::fmt::Debug + Ord + Archive<Archived = Self> {}
 
-impl<T: Copy + std::fmt::Debug + Ord + rkyv::Archive<Archived = Self>> Actor for T {}
+impl<T: Copy + std::fmt::Debug + Ord + Archive<Archived = Self>> Actor for T {}
 
 /// Dot is a version marker for a single actor.
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Archive, Deserialize, Serialize)]
+#[derive(
+    Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Archive, CheckBytes, Deserialize, Serialize,
+)]
 #[archive(as = "Dot<A>")]
 #[repr(C)]
 pub struct Dot<A: Actor> {
@@ -24,10 +27,11 @@ impl<A: Actor> Dot<A> {
         Self { actor, counter }
     }
 
-    /// Generate the successor of this dot
-    pub fn inc(mut self) -> Self {
+    /// Returns a copy of the unincremented dot.
+    pub fn inc(&mut self) -> Self {
+        let curr = *self;
         self.counter += 1;
-        self
+        curr
     }
 
     pub fn counter(&self) -> u64 {
@@ -56,7 +60,8 @@ impl<A: Actor> From<(A, u64)> for Dot<A> {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Archive, CheckBytes, Deserialize, Serialize)]
+#[archive_attr(derive(CheckBytes))]
 #[repr(C)]
 pub struct Clock<A: Actor> {
     pub(crate) cloud: BTreeSet<Dot<A>>,

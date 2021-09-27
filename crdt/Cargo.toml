@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2018"
 
 [dependencies]
+bytecheck = "0.6.5"
 proptest = { version = "1.0.0", optional = true }
 rkyv = "0.7.18"
 

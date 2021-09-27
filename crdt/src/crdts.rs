@@ -1,9 +1,12 @@
-use crate::{Actor, Causal, CausalRef, Clock, Dot, DotFun, DotMap, DotSet, DotStore, Lattice};
-use rkyv::{Archive, Deserialize, Serialize};
+use crate::{Actor, Causal, CausalRef, Clock, Dot, DotFun, DotMap, DotSet, DotStore, Key, Lattice};
+use bytecheck::CheckBytes;
+use rkyv::{Archive, Archived, Deserialize, Serialize};
+use std::borrow::Borrow;
 use std::collections::BTreeSet;
 use std::ops::{Deref, DerefMut};
 
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[archive_attr(derive(CheckBytes))]
 #[repr(C)]
 pub struct EWFlag<A: Actor>(DotSet<A>);
 
@@ -60,13 +63,16 @@ impl<'a, A: Actor> CausalRef<'a, A, EWFlag<A>> {
         delta.clock.insert(dot);
         delta
     }
+}
 
-    pub fn value(self) -> bool {
-        !self.store.is_empty()
+impl<A: Actor> EWFlag<A> {
+    pub fn value(&self) -> bool {
+        !self.0.is_empty()
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[archive_attr(derive(CheckBytes))]
 #[repr(C)]
 pub struct MVReg<A: Actor, L>(DotFun<A, L>);
 
@@ -116,23 +122,26 @@ impl<'a, A: Actor, L: Lattice> CausalRef<'a, A, MVReg<A, L>> {
         delta.clock.insert(dot);
         delta
     }
+}
 
-    pub fn read(self) -> impl Iterator<Item = &'a L> {
-        self.store.values()
+impl<A: Actor, L: Lattice> MVReg<A, L> {
+    pub fn read(&self) -> impl Iterator<Item = &L> {
+        self.0.values()
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[archive_attr(derive(CheckBytes))]
 #[repr(C)]
-pub struct ORMap<K: Ord, V>(DotMap<K, V>);
+pub struct ORMap<K: Key, V>(DotMap<K, V>);
 
-impl<K: Ord, V> Default for ORMap<K, V> {
+impl<K: Key, V> Default for ORMap<K, V> {
     fn default() -> Self {
         Self(Default::default())
     }
 }
 
-impl<K: Ord, V> Deref for ORMap<K, V> {
+impl<K: Key, V> Deref for ORMap<K, V> {
     type Target = DotMap<K, V>;
 
     fn deref(&self) -> &Self::Target {
@@ -140,15 +149,15 @@ impl<K: Ord, V> Deref for ORMap<K, V> {
     }
 }
 
-impl<K: Ord, V> DerefMut for ORMap<K, V> {
+impl<K: Key, V> DerefMut for ORMap<K, V> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl<A: Actor, K: Clone + Ord, V> DotStore<A> for ORMap<K, V>
+impl<A: Actor, K: Key, V: DotStore<A>> DotStore<A> for ORMap<K, V>
 where
-    V: DotStore<A> + Clone,
+    Archived<K>: Ord,
 {
     fn is_empty(&self) -> bool {
         self.0.is_empty()
@@ -167,19 +176,16 @@ where
     }
 }
 
-impl<'a, A: Actor, K: Ord, V: DotStore<A>> CausalRef<'a, A, ORMap<K, V>> {
-    pub fn apply<F>(self, k: K, f: F) -> Causal<A, ORMap<K, V>>
+impl<'a, A: Actor, K: Key, V: DotStore<A>> CausalRef<'a, A, ORMap<K, V>> {
+    pub fn apply<F>(self, k: K, mut f: F) -> Causal<A, ORMap<K, V>>
     where
-        F: Fn(CausalRef<'_, A, V>) -> Causal<A, V>,
+        F: FnMut(CausalRef<'_, A, V>) -> Causal<A, V>,
     {
-        let inner_delta = if let Some(v) = self.get(&k) {
-            f(v)
+        let inner_delta = if let Some(v) = self.store.get(&k) {
+            f(self.map(v))
         } else {
             let v = V::default();
-            let vref = CausalRef {
-                store: &v,
-                clock: self.clock,
-            };
+            let vref = self.map(&v);
             f(vref)
         };
         let mut delta = Causal::<_, ORMap<_, _>>::new();
@@ -188,7 +194,11 @@ impl<'a, A: Actor, K: Ord, V: DotStore<A>> CausalRef<'a, A, ORMap<K, V>> {
         delta
     }
 
-    pub fn remove(self, dot: Dot<A>, k: &K) -> Causal<A, ORMap<K, V>> {
+    pub fn remove<Q: ?Sized>(self, dot: Dot<A>, k: &Q) -> Causal<A, ORMap<K, V>>
+    where
+        K: Borrow<Q>,
+        Q: Ord,
+    {
         let mut delta = Causal::<_, ORMap<_, _>>::new();
         if let Some(v) = self.store.get(k) {
             let mut dots = BTreeSet::new();
@@ -198,12 +208,15 @@ impl<'a, A: Actor, K: Ord, V: DotStore<A>> CausalRef<'a, A, ORMap<K, V>> {
         }
         delta
     }
+}
 
-    pub fn get(self, k: &'a K) -> Option<CausalRef<'a, A, V>> {
-        self.store.get(k).map(|v| CausalRef {
-            store: v,
-            clock: self.clock,
-        })
+impl<K: Key, V> ORMap<K, V> {
+    pub fn get<Q: ?Sized>(&self, k: &Q) -> Option<&V>
+    where
+        K: Borrow<Q>,
+        Q: Ord,
+    {
+        self.0.get(k)
     }
 }
 
@@ -217,10 +230,10 @@ mod tests {
         let mut flag: Causal<_, EWFlag<_>> = Causal::new();
         let op1 = flag.as_ref().enable(Dot::new(0, 1));
         flag.join(&op1);
-        assert!(flag.as_ref().value());
+        assert!(flag.store.value());
         let op2 = flag.as_ref().disable(Dot::new(0, 2));
         flag.join(&op2);
-        assert!(!flag.as_ref().value());
+        assert!(!flag.store.value());
     }
 
     #[test]
@@ -230,7 +243,7 @@ mod tests {
         let op2 = reg.as_ref().write(Dot::new(1, 1), 43);
         reg.join(&op1);
         reg.join(&op2);
-        let values = reg.as_ref().read().collect::<BTreeSet<_>>();
+        let values = reg.store.read().collect::<BTreeSet<_>>();
         assert_eq!(values.len(), 2);
         assert!(values.contains(&42));
         assert!(values.contains(&43));
@@ -241,15 +254,15 @@ mod tests {
         let mut map: Causal<_, ORMap<_, EWFlag<_>>> = Causal::new();
         let op1 = map
             .as_ref()
-            .apply("flag", |flag| flag.enable(Dot::new(0, 1)));
+            .apply("flag".to_string(), |flag| flag.enable(Dot::new(0, 1)));
         map.join(&op1);
-        assert!(map.as_ref().get(&"flag").unwrap().value());
+        assert!(map.store.get("flag").unwrap().value());
         let op2 = map
             .as_ref()
-            .apply("flag", |flag| flag.disable(Dot::new(1, 1)));
-        let op3 = map.as_ref().remove(Dot::new(0, 2), &"flag");
+            .apply("flag".to_string(), |flag| flag.disable(Dot::new(1, 1)));
+        let op3 = map.as_ref().remove(Dot::new(0, 2), "flag");
         map.join(&op2);
         map.join(&op3);
-        assert!(!map.as_ref().get(&"flag").unwrap().value());
+        assert!(!map.store.get("flag").unwrap().value());
     }
 }
