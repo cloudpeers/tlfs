@@ -1,15 +1,16 @@
 //! Delta crdts
 
-mod clock;
+mod dotset;
 mod crdts;
 #[cfg(any(feature = "proptest", test))]
 pub mod props;
 mod store;
 
-pub use crate::clock::{Actor, Clock, Dot};
+pub use crate::dotset::{Actor, Dot, DotSet};
 pub use crate::crdts::{EWFlag, MVReg, ORMap};
-pub use crate::store::{DotFun, DotMap, DotSet, DotStore};
+pub use crate::store::{DotFun, DotMap, DotStore};
 
+use dotset::CausalContext;
 use rkyv::{Archive, Deserialize, Serialize};
 
 /// Join semilattice.
@@ -28,7 +29,7 @@ impl Lattice for u64 {
 
 pub struct CausalRef<'a, A: Actor, S> {
     pub store: &'a S,
-    pub clock: &'a Clock<A>,
+    pub clock: &'a DotSet<A>,
 }
 
 impl<'a, A: Actor, S> Clone for CausalRef<'a, A, S> {
@@ -46,7 +47,7 @@ impl<'a, A: Actor, S> Copy for CausalRef<'a, A, S> {}
 #[repr(C)]
 pub struct Causal<A: Actor, S> {
     pub store: S,
-    pub clock: Clock<A>,
+    pub clock: CausalContext<A>,
 }
 
 impl<A: Actor, S: Default> Default for Causal<A, S> {
@@ -82,7 +83,7 @@ impl<A: Actor, S> Causal<A, S> {
         self.clock.union(&other.clock);
     }
 
-    pub fn unjoin(&self, other: &Clock<A>) -> Self
+    pub fn unjoin(&self, other: &DotSet<A>) -> Self
     where
         A: Clone,
         S: DotStore<A>,

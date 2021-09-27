@@ -1,4 +1,4 @@
-use crate::{Actor, Causal, CausalRef, Clock, Dot, DotFun, DotMap, DotSet, DotStore, Lattice};
+use crate::{Actor, Causal, CausalRef, Dot, DotFun, DotMap, DotSet, DotStore, Lattice};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::ops::{Deref, DerefMut};
@@ -36,11 +36,11 @@ impl<A: Actor> DotStore<A> for EWFlag<A> {
         self.0.dots(dots)
     }
 
-    fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>) {
+    fn join(&mut self, clock: &DotSet<A>, other: &Self, clock_other: &DotSet<A>) {
         self.0.join(clock, other, clock_other);
     }
 
-    fn unjoin(&self, diff: &Clock<A>) -> Self {
+    fn unjoin(&self, diff: &DotSet<A>) -> Self {
         Self(self.0.unjoin(diff))
     }
 }
@@ -99,11 +99,11 @@ impl<A: Actor, L: Lattice + Clone> DotStore<A> for MVReg<A, L> {
         self.0.dots(dots)
     }
 
-    fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>) {
+    fn join(&mut self, clock: &DotSet<A>, other: &Self, clock_other: &DotSet<A>) {
         self.0.join(clock, other, clock_other);
     }
 
-    fn unjoin(&self, diff: &Clock<A>) -> Self {
+    fn unjoin(&self, diff: &DotSet<A>) -> Self {
         Self(self.0.unjoin(diff))
     }
 }
@@ -158,11 +158,11 @@ where
         self.0.dots(dots)
     }
 
-    fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>) {
+    fn join(&mut self, clock: &DotSet<A>, other: &Self, clock_other: &DotSet<A>) {
         self.0.join(clock, other, clock_other);
     }
 
-    fn unjoin(&self, diff: &Clock<A>) -> Self {
+    fn unjoin(&self, diff: &DotSet<A>) -> Self {
         Self(self.0.unjoin(diff))
     }
 }

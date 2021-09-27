@@ -1,4 +1,4 @@
-use crate::{Causal, Clock, Dot, DotFun, DotMap, DotSet, DotStore, EWFlag, Lattice, MVReg, ORMap};
+use crate::{Causal, Dot, DotFun, DotMap, DotSet, DotStore, EWFlag, Lattice, MVReg, ORMap};
 use proptest::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::iter::FromIterator;
@@ -12,9 +12,9 @@ pub fn arb_dot() -> impl Strategy<Value = Dot<u8>> {
     arb_dot_in(1u64..25)
 }
 
-pub fn arb_clock() -> impl Strategy<Value = Clock<u8>> {
+pub fn arb_clock() -> impl Strategy<Value = DotSet<u8>> {
     prop::collection::btree_set(arb_dot_in(1u64..5), 0..50)
-        .prop_map(|cloud| Clock::from_iter(cloud.into_iter()))
+        .prop_map(|cloud| DotSet::from_iter(cloud.into_iter()))
 }
 
 pub fn to_causal<S: DotStore<u8>>(store: S) -> Causal<u8, S> {
@@ -28,7 +28,7 @@ pub fn to_causal<S: DotStore<u8>>(store: S) -> Causal<u8, S> {
             present.insert(actor, counter);
         }
     }
-    let clock = Clock::from_map(present);
+    let clock = DotSet::from_map(present);
     Causal { store, clock }
 }
 
@@ -101,17 +101,17 @@ where
     })
 }
 
-pub fn union(a: &Clock<u8>, b: &Clock<u8>) -> Clock<u8> {
+pub fn union(a: &DotSet<u8>, b: &DotSet<u8>) -> DotSet<u8> {
     let mut a = a.clone();
     a.union(b);
     a
 }
 
-pub fn intersect(a: &Clock<u8>, b: &Clock<u8>) -> Clock<u8> {
+pub fn intersect(a: &DotSet<u8>, b: &DotSet<u8>) -> DotSet<u8> {
     a.intersect(b)
 }
 
-pub fn difference(a: &Clock<u8>, b: &Clock<u8>) -> Clock<u8> {
+pub fn difference(a: &DotSet<u8>, b: &DotSet<u8>) -> DotSet<u8> {
     a.difference(b)
 }
 

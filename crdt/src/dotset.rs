@@ -1,4 +1,4 @@
-//! This module contains a generic vector clock implementation.
+//! This module contains an efficient set of dots for use as both a dot store and a causal context
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -58,11 +58,13 @@ impl<A: Actor> From<(A, u64)> for Dot<A> {
 
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[repr(C)]
-pub struct Clock<A: Actor> {
+pub struct DotSet<A: Actor> {
     pub(crate) cloud: BTreeSet<Dot<A>>,
 }
 
-impl<A: Actor> Default for Clock<A> {
+pub type CausalContext<A> = DotSet<A>;
+
+impl<A: Actor> Default for DotSet<A> {
     fn default() -> Self {
         Self {
             cloud: Default::default(),
@@ -70,10 +72,10 @@ impl<A: Actor> Default for Clock<A> {
     }
 }
 
-impl<A: Actor> Clock<A> {
+impl<A: Actor> DotSet<A> {
     /// Returns a new instance.
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(cloud: BTreeSet<Dot<A>>) -> Self {
+        Self { cloud }
     }
 
     pub fn from_map(x: BTreeMap<A, u64>) -> Self {
@@ -131,21 +133,21 @@ impl<A: Actor> Clock<A> {
     }
 
     /// Returns the intersection of two clocks.
-    pub fn intersect(&self, other: &Clock<A>) -> Clock<A>
+    pub fn intersect(&self, other: &DotSet<A>) -> DotSet<A>
     where
         A: Clone,
     {
-        let mut clock = Clock::new();
+        let mut clock = DotSet::default();
         clock.cloud = self.cloud.intersection(&other.cloud).cloned().collect();
         clock
     }
 
     /// Returns the difference of two clocks.
-    pub fn difference(&self, other: &Clock<A>) -> Clock<A>
+    pub fn difference(&self, other: &DotSet<A>) -> DotSet<A>
     where
         A: Clone,
     {
-        let mut clock = Clock::new();
+        let mut clock = DotSet::default();
         for dot in &self.cloud {
             if !other.contains(dot) {
                 clock.cloud.insert(*dot);
@@ -155,7 +157,7 @@ impl<A: Actor> Clock<A> {
     }
 
     /// Merges with the other clock.
-    pub fn union(&mut self, other: &Clock<A>)
+    pub fn union(&mut self, other: &DotSet<A>)
     where
         A: Clone,
     {
@@ -165,9 +167,9 @@ impl<A: Actor> Clock<A> {
     }
 }
 
-impl<A: Actor> std::iter::FromIterator<Dot<A>> for Clock<A> {
+impl<A: Actor> std::iter::FromIterator<Dot<A>> for DotSet<A> {
     fn from_iter<I: IntoIterator<Item = Dot<A>>>(iter: I) -> Self {
-        let mut clock = Clock::new();
+        let mut clock = DotSet::default();
         for dot in iter {
             clock.insert(dot);
         }

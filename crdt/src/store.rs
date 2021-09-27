@@ -1,4 +1,4 @@
-use crate::{Actor, Clock, Dot, Lattice};
+use crate::{Actor, Dot, DotSet, Lattice};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::{Deref, DerefMut};
@@ -9,80 +9,48 @@ pub trait DotStore<A: Actor>: Clone + Default {
     /// Returns the set of dots in the store.
     fn dots(&self, dots: &mut BTreeSet<Dot<A>>);
     /// Joins are required to be idempotent, associative and commutative.
-    fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>);
+    fn join(&mut self, clock: &DotSet<A>, other: &Self, clock_other: &DotSet<A>);
     /// Unjoin a state based on a clock (clock \ other_clock).
-    fn unjoin(&self, diff: &Clock<A>) -> Self;
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
-#[repr(C)]
-pub struct DotSet<A: Actor> {
-    set: BTreeSet<Dot<A>>,
-}
-
-impl<A: Actor> DotSet<A> {
-    pub fn new(set: BTreeSet<Dot<A>>) -> Self {
-        Self { set }
-    }
-}
-
-impl<A: Actor> Default for DotSet<A> {
-    fn default() -> Self {
-        Self::new(Default::default())
-    }
-}
-
-impl<A: Actor> Deref for DotSet<A> {
-    type Target = BTreeSet<Dot<A>>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.set
-    }
-}
-
-impl<A: Actor> DerefMut for DotSet<A> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.set
-    }
+    fn unjoin(&self, diff: &DotSet<A>) -> Self;
 }
 
 impl<A: Actor> DotStore<A> for DotSet<A> {
     fn is_empty(&self) -> bool {
-        self.set.is_empty()
+        self.cloud.is_empty()
     }
 
     fn dots(&self, dots: &mut BTreeSet<Dot<A>>) {
-        for dot in &self.set {
+        for dot in &self.cloud {
             dots.insert(*dot);
         }
     }
 
     /// from the paper
     /// (s, c) ∐ (s', c') = ((s ∩ s') ∪ (s \ c') (s' \ c), c ∪ c')
-    fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>) {
+    fn join(&mut self, clock: &DotSet<A>, other: &Self, clock_other: &DotSet<A>) {
         // intersection of the two sets, and keep elements that are not in the other clock
-        self.set.retain(|dot|
+        self.cloud.retain(|dot|
                 // ((s ∩ s')
-                other.set.contains(dot) ||
+                other.contains(dot) ||
                 // (s \ c')
                 !clock_other.contains(dot));
         // add all elements of the other set which are not in our clock
         // (s' \ c)
-        for dot in &other.set {
+        for dot in &other.cloud {
             if !clock.contains(dot) {
-                self.set.insert(*dot);
+                self.insert(*dot);
             }
         }
     }
 
-    fn unjoin(&self, diff: &Clock<A>) -> Self {
-        let mut set = BTreeSet::new();
-        for dot in &self.set {
+    fn unjoin(&self, diff: &DotSet<A>) -> Self {
+        let mut cloud = BTreeSet::new();
+        for dot in &self.cloud {
             if diff.contains(dot) {
-                set.insert(*dot);
+                cloud.insert(*dot);
             }
         }
-        Self { set }
+        Self { cloud }
     }
 }
 
@@ -132,7 +100,7 @@ impl<A: Actor, T: Lattice + Clone> DotStore<A> for DotFun<A, T> {
     /// from the paper
     /// (m, c) ∐ (m', c') = ({ k -> m(k) ∐ m'(k), k ∈ dom m ∩ dom m' } ∪
     ///                      {(d, v) ∊ m | d ∉ c'} ∪ {(d, v) ∊ m' | d ∉ c}, c ∪ c')
-    fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>) {
+    fn join(&mut self, clock: &DotSet<A>, other: &Self, clock_other: &DotSet<A>) {
         self.fun.retain(|dot, v| {
             if let Some(v2) = other.fun.get(dot) {
                 // join all elements that are in both funs
@@ -154,7 +122,7 @@ impl<A: Actor, T: Lattice + Clone> DotStore<A> for DotFun<A, T> {
         }
     }
 
-    fn unjoin(&self, diff: &Clock<A>) -> Self {
+    fn unjoin(&self, diff: &DotSet<A>) -> Self {
         let mut fun = BTreeMap::new();
         for (dot, v) in &self.fun {
             if diff.contains(dot) {
@@ -211,7 +179,7 @@ impl<A: Actor, K: Clone + Ord, V: DotStore<A>> DotStore<A> for DotMap<K, V> {
     /// from the paper
     /// (m, c) ∐ (m', c') = ({ k -> v(k), k ∈ dom m ∪ dom m' ∧ v(k) ≠ ⊥ }, c ∪ c')
     ///                     where v(k) = fst ((m(k), c) ∐ (m'(k), c'))
-    fn join(&mut self, clock: &Clock<A>, other: &Self, other_clock: &Clock<A>) {
+    fn join(&mut self, clock: &DotSet<A>, other: &Self, other_clock: &DotSet<A>) {
         for (k, v2) in &other.map {
             if let Some(v) = self.map.get_mut(k) {
                 // we got a value in both maps, so we need to do the join
@@ -224,7 +192,7 @@ impl<A: Actor, K: Clone + Ord, V: DotStore<A>> DotStore<A> for DotMap<K, V> {
         // all other values will remain unchanged
     }
 
-    fn unjoin(&self, diff: &Clock<A>) -> Self {
+    fn unjoin(&self, diff: &DotSet<A>) -> Self {
         let mut map = BTreeMap::new();
         for (k, v) in &self.map {
             let v = v.unjoin(diff);

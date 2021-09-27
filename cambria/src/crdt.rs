@@ -1,6 +1,6 @@
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use tlfs_crdt::{Clock, DotStore, EWFlag, Lattice, MVReg, ORMap};
+use tlfs_crdt::{DotSet, DotStore, EWFlag, Lattice, MVReg, ORMap};
 
 pub use tlfs_crdt::{Actor, Causal, CausalRef, Dot};
 
@@ -62,7 +62,7 @@ impl<A: Actor> DotStore<A> for Crdt<A> {
         }
     }
 
-    fn join(&mut self, clock: &Clock<A>, other: &Self, other_clock: &Clock<A>) {
+    fn join(&mut self, clock: &DotSet<A>, other: &Self, other_clock: &DotSet<A>) {
         match (self, other) {
             (Self::Flag(f1), Self::Flag(f2)) => f1.join(clock, f2, other_clock),
             (Self::Reg(r1), Self::Reg(r2)) => r1.join(clock, r2, other_clock),
@@ -80,7 +80,7 @@ impl<A: Actor> DotStore<A> for Crdt<A> {
         }
     }
 
-    fn unjoin(&self, diff: &Clock<A>) -> Self {
+    fn unjoin(&self, diff: &DotSet<A>) -> Self {
         match self {
             Self::Null => Self::Null,
             Self::Flag(f) => Self::Flag(f.unjoin(diff)),
