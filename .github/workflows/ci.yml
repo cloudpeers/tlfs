@@ -15,7 +15,7 @@ jobs:
         - rust: stable
         platform:
         - target: x86_64-unknown-linux-gnu
-          host: ubuntu-latest
+          host: self-hosted
           cross: false
 
         - target: x86_64-apple-darwin
@@ -27,10 +27,10 @@ jobs:
           cross: false
 
         - target: armv7-linux-androideabi
-          host: ubuntu-latest
+          host: self-hosted
           cross: true
         - target: aarch64-linux-android
-          host: ubuntu-latest
+          host: self-hosted
           cross: true
 
         - target: aarch64-apple-ios
@@ -38,7 +38,7 @@ jobs:
           cross: true
 
         # - target: wasm32-unknown-unknown
-        #   host: ubuntu-latest
+        #   host: self-hosted
         #   cross: true
     env:
       RUST_BACKTRACE: 1
@@ -81,7 +81,7 @@ jobs:
       run: cargo test --all-features
 
   lint-rust:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
     - name: Checkout sources
       uses: actions/checkout@v2
