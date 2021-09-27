@@ -1,4 +1,4 @@
-#!/bin/bash -e
+#/bin/bash -e
 WASMOPT=./wasm-opt
 WASMOPT_VERSION=101
 WASMBINDGEN_VERSION=0.2.77
