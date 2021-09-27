@@ -48,14 +48,12 @@ impl<A: Actor> From<(A, u64)> for Dot<A> {
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[repr(C)]
 pub struct Clock<A: Actor> {
-    pub(crate) clock: BTreeMap<A, u64>,
     pub(crate) cloud: BTreeSet<Dot<A>>,
 }
 
 impl<A: Actor> Default for Clock<A> {
     fn default() -> Self {
         Self {
-            clock: Default::default(),
             cloud: Default::default(),
         }
     }
@@ -74,28 +72,30 @@ impl<A: Actor> Clock<A> {
 
     /// Checks if the dot is contained in the clock.
     pub fn contains(&self, dot: &Dot<A>) -> bool {
-        if self.get(&dot.actor) >= dot.counter {
-            return true;
-        }
         self.cloud.contains(dot)
     }
 
     /// Adds a dot to the clock.
     pub fn insert(&mut self, dot: Dot<A>) {
-        let current = self.get(&dot.actor);
-        let next = current + 1;
-        if dot.counter == next {
-            self.clock.insert(dot.actor, dot.counter);
-            self.compact();
-        } else if dot.counter > current {
-            self.cloud.insert(dot);
-        }
+        self.cloud.insert(dot);
     }
 
     /// Return the associated counter for this actor.
     /// All actors not in the clock have an implied count of 0.
     pub fn get(&self, actor: &A) -> u64 {
-        self.clock.get(actor).copied().unwrap_or_default()
+        let dots = self
+            .cloud
+            .iter()
+            .filter(|x| &x.actor == actor)
+            .collect::<Vec<_>>();
+        let mut prev = 0;
+        for dot in dots {
+            if dot.counter != prev + 1 {
+                return prev;
+            }
+            prev = dot.counter;
+        }
+        prev
     }
 
     /// Returns the associated dot for this actor.
@@ -115,12 +115,6 @@ impl<A: Actor> Clock<A> {
         A: Clone,
     {
         let mut clock = Clock::new();
-        for (actor, counter) in &self.clock {
-            let counter = std::cmp::min(*counter, other.get(actor));
-            if counter > 0 {
-                clock.clock.insert(*actor, counter);
-            }
-        }
         clock.cloud = self.cloud.intersection(&other.cloud).cloned().collect();
         clock
     }
@@ -131,11 +125,6 @@ impl<A: Actor> Clock<A> {
         A: Clone,
     {
         let mut clock = Clock::new();
-        for (actor, counter) in &self.clock {
-            if *counter > other.get(actor) {
-                clock.clock.insert(*actor, *counter);
-            }
-        }
         for dot in &self.cloud {
             if !other.contains(dot) {
                 clock.cloud.insert(*dot);
@@ -149,38 +138,12 @@ impl<A: Actor> Clock<A> {
     where
         A: Clone,
     {
-        for (actor, counter) in &other.clock {
-            if *counter > self.get(actor) {
-                self.clock.insert(*actor, *counter);
-            }
-        }
-        self.compact();
         for dot in &other.cloud {
             self.insert(*dot);
         }
     }
 
-    fn compact(&mut self) {
-        let clock = &mut self.clock;
-        loop {
-            let mut progress = false;
-            self.cloud.retain(|dot| {
-                if let Some(counter) = clock.get_mut(&dot.actor) {
-                    let ncounter = *counter + 1;
-                    if dot.counter == ncounter {
-                        *counter = ncounter;
-                        progress = true;
-                    }
-                    dot.counter > ncounter
-                } else {
-                    true
-                }
-            });
-            if !progress {
-                break;
-            }
-        }
-    }
+    fn compact(&mut self) {}
 }
 
 impl<A: Actor> std::iter::FromIterator<Dot<A>> for Clock<A> {
@@ -195,7 +158,9 @@ impl<A: Actor> std::iter::FromIterator<Dot<A>> for Clock<A> {
 
 #[cfg(test)]
 mod tests {
-    use crate::props::*;
+    use std::iter::FromIterator;
+
+    use crate::{Clock, Dot, props::*};
     use proptest::prelude::*;
 
     proptest! {
@@ -243,5 +208,12 @@ mod tests {
         fn union_difference_and_intersect(s1 in arb_clock(), s2 in arb_clock()) {
             prop_assert_eq!(union(&difference(&s1, &s2), &intersect(&s1, &s2)), s1);
         }
+    }
+
+    #[test]
+    fn union_difference_and_intersect_1() {
+        let s1 = Clock::from_iter(vec![]);
+        let s2 = Clock::from_iter(vec![Dot { actor: 1, counter: 0 }]);
+        assert_eq!(union(&difference(&s1, &s2), &intersect(&s1, &s2)), s1);
     }
 }
