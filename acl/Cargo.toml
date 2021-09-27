@@ -6,6 +6,6 @@ edition = "2018"
 [dependencies]
 anyhow = "1.0.44"
 base64 = "0.13.0"
+bytecheck = "0.6.5"
 crepe = "0.1.5"
-getrandom = "0.2.3"
 rkyv = "0.7.18"
