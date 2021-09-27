@@ -69,8 +69,8 @@ impl<A: Actor> DotStore<A> for DotSet<A> {
         // add all elements of the other set which are not in our clock
         // (s' \ c)
         for dot in &other.set {
-            if !clock.contains(&dot) {
-                self.set.insert(dot.clone());
+            if !clock.contains(dot) {
+                self.set.insert(*dot);
             }
         }
     }
@@ -148,8 +148,8 @@ impl<A: Actor, T: Lattice + Clone> DotStore<A> for DotFun<A, T> {
         // copy all elements from the other fun, that are neither in our fun nor in our clock
         // { (d, v) ∊ m' | d ∉ c }
         for (d, v) in &other.fun {
-            if !self.fun.contains_key(d) && !clock.contains(&d) {
-                self.fun.insert(d.clone(), v.clone());
+            if !self.fun.contains_key(d) && !clock.contains(d) {
+                self.fun.insert(*d, v.clone());
             }
         }
     }
