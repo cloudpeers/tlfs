@@ -18,24 +18,26 @@ jobs:
           host: self-hosted
           cross: false
 
-        - target: x86_64-apple-darwin
-          host: macos-latest
-          cross: false
+            #        - target: x86_64-apple-darwin
+            #          host: macos-latest
+            #          cross: false
 
-        - target: x86_64-pc-windows-msvc
-          host: windows-latest
-          cross: false
+            #        - target: x86_64-pc-windows-msvc
+            #          host: windows-latest
+            #          cross: false
 
-        - target: armv7-linux-androideabi
-          host: self-hosted
-          cross: true
-        - target: aarch64-linux-android
-          host: self-hosted
-          cross: true
+            # TODO: Install ndk in hosted runner
+            #        - target: armv7-linux-androideabi
+            #          host: self-hosted
+            #          cross: true
 
-        - target: aarch64-apple-ios
-          host: macos-latest
-          cross: true
+            #        - target: aarch64-linux-android
+            #          host: self-hosted
+            #          cross: true
+
+            #        - target: aarch64-apple-ios
+            #          host: macos-latest
+            #          cross: true
 
         # - target: wasm32-unknown-unknown
         #   host: self-hosted
