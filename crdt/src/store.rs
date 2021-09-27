@@ -1,9 +1,10 @@
 use crate::{Actor, Clock, Dot, Lattice};
-use rkyv::{Archive, Deserialize, Serialize};
+use bytecheck::CheckBytes;
+use rkyv::{Archive, Archived, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::{Deref, DerefMut};
 
-pub trait DotStore<A: Actor>: Clone + Default {
+pub trait DotStore<A: Actor>: Archive + Clone + Default {
     /// Returns true if there are no dots in the store.
     fn is_empty(&self) -> bool;
     /// Returns the set of dots in the store.
@@ -14,7 +15,8 @@ pub trait DotStore<A: Actor>: Clone + Default {
     fn unjoin(&self, diff: &Clock<A>) -> Self;
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Archive, CheckBytes, Deserialize, Serialize)]
+#[archive_attr(derive(CheckBytes))]
 #[repr(C)]
 pub struct DotSet<A: Actor> {
     set: BTreeSet<Dot<A>>,
@@ -86,7 +88,8 @@ impl<A: Actor> DotStore<A> for DotSet<A> {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Archive, CheckBytes, Deserialize, Serialize)]
+#[archive_attr(derive(CheckBytes))]
 #[repr(C)]
 pub struct DotFun<A: Actor, T> {
     fun: BTreeMap<Dot<A>, T>,
@@ -165,7 +168,12 @@ impl<A: Actor, T: Lattice + Clone> DotStore<A> for DotFun<A, T> {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+pub trait Key: Clone + Ord + Archive {}
+
+impl<T: Clone + Ord + Archive> Key for T {}
+
+#[derive(Clone, Debug, Eq, PartialEq, Archive, CheckBytes, Deserialize, Serialize)]
+#[archive_attr(derive(CheckBytes))]
 #[repr(C)]
 pub struct DotMap<K: Ord, V> {
     map: BTreeMap<K, V>,
@@ -197,7 +205,10 @@ impl<K: Ord, V> DerefMut for DotMap<K, V> {
     }
 }
 
-impl<A: Actor, K: Clone + Ord, V: DotStore<A>> DotStore<A> for DotMap<K, V> {
+impl<A: Actor, K: Key, V: DotStore<A>> DotStore<A> for DotMap<K, V>
+where
+    Archived<K>: Ord,
+{
     fn is_empty(&self) -> bool {
         self.map.is_empty()
     }

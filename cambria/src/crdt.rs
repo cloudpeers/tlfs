@@ -7,6 +7,7 @@ pub use tlfs_crdt::{Actor, Causal, CausalRef, Dot};
 pub type Prop = String;
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Archive, Deserialize, Serialize)]
+#[archive_attr(derive(Debug, Eq, Hash, Ord, PartialEq, PartialOrd))]
 #[repr(C)]
 pub enum Primitive {
     Bool(bool),
@@ -22,13 +23,14 @@ impl Lattice for Primitive {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
 #[repr(C)]
 pub enum Crdt<A: Actor> {
     Null,
     Flag(EWFlag<A>),
     Reg(MVReg<A, Primitive>),
-    Table(ORMap<Primitive, Crdt<A>>),
-    Struct(BTreeMap<Prop, Crdt<A>>),
+    Table(#[omit_bounds] ORMap<Primitive, Crdt<A>>),
+    Struct(#[omit_bounds] BTreeMap<Prop, Crdt<A>>),
 }
 
 impl<A: Actor> Default for Crdt<A> {

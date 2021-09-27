@@ -8,12 +8,13 @@ mod store;
 
 pub use crate::clock::{Actor, Clock, Dot};
 pub use crate::crdts::{EWFlag, MVReg, ORMap};
-pub use crate::store::{DotFun, DotMap, DotSet, DotStore};
+pub use crate::store::{DotFun, DotMap, DotSet, DotStore, Key};
 
+use bytecheck::CheckBytes;
 use rkyv::{Archive, Deserialize, Serialize};
 
 /// Join semilattice.
-pub trait Lattice {
+pub trait Lattice: Clone + Archive {
     /// Joins are required to be idempotent, associative and commutative.
     fn join(&mut self, other: &Self);
 }
@@ -42,7 +43,18 @@ impl<'a, A: Actor, S> Clone for CausalRef<'a, A, S> {
 
 impl<'a, A: Actor, S> Copy for CausalRef<'a, A, S> {}
 
-#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+impl<'a, A: Actor, S> CausalRef<'a, A, S> {
+    pub fn new(store: &'a S, clock: &'a Clock<A>) -> Self {
+        Self { store, clock }
+    }
+
+    pub fn map<S2>(self, store: &'a S2) -> CausalRef<'a, A, S2> {
+        CausalRef::new(store, self.clock)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Archive, CheckBytes, Deserialize, Serialize)]
+#[archive_attr(derive(CheckBytes))]
 #[repr(C)]
 pub struct Causal<A: Actor, S> {
     pub store: S,
@@ -66,11 +78,15 @@ impl<A: Actor, S> Causal<A, S> {
         Self::default()
     }
 
-    pub fn as_ref(&self) -> CausalRef<'_, A, S> {
-        CausalRef {
-            store: &self.store,
-            clock: &self.clock,
+    pub fn map<S2, F: Fn(S) -> S2>(self, f: F) -> Causal<A, S2> {
+        Causal {
+            store: f(self.store),
+            clock: self.clock,
         }
+    }
+
+    pub fn as_ref(&self) -> CausalRef<'_, A, S> {
+        CausalRef::new(&self.store, &self.clock)
     }
 
     pub fn join(&mut self, other: &Self)

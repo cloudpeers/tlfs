@@ -1,4 +1,6 @@
-use crate::{Causal, Clock, Dot, DotFun, DotMap, DotSet, DotStore, EWFlag, Lattice, MVReg, ORMap};
+use crate::{
+    Causal, Clock, Dot, DotFun, DotMap, DotSet, DotStore, EWFlag, Key, Lattice, MVReg, ORMap,
+};
 use proptest::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::iter::FromIterator;
@@ -87,7 +89,7 @@ pub fn arb_ormap<K, V>(
     v: impl Strategy<Value = V>,
 ) -> impl Strategy<Value = ORMap<K, V>>
 where
-    K: Ord + std::fmt::Debug,
+    K: Key + std::fmt::Debug,
     V: DotStore<u8> + std::fmt::Debug,
 {
     (k, v).prop_map(|(k, v)| {
@@ -115,7 +117,7 @@ pub fn difference(a: &Clock<u8>, b: &Clock<u8>) -> Clock<u8> {
     a.difference(b)
 }
 
-pub fn join<L: Lattice + Clone>(a: &L, b: &L) -> L {
+pub fn join<L: Lattice>(a: &L, b: &L) -> L {
     let mut a = a.clone();
     a.join(b);
     a
