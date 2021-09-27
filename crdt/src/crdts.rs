@@ -222,7 +222,6 @@ impl<K: Key, V> ORMap<K, V> {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
 
     #[test]

@@ -1,8 +1,11 @@
 use anyhow::anyhow;
+use bytecheck::CheckBytes;
 use crepe::crepe;
 use rkyv::{Archive, Deserialize, Serialize};
 
-#[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd, Archive, Deserialize, Serialize)]
+#[derive(
+    Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd, Archive, CheckBytes, Deserialize, Serialize,
+)]
 #[archive(as = "DocId")]
 #[repr(transparent)]
 pub struct DocId([u8; 32]);
@@ -10,6 +13,18 @@ pub struct DocId([u8; 32]);
 impl DocId {
     pub fn new(id: [u8; 32]) -> Self {
         Self(id)
+    }
+}
+
+impl From<DocId> for [u8; 32] {
+    fn from(id: DocId) -> Self {
+        id.0
+    }
+}
+
+impl AsRef<[u8; 32]> for DocId {
+    fn as_ref(&self) -> &[u8; 32] {
+        &self.0
     }
 }
 
@@ -40,7 +55,9 @@ impl std::str::FromStr for DocId {
     }
 }
 
-#[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd, Archive, Deserialize, Serialize)]
+#[derive(
+    Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd, Archive, CheckBytes, Deserialize, Serialize,
+)]
 #[archive(as = "PeerId")]
 #[repr(transparent)]
 pub struct PeerId([u8; 32]);
@@ -48,6 +65,18 @@ pub struct PeerId([u8; 32]);
 impl PeerId {
     pub fn new(id: [u8; 32]) -> Self {
         Self(id)
+    }
+}
+
+impl From<PeerId> for [u8; 32] {
+    fn from(id: PeerId) -> Self {
+        id.0
+    }
+}
+
+impl AsRef<[u8; 32]> for PeerId {
+    fn as_ref(&self) -> &[u8; 32] {
+        &self.0
     }
 }
 
@@ -79,7 +108,18 @@ impl std::str::FromStr for PeerId {
 }
 
 #[derive(
-    Clone, Copy, Debug, Eq, Hash, PartialEq, Ord, PartialOrd, Archive, Deserialize, Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Archive,
+    CheckBytes,
+    Deserialize,
+    Serialize,
 )]
 #[archive(as = "Permission")]
 #[repr(u8)]
@@ -119,7 +159,7 @@ impl Actor {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Archive, Deserialize, Serialize)]
-#[archive_attr(derive(Debug, Eq, PartialEq))]
+#[archive_attr(derive(Debug, Eq, PartialEq, CheckBytes))]
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
 #[repr(C)]
 pub enum Label {
@@ -170,8 +210,23 @@ impl std::fmt::Display for Label {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Archive, Deserialize, Serialize)]
-#[archive_attr(derive(Debug, Eq, PartialEq))]
+#[derive(Clone, Copy)]
+pub enum LabelRef<'a> {
+    Root(DocId),
+    Dot(&'a LabelRef<'a>, &'a str),
+}
+
+impl<'a> LabelRef<'a> {
+    pub fn to_label(self) -> Label {
+        match self {
+            Self::Root(id) => Label::Root(id),
+            Self::Dot(l, s) => Label::Dot(Box::new(l.to_label()), s.to_string()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Archive, CheckBytes, Deserialize, Serialize)]
+#[archive_attr(derive(Debug, Eq, PartialEq, CheckBytes))]
 #[repr(C)]
 pub struct Can {
     actor: Actor,
@@ -240,7 +295,7 @@ impl std::fmt::Display for Can {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Archive, Deserialize, Serialize)]
-#[archive_attr(derive(Debug, Eq, PartialEq))]
+#[archive_attr(derive(Debug, Eq, PartialEq, CheckBytes))]
 #[repr(C)]
 pub enum Says {
     Can(usize, Actor, Can),
