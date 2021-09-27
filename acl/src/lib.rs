@@ -98,12 +98,7 @@ pub enum Permission {
 
 impl Permission {
     fn controllable(self) -> bool {
-        match self {
-            Self::Sync => true,
-            Self::Read => true,
-            Self::Write => true,
-            _ => false,
-        }
+        matches!(self, Self::Sync | Self::Read | Self::Write)
     }
 }
 
@@ -119,11 +114,7 @@ pub enum Actor {
 
 impl Actor {
     fn is_local_authority(self) -> bool {
-        if let Actor::Doc(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, Actor::Doc(_))
     }
 }
 

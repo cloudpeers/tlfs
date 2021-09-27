@@ -57,15 +57,22 @@ impl<A: Actor> DotStore<A> for DotSet<A> {
         }
     }
 
+    /// from the paper
+    /// (s, c) ∐ (s', c') = ((s ∩ s') ∪ (s \ c') (s' \ c), c ∪ c')
     fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>) {
+        // intersection of the two sets, and keep elements that are not in the other clock
+        self.set.retain(|dot|
+                // ((s ∩ s')
+                other.set.contains(dot) ||
+                // (s \ c')
+                !clock_other.contains(dot));
+        // add all elements of the other set which are not in our clock
+        // (s' \ c)
         for dot in &other.set {
-            if clock_other.get(&dot.actor) > clock.get(&dot.actor) {
+            if !clock.contains(dot) {
                 self.set.insert(*dot);
             }
         }
-        self.set.retain(|dot| {
-            other.set.contains(dot) || clock.get(&dot.actor) > clock_other.get(&dot.actor)
-        });
     }
 
     fn unjoin(&self, diff: &Clock<A>) -> Self {
@@ -122,17 +129,29 @@ impl<A: Actor, T: Lattice + Clone> DotStore<A> for DotFun<A, T> {
         }
     }
 
+    /// from the paper
+    /// (m, c) ∐ (m', c') = ({ k -> m(k) ∐ m'(k), k ∈ dom m ∩ dom m' } ∪
+    ///                      {(d, v) ∊ m | d ∉ c'} ∪ {(d, v) ∊ m' | d ∉ c}, c ∪ c')
     fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>) {
-        for (dot, v) in &other.fun {
-            if let Some(v2) = self.fun.get_mut(dot) {
-                v2.join(v);
-            } else if clock_other.get(&dot.actor) > clock.get(&dot.actor) {
-                self.fun.insert(*dot, v.clone());
+        self.fun.retain(|dot, v| {
+            if let Some(v2) = other.fun.get(dot) {
+                // join all elements that are in both funs
+                // { k -> m(k) ∐ m'(k), k ∈ dom m ∩ dom m' }
+                v.join(v2);
+                true
+            } else {
+                // keep all elements unmodified that are not in the other clock
+                // { (d, v) ∊ m | d ∉ c' }
+                !clock_other.contains(dot)
+            }
+        });
+        // copy all elements from the other fun, that are neither in our fun nor in our clock
+        // { (d, v) ∊ m' | d ∉ c }
+        for (d, v) in &other.fun {
+            if !self.fun.contains_key(d) && !clock.contains(d) {
+                self.fun.insert(*d, v.clone());
             }
         }
-        self.fun.retain(|dot, _| {
-            other.fun.contains_key(dot) || clock.get(&dot.actor) > clock_other.get(&dot.actor)
-        });
     }
 
     fn unjoin(&self, diff: &Clock<A>) -> Self {
@@ -189,14 +208,20 @@ impl<A: Actor, K: Clone + Ord, V: DotStore<A>> DotStore<A> for DotMap<K, V> {
         }
     }
 
+    /// from the paper
+    /// (m, c) ∐ (m', c') = ({ k -> v(k), k ∈ dom m ∪ dom m' ∧ v(k) ≠ ⊥ }, c ∪ c')
+    ///                     where v(k) = fst ((m(k), c) ∐ (m'(k), c'))
     fn join(&mut self, clock: &Clock<A>, other: &Self, other_clock: &Clock<A>) {
-        for (k, v) in &other.map {
-            if let Some(v2) = self.map.get_mut(k) {
-                v2.join(clock, v, other_clock);
+        for (k, v2) in &other.map {
+            if let Some(v) = self.map.get_mut(k) {
+                // we got a value in both maps, so we need to do the join
+                v.join(clock, v2, other_clock);
             } else {
-                self.map.insert(k.clone(), v.clone());
+                // we don't have a value yet, just copy over the other one
+                self.map.insert(k.clone(), v2.clone());
             }
         }
+        // all other values will remain unchanged
     }
 
     fn unjoin(&self, diff: &Clock<A>) -> Self {

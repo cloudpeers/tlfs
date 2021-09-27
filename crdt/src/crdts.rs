@@ -209,6 +209,7 @@ impl<'a, A: Actor, K: Ord, V: DotStore<A>> CausalRef<'a, A, ORMap<K, V>> {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     #[test]

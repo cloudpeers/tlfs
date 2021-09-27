@@ -1,6 +1,7 @@
 use crate::{Causal, Clock, Dot, DotFun, DotMap, DotSet, DotStore, EWFlag, Lattice, MVReg, ORMap};
 use proptest::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
+use std::iter::FromIterator;
 use std::ops::Range;
 
 pub fn arb_dot_in(counter: Range<u64>) -> impl Strategy<Value = Dot<u8>> {
@@ -12,25 +13,23 @@ pub fn arb_dot() -> impl Strategy<Value = Dot<u8>> {
 }
 
 pub fn arb_clock() -> impl Strategy<Value = Clock<u8>> {
-    (
-        prop::collection::btree_map(0u8..5, 1u64..5, 0..5),
-        prop::collection::btree_set(arb_dot_in(6u64..10), 0..5),
-    )
-        .prop_map(|(clock, cloud)| Clock { clock, cloud })
+    prop::collection::btree_set(arb_dot_in(1u64..5), 0..50)
+        .prop_map(|cloud| Clock::from_iter(cloud.into_iter()))
 }
 
 pub fn to_causal<S: DotStore<u8>>(store: S) -> Causal<u8, S> {
-        let mut dots = BTreeSet::new();
-        store.dots(&mut dots);
-        let mut present = BTreeMap::new();
-        for Dot { actor, counter } in dots {
-            if counter > 0 && counter > present.get(&actor).copied().unwrap_or_default() {
-                present.insert(actor, counter);
-            }
+    let mut dots = BTreeSet::new();
+    store.dots(&mut dots);
+    let mut present = BTreeMap::new();
+    for dot in dots {
+        let counter = dot.counter();
+        let actor = dot.actor;
+        if counter > 0 && counter > present.get(&actor).copied().unwrap_or_default() {
+            present.insert(actor, counter);
         }
-        let mut clock = Clock::new();
-        clock.clock = present;
-        Causal { store, clock }
+    }
+    let clock = Clock::from_map(present);
+    Causal { store, clock }
 }
 
 pub fn arb_causal<S, P, F>(s: F) -> impl Strategy<Value = Causal<u8, S>>

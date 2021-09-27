@@ -1,0 +1,10 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc f5e5033aea729570d03c151490b97aff2a44fb83624d244f70bd16e5a5d78fc4 # shrinks to s1 = Clock { clock: {}, cloud: {Dot { actor: 4, counter: 2 }} }, s2 = Clock { clock: {4: 2}, cloud: {} }
+cc 3a8033a273958eb130f5c545ebdadd5ed89474a23cfe2388cc047517347efc0e # shrinks to s1 = Clock { clock: {}, cloud: {Dot { actor: 2, counter: 2 }} }, s2 = Clock { clock: {}, cloud: {Dot { actor: 2, counter: 2 }} }, s3 = Clock { clock: {2: 1}, cloud: {} }
+cc 4de60535d56d754b8c1dc060c53e8e2b816101631fac2854efb69324dbe629fd # shrinks to s1 = Clock { clock: {}, cloud: {Dot { actor: 0, counter: 2 }} }, s2 = Clock { clock: {0: 2}, cloud: {} }
+cc a8f26e57dd6db991eae40db325b1b63d5b1dee16acb853b74720465437d4968c # shrinks to s1 = Clock { clock: {}, cloud: {Dot { actor: 0, counter: 4 }} }, s2 = Clock { clock: {0: 3}, cloud: {} }, s3 = Clock { clock: {}, cloud: {} }
