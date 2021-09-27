@@ -103,7 +103,7 @@ jobs:
       run: cargo clippy --workspace --examples --tests --all-features -- -D warnings
 
   wasm:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
     - name: Checkout sources
       uses: actions/checkout@v2
