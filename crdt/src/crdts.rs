@@ -1,4 +1,6 @@
-use crate::{Causal, CausalContext, CausalRef, Dot, DotFun, DotMap, DotSet, DotStore, Lattice, ReplicaId};
+use crate::{
+    Causal, CausalContext, CausalRef, Dot, DotFun, DotMap, DotSet, DotStore, Lattice, ReplicaId,
+};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::ops::{Deref, DerefMut};

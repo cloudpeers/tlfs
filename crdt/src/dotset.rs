@@ -110,11 +110,7 @@ impl<I: ReplicaId> DotSet<I> {
     /// Return the associated counter for this replica.
     /// All replicas not in the set have an implied count of 0.
     pub fn get(&self, id: &I) -> u64 {
-        let dots = self
-            .set
-            .iter()
-            .filter(|x| &x.id == id)
-            .collect::<Vec<_>>();
+        let dots = self.set.iter().filter(|x| &x.id == id).collect::<Vec<_>>();
         let mut prev = 0;
         for dot in dots {
             if dot.counter != prev + 1 {
@@ -142,7 +138,7 @@ impl<I: ReplicaId> DotSet<I> {
         I: Clone,
     {
         Self {
-            set: self.set.intersection(&other.set).cloned().collect()
+            set: self.set.intersection(&other.set).cloned().collect(),
         }
     }
 
