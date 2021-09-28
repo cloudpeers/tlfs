@@ -99,9 +99,10 @@ impl<I: ReplicaId> DotSet<I> {
         Self { set: cloud }
     }
 
-    /// Checks if the set is causally consistent.
+    /// Checks if the set is causal.
     ///
-    /// a dot set is considered causally consistent when there are only contiguous sequences of counters for each replica
+    /// a dot set is considered causal when there are only contiguous sequences of
+    /// counters for each replica, starting with 1
     pub fn is_causal(&self) -> bool {
         self.set
             .iter()
@@ -127,6 +128,7 @@ impl<I: ReplicaId> DotSet<I> {
     ///
     /// maxᵢ(c) = max({ n | (i, n) ∈ c} ∪ { 0 })
     pub fn max(&self, id: &I) -> u64 {
+        // using last() relies on set being sorted, which is the case for a BTreeSet
         self.set
             .iter()
             .filter(|x| &x.id == id)
@@ -148,7 +150,7 @@ impl<I: ReplicaId> DotSet<I> {
     }
 
     /// Returns the intersection of two dot sets.
-    pub fn intersect(&self, other: &Self) -> Self {
+    pub fn intersection(&self, other: &Self) -> Self {
         Self {
             set: self.set.intersection(&other.set).cloned().collect(),
         }
