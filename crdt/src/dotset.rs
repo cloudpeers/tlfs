@@ -1,4 +1,5 @@
 //! This module contains an efficient set of dots for use as both a dot store and a causal context
+use itertools::Itertools;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -77,14 +78,17 @@ impl<I: ReplicaId> Default for DotSet<I> {
 
 impl<I: ReplicaId> DotSet<I> {
     /// Returns a new instance.
-    pub fn new(cloud: BTreeSet<Dot<I>>) -> Self {
-        Self { set: cloud }
+    pub fn new(set: BTreeSet<Dot<I>>) -> Self {
+        Self { set }
     }
 
     pub fn is_empty(&self) -> bool {
         self.set.is_empty()
     }
 
+    /// creates a causal dot set from a map that contains the maximum dot for each replica (inclusive!)
+    ///
+    /// a maximum of 0 will be ignored
     pub fn from_map(x: BTreeMap<I, u64>) -> Self {
         let mut cloud = BTreeSet::new();
         for (id, max) in x {
@@ -95,10 +99,16 @@ impl<I: ReplicaId> DotSet<I> {
         Self { set: cloud }
     }
 
-    /// Checks if the set is causally consistent.
+    /// Checks if the set is causal.
+    ///
+    /// a dot set is considered causal when there are only contiguous sequences of
+    /// counters for each replica, starting with 1
     pub fn is_causal(&self) -> bool {
-        // TODO!
-        self.set.is_empty()
+        self.set
+            .iter()
+            .group_by(|x| x.id)
+            .into_iter()
+            .all(|(_, iter)| is_causal_for_replica(iter))
     }
 
     /// Checks if the dot is contained in the set.
@@ -112,32 +122,35 @@ impl<I: ReplicaId> DotSet<I> {
     }
 
     /// Return the associated counter for this replica.
+    ///
+    /// The associated counter is the maximum counter value for the replica id.
     /// All replicas not in the set have an implied count of 0.
-    pub fn get(&self, id: &I) -> u64 {
-        let dots = self.set.iter().filter(|x| &x.id == id).collect::<Vec<_>>();
-        let mut prev = 0;
-        for dot in dots {
-            if dot.counter != prev + 1 {
-                return prev;
-            }
-            prev = dot.counter;
-        }
-        prev
+    ///
+    /// maxᵢ(c) = max({ n | (i, n) ∈ c} ∪ { 0 })
+    pub fn max(&self, id: &I) -> u64 {
+        // using last() relies on set being sorted, which is the case for a BTreeSet
+        self.set
+            .iter()
+            .filter(|x| &x.id == id)
+            .map(|x| x.counter)
+            .last()
+            .unwrap_or_default()
     }
 
     /// Returns the associated dot for this replica.
     pub fn dot(&self, id: I) -> Dot<I> {
-        let counter = self.get(&id);
-        Dot::new(id, counter)
+        Dot::new(id, self.max(&id))
     }
 
     /// Returns the incremented dot for this replica.
-    pub fn inc(&self, id: I) -> Dot<I> {
+    ///
+    /// nextᵢ(c) = (i, maxᵢ(c) + 1)
+    pub fn next(&self, id: I) -> Dot<I> {
         self.dot(id).inc()
     }
 
     /// Returns the intersection of two dot sets.
-    pub fn intersect(&self, other: &Self) -> Self {
+    pub fn intersection(&self, other: &Self) -> Self {
         Self {
             set: self.set.intersection(&other.set).cloned().collect(),
         }
@@ -160,6 +173,14 @@ impl<I: ReplicaId> DotSet<I> {
             self.insert(*dot);
         }
     }
+
+    /// Iterator over all dots in this dot set
+    ///
+    /// Note that this is mostly useful for testing, since iterating over all
+    /// dots in a large dotset can be expensive.
+    pub fn iter(&self) -> impl Iterator<Item = &Dot<I>> {
+        self.set.iter()
+    }
 }
 
 impl<I: ReplicaId> std::iter::FromIterator<Dot<I>> for DotSet<I> {
@@ -172,12 +193,76 @@ impl<I: ReplicaId> std::iter::FromIterator<Dot<I>> for DotSet<I> {
     }
 }
 
+fn is_causal_for_replica<'a, I: ReplicaId + 'a>(
+    mut iter: impl Iterator<Item = &'a Dot<I>>,
+) -> bool {
+    let mut prev = 0;
+    iter.all(|e| {
+        prev += 1;
+        e.counter == prev
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::props::*;
+    use std::collections::BTreeSet;
+
+    use crate::{props::*, Dot, DotSet};
     use proptest::prelude::*;
 
+    /// convert a dotset into a std set for reference ops
+    fn std_set(x: &DotSet<u8>) -> BTreeSet<Dot<u8>> {
+        x.iter().cloned().collect()
+    }
+
+    /// convert an iterator into a dotset
+    fn dot_set<'a>(x: impl IntoIterator<Item = &'a Dot<u8>>) -> DotSet<u8> {
+        x.into_iter().cloned().collect()
+    }
+
+    fn from_tuples(x: impl IntoIterator<Item = (u8, u64)>) -> DotSet<u8> {
+        x.into_iter().map(|(i, c)| Dot::new(i, c)).collect()
+    }
+
+    #[test]
+    fn is_causal() {
+        assert!(from_tuples([(1, 1), (1, 2), (1, 3)]).is_causal());
+        assert!(!from_tuples([(1, 1), (1, 2), (1, 4)]).is_causal());
+        assert!(!from_tuples([(1, 1), (1, 2), (1, 3), (2, 1), (2, 2), (2, 4)]).is_causal());
+    }
+
     proptest! {
+        #[test]
+        fn union_elements(s1 in arb_ctx(), s2 in arb_ctx()) {
+            let reference = dot_set(std_set(&s1).union(&std_set(&s2)));
+            let result = union(&s1, &s2);
+            prop_assert_eq!(result, reference);
+        }
+
+        #[test]
+        fn intersection_elements(s1 in arb_ctx(), s2 in arb_ctx()) {
+            let reference = dot_set(std_set(&s1).intersection(&std_set(&s2)));
+            let result = intersect(&s1, &s2);
+            prop_assert_eq!(result, reference);
+        }
+
+        #[test]
+        fn difference_elements(s1 in arb_ctx(), s2 in arb_ctx()) {
+            let reference = dot_set(std_set(&s1).difference(&std_set(&s2)));
+            let result = difference(&s1, &s2);
+            prop_assert_eq!(result, reference);
+        }
+
+        #[test]
+        fn insert_reference(s in arb_ctx(), e in arb_dot()) {
+            let mut reference = std_set(&s);
+            reference.insert(e);
+            let reference = dot_set(reference.iter());
+            let mut result = s;
+            result.insert(e);
+            prop_assert_eq!(result, reference);
+        }
+
         #[test]
         fn union_idempotence(s1 in arb_ctx()) {
             prop_assert_eq!(union(&s1, &s1), s1);

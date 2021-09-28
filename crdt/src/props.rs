@@ -108,7 +108,7 @@ pub fn union(a: &DotSet<u8>, b: &DotSet<u8>) -> DotSet<u8> {
 }
 
 pub fn intersect(a: &DotSet<u8>, b: &DotSet<u8>) -> DotSet<u8> {
-    a.intersect(b)
+    a.intersection(b)
 }
 
 pub fn difference(a: &DotSet<u8>, b: &DotSet<u8>) -> DotSet<u8> {
