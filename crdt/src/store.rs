@@ -1,9 +1,14 @@
 use crate::{CausalContext, Dot, DotSet, Lattice, ReplicaId};
-use rkyv::{Archive, Deserialize, Serialize};
+use rkyv::{Archive, Archived, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::{Deref, DerefMut};
+use bytecheck::CheckBytes;
 
-pub trait DotStore<I: ReplicaId>: Clone + Default {
+pub trait Key: Clone + Ord + Archive {}
+
+impl<T: Clone + Ord + Archive> Key for T {}
+
+pub trait DotStore<I: ReplicaId>: Archive + Clone + Default {
     /// Returns true if there are no dots in the store.
     fn is_empty(&self) -> bool;
     /// Returns the set of dots in the store.
@@ -54,7 +59,8 @@ impl<I: ReplicaId> DotStore<I> for DotSet<I> {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Archive, CheckBytes, Deserialize, Serialize)]
+#[archive_attr(derive(CheckBytes))]
 #[repr(C)]
 pub struct DotFun<I: ReplicaId, T> {
     fun: BTreeMap<Dot<I>, T>,
@@ -133,7 +139,8 @@ impl<I: ReplicaId, T: Lattice + Clone> DotStore<I> for DotFun<I, T> {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Archive, CheckBytes, Deserialize, Serialize)]
+#[archive_attr(derive(CheckBytes))]
 #[repr(C)]
 pub struct DotMap<K: Ord, V> {
     map: BTreeMap<K, V>,
@@ -165,7 +172,10 @@ impl<K: Ord, V> DerefMut for DotMap<K, V> {
     }
 }
 
-impl<I: ReplicaId, K: Clone + Ord, V: DotStore<I>> DotStore<I> for DotMap<K, V> {
+impl<I: ReplicaId, K: Key, V: DotStore<I>> DotStore<I> for DotMap<K, V>
+where
+    Archived<K>: Ord,
+{
     fn is_empty(&self) -> bool {
         self.map.is_empty()
     }

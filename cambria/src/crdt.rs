@@ -1,3 +1,4 @@
+use bytecheck::CheckBytes;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use tlfs_crdt::{DotSet, DotStore, EWFlag, Lattice, MVReg, ORMap};
@@ -7,6 +8,7 @@ pub use tlfs_crdt::{Causal, CausalRef, Dot, ReplicaId};
 pub type Prop = String;
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Archive, Deserialize, Serialize)]
+#[archive_attr(derive(Debug, Eq, Hash, Ord, PartialEq, PartialOrd, CheckBytes))]
 #[repr(C)]
 pub enum Primitive {
     Bool(bool),
@@ -22,13 +24,26 @@ impl Lattice for Primitive {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[archive_attr(derive(CheckBytes))]
+#[archive_attr(check_bytes(
+    bound = "__C: rkyv::validation::ArchiveContext, <__C as rkyv::Fallible>::Error: std::error::Error"
+))]
+#[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
 #[repr(C)]
 pub enum Crdt<I: ReplicaId> {
     Null,
     Flag(EWFlag<I>),
     Reg(MVReg<I, Primitive>),
-    Table(ORMap<Primitive, Crdt<I>>),
-    Struct(BTreeMap<Prop, Crdt<I>>),
+    Table(
+        #[omit_bounds]
+        #[archive_attr(omit_bounds)]
+        ORMap<Primitive, Crdt<I>>,
+    ),
+    Struct(
+        #[omit_bounds]
+        #[archive_attr(omit_bounds)]
+        BTreeMap<Prop, Crdt<I>>,
+    ),
 }
 
 impl<I: ReplicaId> Default for Crdt<I> {

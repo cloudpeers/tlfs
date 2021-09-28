@@ -1,10 +1,11 @@
-use crate::crdt::{Crdt, Primitive, Prop, ReplicaId};
+use crate::crdt::{ReplicaId, Crdt, Primitive, Prop};
+use bytecheck::CheckBytes;
 use rkyv::{Archive, Serialize};
 use std::collections::BTreeMap;
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Archive, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Archive, CheckBytes, Serialize)]
 #[archive(as = "PrimitiveKind")]
-#[repr(C)]
+#[repr(u8)]
 pub enum PrimitiveKind {
     Bool,
     U64,

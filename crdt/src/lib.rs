@@ -8,7 +8,7 @@ mod store;
 
 pub use crate::crdts::{EWFlag, MVReg, ORMap};
 pub use crate::dotset::{Dot, DotSet, ReplicaId};
-pub use crate::store::{DotFun, DotMap, DotStore};
+pub use crate::store::{DotFun, DotMap, DotStore, Key};
 
 /// A causal context is a grow only set of dots that describes the causal history of a replica.
 /// Every dot corresponds to an event. We use a DotSet for this.
@@ -16,9 +16,10 @@ pub use crate::store::{DotFun, DotMap, DotStore};
 /// CausalContext = 𝑃(𝕀 ✕ ℕ)
 pub type CausalContext<I> = DotSet<I>;
 use rkyv::{Archive, Deserialize, Serialize};
+use bytecheck::CheckBytes;
 
 /// Join semilattice.
-pub trait Lattice {
+pub trait Lattice: Clone + Archive {
     /// Joins are required to be idempotent, associative and commutative.
     fn join(&mut self, other: &Self);
 }
@@ -47,7 +48,18 @@ impl<'a, I: ReplicaId, S> Clone for CausalRef<'a, I, S> {
 
 impl<'a, I: ReplicaId, S> Copy for CausalRef<'a, I, S> {}
 
-#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+impl<'a, I: ReplicaId, S> CausalRef<'a, I, S> {
+    pub fn new(store: &'a S, ctx: &'a CausalContext<I>) -> Self {
+        Self { store, ctx }
+    }
+
+    pub fn map<S2>(self, store: &'a S2) -> CausalRef<'a, I, S2> {
+        CausalRef::new(store, self.ctx)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Archive, CheckBytes, Deserialize, Serialize)]
+#[archive_attr(derive(CheckBytes))]
 #[repr(C)]
 pub struct Causal<I: ReplicaId, S> {
     pub store: S,
@@ -71,11 +83,15 @@ impl<I: ReplicaId, S> Causal<I, S> {
         Self::default()
     }
 
-    pub fn as_ref(&self) -> CausalRef<'_, I, S> {
-        CausalRef {
-            store: &self.store,
-            ctx: &self.ctx,
+    pub fn map<S2, F: Fn(S) -> S2>(self, f: F) -> Causal<I, S2> {
+        Causal {
+            store: f(self.store),
+            ctx: self.ctx,
         }
+    }
+
+    pub fn as_ref(&self) -> CausalRef<'_, I, S> {
+        CausalRef::new(&self.store, &self.ctx)
     }
 
     pub fn join(&mut self, other: &Self)

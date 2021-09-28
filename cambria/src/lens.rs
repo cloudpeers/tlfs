@@ -1,13 +1,14 @@
 use crate::crdt::{Crdt, Prop, ReplicaId};
 use crate::schema::{PrimitiveKind, Schema};
 use anyhow::{anyhow, Result};
+use bytecheck::CheckBytes;
 use rkyv::ser::serializers::AllocSerializer;
 use rkyv::ser::Serializer;
 use rkyv::string::ArchivedString;
 use rkyv::{Archive, Serialize};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Archive, Serialize)]
-#[archive(as = "Kind")]
+#[archive_attr(derive(Clone, Copy, Debug, Eq, PartialEq, CheckBytes))]
 #[repr(C)]
 pub enum Kind {
     Null,
@@ -18,7 +19,10 @@ pub enum Kind {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Serialize)]
-#[archive_attr(derive(Debug, Eq, PartialEq))]
+#[archive_attr(derive(Debug, Eq, PartialEq, CheckBytes))]
+#[archive_attr(check_bytes(
+    bound = "__C: rkyv::validation::ArchiveContext, <__C as rkyv::Fallible>::Error: std::error::Error"
+))]
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
 #[repr(C)]
 pub enum Lens {
@@ -29,8 +33,27 @@ pub enum Lens {
     RenameProperty(Prop, Prop),
     HoistProperty(Prop, Prop),
     PlungeProperty(Prop, Prop),
-    LensIn(Prop, #[omit_bounds] Box<Lens>),
-    LensMapValue(#[omit_bounds] Box<Lens>),
+    LensIn(
+        Prop,
+        #[omit_bounds]
+        #[archive_attr(omit_bounds)]
+        Box<Lens>,
+    ),
+    LensMapValue(
+        #[omit_bounds]
+        #[archive_attr(omit_bounds)]
+        Box<Lens>,
+    ),
+}
+
+impl Lens {
+    pub fn lens_in(self, prop: &str) -> Self {
+        Self::LensIn(prop.into(), Box::new(self))
+    }
+
+    pub fn lens_map_value(self) -> Self {
+        Self::LensMapValue(Box::new(self))
+    }
 }
 
 impl ArchivedLens {
@@ -51,8 +74,8 @@ impl ArchivedLens {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LensRef<'a> {
-    Make(Kind),
-    Destroy(Kind),
+    Make(ArchivedKind),
+    Destroy(ArchivedKind),
     AddProperty(&'a ArchivedString),
     RemoveProperty(&'a ArchivedString),
     RenameProperty(&'a ArchivedString, &'a ArchivedString),
@@ -92,22 +115,22 @@ impl<'a> LensRef<'a> {
                     return Err(anyhow!("cannot make schema"));
                 }
                 *s = match k {
-                    Kind::Null => return Err(anyhow!("cannot make a null schema")),
-                    Kind::Flag => Schema::Flag,
-                    Kind::Reg(kind) => Schema::Reg(*kind),
-                    Kind::Table(kind) => Schema::Table(*kind, Box::new(Schema::Null)),
-                    Kind::Struct => Schema::Struct(Default::default()),
+                    ArchivedKind::Null => return Err(anyhow!("cannot make a null schema")),
+                    ArchivedKind::Flag => Schema::Flag,
+                    ArchivedKind::Reg(kind) => Schema::Reg(*kind),
+                    ArchivedKind::Table(kind) => Schema::Table(*kind, Box::new(Schema::Null)),
+                    ArchivedKind::Struct => Schema::Struct(Default::default()),
                 }
             }
             (Self::Destroy(k), s) => {
                 match (k, &s) {
-                    (Kind::Flag, Schema::Flag) => {}
-                    (Kind::Reg(k1), Schema::Reg(k2)) => {
+                    (ArchivedKind::Flag, Schema::Flag) => {}
+                    (ArchivedKind::Reg(k1), Schema::Reg(k2)) => {
                         if k1 != k2 {
                             return Err(anyhow!("can't destroy different kind"));
                         }
                     }
-                    (Kind::Table(k1), Schema::Table(k2, s)) => {
+                    (ArchivedKind::Table(k1), Schema::Table(k2, s)) => {
                         if k1 != k2 {
                             return Err(anyhow!("can't destroy different kind"));
                         }
@@ -115,7 +138,7 @@ impl<'a> LensRef<'a> {
                             return Err(anyhow!("can't destroy table with non null schema"));
                         }
                     }
-                    (Kind::Struct, Schema::Struct(m)) => {
+                    (ArchivedKind::Struct, Schema::Struct(m)) => {
                         if !m.is_empty() {
                             return Err(anyhow!("can't destroy non empty object"));
                         }
@@ -202,11 +225,11 @@ impl<'a> LensRef<'a> {
         match (self, c) {
             (Self::Make(k), v) => {
                 *v = match k {
-                    Kind::Null => Crdt::Null,
-                    Kind::Flag => Crdt::Flag(Default::default()),
-                    Kind::Reg(_) => Crdt::Reg(Default::default()),
-                    Kind::Table(_) => Crdt::Table(Default::default()),
-                    Kind::Struct => Crdt::Struct(Default::default()),
+                    ArchivedKind::Null => Crdt::Null,
+                    ArchivedKind::Flag => Crdt::Flag(Default::default()),
+                    ArchivedKind::Reg(_) => Crdt::Reg(Default::default()),
+                    ArchivedKind::Table(_) => Crdt::Table(Default::default()),
+                    ArchivedKind::Struct => Crdt::Struct(Default::default()),
                 };
             }
             (Self::Destroy(_), v) => {
@@ -255,7 +278,7 @@ impl<'a> LensRef<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Serialize)]
-#[archive_attr(derive(Debug, Eq, PartialEq))]
+#[archive_attr(derive(Debug, Eq, PartialEq, CheckBytes))]
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
 #[repr(C)]
 pub struct Lenses(Vec<Lens>);
@@ -263,6 +286,12 @@ pub struct Lenses(Vec<Lens>);
 impl Lenses {
     pub fn new(lenses: Vec<Lens>) -> Self {
         Self(lenses)
+    }
+
+    pub fn archive(&self) -> Vec<u8> {
+        let mut ser = AllocSerializer::<256>::default();
+        ser.serialize_value(self).unwrap();
+        ser.into_serializer().into_inner().to_vec()
     }
 }
 

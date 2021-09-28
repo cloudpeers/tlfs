@@ -1,31 +1,20 @@
 mod crdt;
 mod lens;
-mod precompile;
 #[cfg(any(test, feature = "proptest"))]
 pub mod props;
 mod schema;
 
-pub use crdt::{ArchivedCrdt, ArchivedPrimitive, Crdt, Primitive, Prop, ReplicaId};
-pub use lens::{ArchivedLens, ArchivedLenses, Lens, LensRef, Lenses};
-pub use precompile::{precompile, write_tokens};
+pub use crdt::{ReplicaId, ArchivedCrdt, ArchivedPrimitive, Crdt, Primitive, Prop};
+pub use lens::{ArchivedLens, ArchivedLenses, Kind, Lens, LensRef, Lenses};
 pub use schema::{ArchivedSchema, PrimitiveKind, Schema};
-pub use {aligned, anyhow, rkyv};
 
-use anyhow::Result;
-use rkyv::archived_root;
-
-pub trait Cambria<I: ReplicaId> {
-    fn lenses() -> &'static [u8];
-
-    fn schema() -> &'static ArchivedSchema;
-
-    fn transform(lenses: &[u8], crdt: &mut Crdt<I>) -> Result<()> {
-        let a = unsafe { archived_root::<Lenses>(lenses) };
-        let b = unsafe { archived_root::<Lenses>(Self::lenses()) };
-        for lens in a.transform(b) {
-            lens.transform_crdt(crdt);
-        }
-        Ok(())
+pub fn transform<I: ReplicaId>(
+    from_lenses: &ArchivedLenses,
+    crdt: &mut Crdt<I>,
+    to_lenses: &ArchivedLenses,
+) {
+    for lens in from_lenses.transform(to_lenses) {
+        lens.transform_crdt(crdt);
     }
 }
 
@@ -34,6 +23,7 @@ mod tests {
     use super::*;
     use crate::props::*;
     use proptest::prelude::*;
+    use rkyv::archived_root;
     use tlfs_crdt::props::to_causal;
 
     tlfs_crdt::lattice!(crdt, arb_crdt);
