@@ -1,4 +1,5 @@
 //! This module contains an efficient set of dots for use as both a dot store and a causal context
+use itertools::Itertools;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -85,6 +86,9 @@ impl<I: ReplicaId> DotSet<I> {
         self.set.is_empty()
     }
 
+    /// creates a causal dot set from a map that contains the maximum dot for each replica (inclusive!)
+    ///
+    /// a maximum of 0 will be ignored
     pub fn from_map(x: BTreeMap<I, u64>) -> Self {
         let mut cloud = BTreeSet::new();
         for (id, max) in x {
@@ -96,9 +100,14 @@ impl<I: ReplicaId> DotSet<I> {
     }
 
     /// Checks if the set is causally consistent.
+    ///
+    /// a dot set is considered causally consistent when there are only contiguous sequences of counters for each replica
     pub fn is_causal(&self) -> bool {
-        // TODO!
-        self.set.is_empty()
+        self.set
+            .iter()
+            .group_by(|x| x.id)
+            .into_iter()
+            .all(|(_, iter)| is_causal_for_replica(iter))
     }
 
     /// Checks if the dot is contained in the set.
@@ -182,6 +191,16 @@ impl<I: ReplicaId> std::iter::FromIterator<Dot<I>> for DotSet<I> {
     }
 }
 
+fn is_causal_for_replica<'a, I: ReplicaId + 'a>(
+    mut iter: impl Iterator<Item = &'a Dot<I>>,
+) -> bool {
+    let mut prev = 0;
+    iter.all(|e| {
+        prev += 1;
+        e.counter == prev
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
@@ -197,6 +216,17 @@ mod tests {
     /// convert an iterator into a dotset
     fn dot_set<'a>(x: impl IntoIterator<Item = &'a Dot<u8>>) -> DotSet<u8> {
         x.into_iter().cloned().collect()
+    }
+
+    fn from_tuples(x: impl IntoIterator<Item = (u8, u64)>) -> DotSet<u8> {
+        x.into_iter().map(|(i, c)| Dot::new(i, c)).collect()
+    }
+
+    #[test]
+    fn is_causal() {
+        assert!(from_tuples([(1, 1), (1, 2), (1, 3)]).is_causal());
+        assert!(!from_tuples([(1, 1), (1, 2), (1, 4)]).is_causal());
+        assert!(!from_tuples([(1, 1), (1, 2), (1, 3), (2, 1), (2, 2), (2, 4)]).is_causal());
     }
 
     proptest! {
