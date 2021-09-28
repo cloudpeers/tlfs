@@ -1,6 +1,4 @@
-use crate::{
-    Causal, Dot, DotFun, DotMap, DotSet, DotStore, EWFlag, Key, Lattice, MVReg, ORMap,
-};
+use crate::{Causal, Dot, DotFun, DotMap, DotSet, DotStore, EWFlag, Key, Lattice, MVReg, ORMap};
 use proptest::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::iter::FromIterator;

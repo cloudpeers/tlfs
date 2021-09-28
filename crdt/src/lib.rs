@@ -15,8 +15,8 @@ pub use crate::store::{DotFun, DotMap, DotStore, Key};
 ///
 /// CausalContext = 𝑃(𝕀 ✕ ℕ)
 pub type CausalContext<I> = DotSet<I>;
-use rkyv::{Archive, Deserialize, Serialize};
 use bytecheck::CheckBytes;
+use rkyv::{Archive, Deserialize, Serialize};
 
 /// Join semilattice.
 pub trait Lattice: Clone + Archive {

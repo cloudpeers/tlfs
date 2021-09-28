@@ -137,16 +137,14 @@ impl<I: ReplicaId> DotSet<I> {
     }
 
     /// Returns the intersection of two dot sets.
-    pub fn intersect(&self, other: &Self) -> Self
-    {
+    pub fn intersect(&self, other: &Self) -> Self {
         Self {
             set: self.set.intersection(&other.set).cloned().collect(),
         }
     }
 
     /// Returns the difference of two dot sets.
-    pub fn difference(&self, other: &DotSet<I>) -> DotSet<I>
-    {
+    pub fn difference(&self, other: &DotSet<I>) -> DotSet<I> {
         let mut res = DotSet::default();
         for dot in &self.set {
             if !other.contains(dot) {
@@ -157,8 +155,7 @@ impl<I: ReplicaId> DotSet<I> {
     }
 
     /// Merges with the other dot set.
-    pub fn union(&mut self, other: &DotSet<I>)
-    {
+    pub fn union(&mut self, other: &DotSet<I>) {
         for dot in &other.set {
             self.insert(*dot);
         }

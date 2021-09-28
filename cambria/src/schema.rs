@@ -1,4 +1,4 @@
-use crate::crdt::{ReplicaId, Crdt, Primitive, Prop};
+use crate::crdt::{Crdt, Primitive, Prop, ReplicaId};
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Serialize};
 use std::collections::BTreeMap;

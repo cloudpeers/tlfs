@@ -1,4 +1,7 @@
-use crate::{ReplicaId, Causal, CausalContext, CausalRef, Dot, DotFun, DotMap, DotSet, DotStore, Key, Lattice};
+use crate::{
+    Causal, CausalContext, CausalRef, Dot, DotFun, DotMap, DotSet, DotStore, Key, Lattice,
+    ReplicaId,
+};
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Archived, Deserialize, Serialize};
 use std::borrow::Borrow;

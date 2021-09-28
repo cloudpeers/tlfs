@@ -1,8 +1,8 @@
 use crate::{CausalContext, Dot, DotSet, Lattice, ReplicaId};
+use bytecheck::CheckBytes;
 use rkyv::{Archive, Archived, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::{Deref, DerefMut};
-use bytecheck::CheckBytes;
 
 pub trait Key: Clone + Ord + Archive {}
 
