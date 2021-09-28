@@ -77,8 +77,8 @@ impl<I: ReplicaId> Default for DotSet<I> {
 
 impl<I: ReplicaId> DotSet<I> {
     /// Returns a new instance.
-    pub fn new(cloud: BTreeSet<Dot<I>>) -> Self {
-        Self { set: cloud }
+    pub fn new(set: BTreeSet<Dot<I>>) -> Self {
+        Self { set }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -112,27 +112,29 @@ impl<I: ReplicaId> DotSet<I> {
     }
 
     /// Return the associated counter for this replica.
+    ///
+    /// The associated counter is the maximum counter value for the replica id.
     /// All replicas not in the set have an implied count of 0.
-    pub fn get(&self, id: &I) -> u64 {
-        let dots = self.set.iter().filter(|x| &x.id == id).collect::<Vec<_>>();
-        let mut prev = 0;
-        for dot in dots {
-            if dot.counter != prev + 1 {
-                return prev;
-            }
-            prev = dot.counter;
-        }
-        prev
+    ///
+    /// maxᵢ(c) = max({ n | (i, n) ∈ c} ∪ { 0 })
+    pub fn max(&self, id: &I) -> u64 {
+        self.set
+            .iter()
+            .filter(|x| &x.id == id)
+            .map(|x| x.counter)
+            .last()
+            .unwrap_or_default()
     }
 
     /// Returns the associated dot for this replica.
     pub fn dot(&self, id: I) -> Dot<I> {
-        let counter = self.get(&id);
-        Dot::new(id, counter)
+        Dot::new(id, self.max(&id))
     }
 
     /// Returns the incremented dot for this replica.
-    pub fn inc(&self, id: I) -> Dot<I> {
+    ///
+    /// nextᵢ(c) = (i, maxᵢ(c) + 1)
+    pub fn next(&self, id: I) -> Dot<I> {
         self.dot(id).inc()
     }
 
@@ -160,6 +162,14 @@ impl<I: ReplicaId> DotSet<I> {
             self.insert(*dot);
         }
     }
+
+    /// Iterator over all dots in this dot set
+    ///
+    /// Note that this is mostly useful for testing, since iterating over all
+    /// dots in a large dotset can be expensive.
+    pub fn iter(&self) -> impl Iterator<Item = &Dot<I>> {
+        self.set.iter()
+    }
 }
 
 impl<I: ReplicaId> std::iter::FromIterator<Dot<I>> for DotSet<I> {
@@ -174,10 +184,53 @@ impl<I: ReplicaId> std::iter::FromIterator<Dot<I>> for DotSet<I> {
 
 #[cfg(test)]
 mod tests {
-    use crate::props::*;
+    use std::collections::BTreeSet;
+
+    use crate::{props::*, Dot, DotSet};
     use proptest::prelude::*;
 
+    /// convert a dotset into a std set for reference ops
+    fn std_set(x: &DotSet<u8>) -> BTreeSet<Dot<u8>> {
+        x.iter().cloned().collect()
+    }
+
+    /// convert an iterator into a dotset
+    fn dot_set<'a>(x: impl IntoIterator<Item = &'a Dot<u8>>) -> DotSet<u8> {
+        x.into_iter().cloned().collect()
+    }
+
     proptest! {
+        #[test]
+        fn union_elements(s1 in arb_ctx(), s2 in arb_ctx()) {
+            let reference = dot_set(std_set(&s1).union(&std_set(&s2)));
+            let result = union(&s1, &s2);
+            prop_assert_eq!(result, reference);
+        }
+
+        #[test]
+        fn intersection_elements(s1 in arb_ctx(), s2 in arb_ctx()) {
+            let reference = dot_set(std_set(&s1).intersection(&std_set(&s2)));
+            let result = intersect(&s1, &s2);
+            prop_assert_eq!(result, reference);
+        }
+
+        #[test]
+        fn difference_elements(s1 in arb_ctx(), s2 in arb_ctx()) {
+            let reference = dot_set(std_set(&s1).difference(&std_set(&s2)));
+            let result = difference(&s1, &s2);
+            prop_assert_eq!(result, reference);
+        }
+
+        #[test]
+        fn insert_reference(s in arb_ctx(), e in arb_dot()) {
+            let mut reference = std_set(&s);
+            reference.insert(e);
+            let reference = dot_set(reference.iter());
+            let mut result = s;
+            result.insert(e);
+            prop_assert_eq!(result, reference);
+        }
+
         #[test]
         fn union_idempotence(s1 in arb_ctx()) {
             prop_assert_eq!(union(&s1, &s1), s1);
