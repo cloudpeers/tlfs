@@ -1,9 +1,9 @@
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use tlfs_crdt::{Clock, DotStore, EWFlag, Lattice, MVReg, ORMap};
+use tlfs_crdt::{DotSet, DotStore, EWFlag, Lattice, MVReg, ORMap};
 
-pub use tlfs_crdt::{Actor, Causal, CausalRef, Dot};
+pub use tlfs_crdt::{Causal, CausalRef, Dot, ReplicaId};
 
 pub type Prop = String;
 
@@ -30,29 +30,29 @@ impl Lattice for Primitive {
 ))]
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
 #[repr(C)]
-pub enum Crdt<A: Actor> {
+pub enum Crdt<I: ReplicaId> {
     Null,
-    Flag(EWFlag<A>),
-    Reg(MVReg<A, Primitive>),
+    Flag(EWFlag<I>),
+    Reg(MVReg<I, Primitive>),
     Table(
         #[omit_bounds]
         #[archive_attr(omit_bounds)]
-        ORMap<Primitive, Crdt<A>>,
+        ORMap<Primitive, Crdt<I>>,
     ),
     Struct(
         #[omit_bounds]
         #[archive_attr(omit_bounds)]
-        BTreeMap<Prop, Crdt<A>>,
+        BTreeMap<Prop, Crdt<I>>,
     ),
 }
 
-impl<A: Actor> Default for Crdt<A> {
+impl<I: ReplicaId> Default for Crdt<I> {
     fn default() -> Self {
         Self::Null
     }
 }
 
-impl<A: Actor> DotStore<A> for Crdt<A> {
+impl<I: ReplicaId> DotStore<I> for Crdt<I> {
     fn is_empty(&self) -> bool {
         match self {
             Self::Null => true,
@@ -63,7 +63,7 @@ impl<A: Actor> DotStore<A> for Crdt<A> {
         }
     }
 
-    fn dots(&self, dots: &mut BTreeSet<Dot<A>>) {
+    fn dots(&self, dots: &mut BTreeSet<Dot<I>>) {
         match self {
             Self::Null => {}
             Self::Flag(f) => f.dots(dots),
@@ -77,7 +77,7 @@ impl<A: Actor> DotStore<A> for Crdt<A> {
         }
     }
 
-    fn join(&mut self, clock: &Clock<A>, other: &Self, other_clock: &Clock<A>) {
+    fn join(&mut self, clock: &DotSet<I>, other: &Self, other_clock: &DotSet<I>) {
         match (self, other) {
             (Self::Flag(f1), Self::Flag(f2)) => f1.join(clock, f2, other_clock),
             (Self::Reg(r1), Self::Reg(r2)) => r1.join(clock, r2, other_clock),
@@ -95,7 +95,7 @@ impl<A: Actor> DotStore<A> for Crdt<A> {
         }
     }
 
-    fn unjoin(&self, diff: &Clock<A>) -> Self {
+    fn unjoin(&self, diff: &DotSet<I>) -> Self {
         match self {
             Self::Null => Self::Null,
             Self::Flag(f) => Self::Flag(f.unjoin(diff)),

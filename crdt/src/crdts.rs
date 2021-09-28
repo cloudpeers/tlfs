@@ -1,4 +1,7 @@
-use crate::{Actor, Causal, CausalRef, Clock, Dot, DotFun, DotMap, DotSet, DotStore, Key, Lattice};
+use crate::{
+    Causal, CausalContext, CausalRef, Dot, DotFun, DotMap, DotSet, DotStore, Key, Lattice,
+    ReplicaId,
+};
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Archived, Deserialize, Serialize};
 use std::borrow::Borrow;
@@ -8,64 +11,64 @@ use std::ops::{Deref, DerefMut};
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(CheckBytes))]
 #[repr(C)]
-pub struct EWFlag<A: Actor>(DotSet<A>);
+pub struct EWFlag<I: ReplicaId>(DotSet<I>);
 
-impl<A: Actor> Default for EWFlag<A> {
+impl<I: ReplicaId> Default for EWFlag<I> {
     fn default() -> Self {
         Self(Default::default())
     }
 }
 
-impl<A: Actor> Deref for EWFlag<A> {
-    type Target = DotSet<A>;
+impl<I: ReplicaId> Deref for EWFlag<I> {
+    type Target = DotSet<I>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl<A: Actor> DerefMut for EWFlag<A> {
+impl<I: ReplicaId> DerefMut for EWFlag<I> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl<A: Actor> DotStore<A> for EWFlag<A> {
+impl<I: ReplicaId> DotStore<I> for EWFlag<I> {
     fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
-    fn dots(&self, dots: &mut BTreeSet<Dot<A>>) {
+    fn dots(&self, dots: &mut BTreeSet<Dot<I>>) {
         self.0.dots(dots)
     }
 
-    fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>) {
-        self.0.join(clock, other, clock_other);
+    fn join(&mut self, ctx: &CausalContext<I>, other: &Self, other_ctx: &CausalContext<I>) {
+        self.0.join(ctx, other, other_ctx);
     }
 
-    fn unjoin(&self, diff: &Clock<A>) -> Self {
+    fn unjoin(&self, diff: &DotSet<I>) -> Self {
         Self(self.0.unjoin(diff))
     }
 }
 
-impl<'a, A: Actor> CausalRef<'a, A, EWFlag<A>> {
-    pub fn enable(self, dot: Dot<A>) -> Causal<A, EWFlag<A>> {
+impl<'a, I: ReplicaId> CausalRef<'a, I, EWFlag<I>> {
+    pub fn enable(self, dot: Dot<I>) -> Causal<I, EWFlag<I>> {
         let mut delta = Causal::<_, EWFlag<_>>::new();
         delta.store.insert(dot);
-        delta.clock = self.clock.clone();
-        delta.clock.insert(dot);
+        delta.ctx = self.ctx.clone();
+        delta.ctx.insert(dot);
         delta
     }
 
-    pub fn disable(self, dot: Dot<A>) -> Causal<A, EWFlag<A>> {
+    pub fn disable(self, dot: Dot<I>) -> Causal<I, EWFlag<I>> {
         let mut delta = Causal::<_, EWFlag<_>>::new();
-        delta.clock = self.clock.clone();
-        delta.clock.insert(dot);
+        delta.ctx = self.ctx.clone();
+        delta.ctx.insert(dot);
         delta
     }
 }
 
-impl<A: Actor> EWFlag<A> {
+impl<I: ReplicaId> EWFlag<I> {
     pub fn value(&self) -> bool {
         !self.0.is_empty()
     }
@@ -74,57 +77,57 @@ impl<A: Actor> EWFlag<A> {
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(CheckBytes))]
 #[repr(C)]
-pub struct MVReg<A: Actor, L>(DotFun<A, L>);
+pub struct MVReg<I: ReplicaId, L>(DotFun<I, L>);
 
-impl<A: Actor, L> Default for MVReg<A, L> {
+impl<I: ReplicaId, L> Default for MVReg<I, L> {
     fn default() -> Self {
         Self(Default::default())
     }
 }
 
-impl<A: Actor, L> Deref for MVReg<A, L> {
-    type Target = DotFun<A, L>;
+impl<I: ReplicaId, L> Deref for MVReg<I, L> {
+    type Target = DotFun<I, L>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl<A: Actor, L> DerefMut for MVReg<A, L> {
+impl<I: ReplicaId, L> DerefMut for MVReg<I, L> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl<A: Actor, L: Lattice + Clone> DotStore<A> for MVReg<A, L> {
+impl<I: ReplicaId, L: Lattice + Clone> DotStore<I> for MVReg<I, L> {
     fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
-    fn dots(&self, dots: &mut BTreeSet<Dot<A>>) {
+    fn dots(&self, dots: &mut BTreeSet<Dot<I>>) {
         self.0.dots(dots)
     }
 
-    fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>) {
-        self.0.join(clock, other, clock_other);
+    fn join(&mut self, ctx: &CausalContext<I>, other: &Self, other_ctx: &CausalContext<I>) {
+        self.0.join(ctx, other, other_ctx);
     }
 
-    fn unjoin(&self, diff: &Clock<A>) -> Self {
+    fn unjoin(&self, diff: &DotSet<I>) -> Self {
         Self(self.0.unjoin(diff))
     }
 }
 
-impl<'a, A: Actor, L: Lattice> CausalRef<'a, A, MVReg<A, L>> {
-    pub fn write(self, dot: Dot<A>, v: L) -> Causal<A, MVReg<A, L>> {
+impl<'a, I: ReplicaId, L: Lattice> CausalRef<'a, I, MVReg<I, L>> {
+    pub fn write(self, dot: Dot<I>, v: L) -> Causal<I, MVReg<I, L>> {
         let mut delta = Causal::<_, MVReg<_, _>>::new();
         delta.store.insert(dot, v);
-        delta.clock = self.clock.clone();
-        delta.clock.insert(dot);
+        delta.ctx = self.ctx.clone();
+        delta.ctx.insert(dot);
         delta
     }
 }
 
-impl<A: Actor, L: Lattice> MVReg<A, L> {
+impl<I: ReplicaId, L: Lattice> MVReg<I, L> {
     pub fn read(&self) -> impl Iterator<Item = &L> {
         self.0.values()
     }
@@ -155,7 +158,7 @@ impl<K: Key, V> DerefMut for ORMap<K, V> {
     }
 }
 
-impl<A: Actor, K: Key, V: DotStore<A>> DotStore<A> for ORMap<K, V>
+impl<I: ReplicaId, K: Key, V: DotStore<I>> DotStore<I> for ORMap<K, V>
 where
     Archived<K>: Ord,
 {
@@ -163,23 +166,23 @@ where
         self.0.is_empty()
     }
 
-    fn dots(&self, dots: &mut BTreeSet<Dot<A>>) {
+    fn dots(&self, dots: &mut BTreeSet<Dot<I>>) {
         self.0.dots(dots)
     }
 
-    fn join(&mut self, clock: &Clock<A>, other: &Self, clock_other: &Clock<A>) {
-        self.0.join(clock, other, clock_other);
+    fn join(&mut self, ctx: &CausalContext<I>, other: &Self, other_ctx: &CausalContext<I>) {
+        self.0.join(ctx, other, other_ctx);
     }
 
-    fn unjoin(&self, diff: &Clock<A>) -> Self {
+    fn unjoin(&self, diff: &DotSet<I>) -> Self {
         Self(self.0.unjoin(diff))
     }
 }
 
-impl<'a, A: Actor, K: Key, V: DotStore<A>> CausalRef<'a, A, ORMap<K, V>> {
-    pub fn apply<F>(self, k: K, mut f: F) -> Causal<A, ORMap<K, V>>
+impl<'a, I: ReplicaId, K: Key, V: DotStore<I>> CausalRef<'a, I, ORMap<K, V>> {
+    pub fn apply<F>(self, k: K, mut f: F) -> Causal<I, ORMap<K, V>>
     where
-        F: FnMut(CausalRef<'_, A, V>) -> Causal<A, V>,
+        F: FnMut(CausalRef<'_, I, V>) -> Causal<I, V>,
     {
         let inner_delta = if let Some(v) = self.store.get(&k) {
             f(self.map(v))
@@ -190,11 +193,11 @@ impl<'a, A: Actor, K: Key, V: DotStore<A>> CausalRef<'a, A, ORMap<K, V>> {
         };
         let mut delta = Causal::<_, ORMap<_, _>>::new();
         delta.store.insert(k, inner_delta.store);
-        delta.clock = inner_delta.clock;
+        delta.ctx = inner_delta.ctx;
         delta
     }
 
-    pub fn remove<Q: ?Sized>(self, dot: Dot<A>, k: &Q) -> Causal<A, ORMap<K, V>>
+    pub fn remove<Q: ?Sized>(self, dot: Dot<I>, k: &Q) -> Causal<I, ORMap<K, V>>
     where
         K: Borrow<Q>,
         Q: Ord,
@@ -203,8 +206,8 @@ impl<'a, A: Actor, K: Key, V: DotStore<A>> CausalRef<'a, A, ORMap<K, V>> {
         if let Some(v) = self.store.get(k) {
             let mut dots = BTreeSet::new();
             v.dots(&mut dots);
-            delta.clock = dots.into_iter().collect();
-            delta.clock.insert(dot);
+            delta.ctx = dots.into_iter().collect();
+            delta.ctx.insert(dot);
         }
         delta
     }

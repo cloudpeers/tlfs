@@ -1,6 +1,4 @@
-use crate::{
-    Causal, Clock, Dot, DotFun, DotMap, DotSet, DotStore, EWFlag, Key, Lattice, MVReg, ORMap,
-};
+use crate::{Causal, Dot, DotFun, DotMap, DotSet, DotStore, EWFlag, Key, Lattice, MVReg, ORMap};
 use proptest::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::iter::FromIterator;
@@ -14,9 +12,9 @@ pub fn arb_dot() -> impl Strategy<Value = Dot<u8>> {
     arb_dot_in(1u64..25)
 }
 
-pub fn arb_clock() -> impl Strategy<Value = Clock<u8>> {
+pub fn arb_ctx() -> impl Strategy<Value = DotSet<u8>> {
     prop::collection::btree_set(arb_dot_in(1u64..5), 0..50)
-        .prop_map(|cloud| Clock::from_iter(cloud.into_iter()))
+        .prop_map(|dots| DotSet::from_iter(dots.into_iter()))
 }
 
 pub fn to_causal<S: DotStore<u8>>(store: S) -> Causal<u8, S> {
@@ -25,13 +23,13 @@ pub fn to_causal<S: DotStore<u8>>(store: S) -> Causal<u8, S> {
     let mut present = BTreeMap::new();
     for dot in dots {
         let counter = dot.counter();
-        let actor = dot.actor;
-        if counter > 0 && counter > present.get(&actor).copied().unwrap_or_default() {
-            present.insert(actor, counter);
+        let id = dot.id;
+        if counter > 0 && counter > present.get(&id).copied().unwrap_or_default() {
+            present.insert(id, counter);
         }
     }
-    let clock = Clock::from_map(present);
-    Causal { store, clock }
+    let ctx = DotSet::from_map(present);
+    Causal { store, ctx }
 }
 
 pub fn arb_causal<S, P, F>(s: F) -> impl Strategy<Value = Causal<u8, S>>
@@ -97,23 +95,23 @@ where
         map.as_ref()
             .apply(k, |_| Causal {
                 store: v.clone(),
-                clock: Default::default(),
+                ctx: Default::default(),
             })
             .store
     })
 }
 
-pub fn union(a: &Clock<u8>, b: &Clock<u8>) -> Clock<u8> {
+pub fn union(a: &DotSet<u8>, b: &DotSet<u8>) -> DotSet<u8> {
     let mut a = a.clone();
     a.union(b);
     a
 }
 
-pub fn intersect(a: &Clock<u8>, b: &Clock<u8>) -> Clock<u8> {
+pub fn intersect(a: &DotSet<u8>, b: &DotSet<u8>) -> DotSet<u8> {
     a.intersect(b)
 }
 
-pub fn difference(a: &Clock<u8>, b: &Clock<u8>) -> Clock<u8> {
+pub fn difference(a: &DotSet<u8>, b: &DotSet<u8>) -> DotSet<u8> {
     a.difference(b)
 }
 
@@ -142,13 +140,13 @@ macro_rules! lattice {
                 }
 
                 #[test]
-                fn unjoin(a in arb_causal($arb), b in arb_clock()) {
+                fn unjoin(a in arb_causal($arb), b in arb_ctx()) {
                     let b = a.unjoin(&b);
                     prop_assert_eq!(join(&a, &b), a);
                 }
 
                 #[test]
-                fn associative(dots in arb_causal($arb), a in arb_clock(), b in arb_clock(), c in arb_clock()) {
+                fn associative(dots in arb_causal($arb), a in arb_ctx(), b in arb_ctx(), c in arb_ctx()) {
                     let a = dots.unjoin(&a);
                     let b = dots.unjoin(&b);
                     let c = dots.unjoin(&c);
