@@ -1,97 +1,97 @@
-use crate::{Actor, Dot, DotSet, Lattice};
+use crate::{Dot, DotSet, Lattice, ReplicaId, CausalContext};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::{Deref, DerefMut};
 
-pub trait DotStore<A: Actor>: Clone + Default {
+pub trait DotStore<I: ReplicaId>: Clone + Default {
     /// Returns true if there are no dots in the store.
     fn is_empty(&self) -> bool;
     /// Returns the set of dots in the store.
-    fn dots(&self, dots: &mut BTreeSet<Dot<A>>);
+    fn dots(&self, dots: &mut BTreeSet<Dot<I>>);
     /// Joins are required to be idempotent, associative and commutative.
-    fn join(&mut self, clock: &DotSet<A>, other: &Self, clock_other: &DotSet<A>);
-    /// Unjoin a state based on a clock (clock \ other_clock).
-    fn unjoin(&self, diff: &DotSet<A>) -> Self;
+    fn join(&mut self, ctx: &CausalContext<I>, other: &Self, other_ctx: &CausalContext<I>);
+    /// Unjoin a state based on a diff (context \ other_context).
+    fn unjoin(&self, diff: &DotSet<I>) -> Self;
 }
 
-impl<A: Actor> DotStore<A> for DotSet<A> {
+impl<I: ReplicaId> DotStore<I> for DotSet<I> {
     fn is_empty(&self) -> bool {
-        self.cloud.is_empty()
+        self.set.is_empty()
     }
 
-    fn dots(&self, dots: &mut BTreeSet<Dot<A>>) {
-        for dot in &self.cloud {
+    fn dots(&self, dots: &mut BTreeSet<Dot<I>>) {
+        for dot in &self.set {
             dots.insert(*dot);
         }
     }
 
     /// from the paper
     /// (s, c) ∐ (s', c') = ((s ∩ s') ∪ (s \ c') (s' \ c), c ∪ c')
-    fn join(&mut self, clock: &DotSet<A>, other: &Self, clock_other: &DotSet<A>) {
-        // intersection of the two sets, and keep elements that are not in the other clock
-        self.cloud.retain(|dot|
+    fn join(&mut self, ctx: &CausalContext<I>, other: &Self, other_ctx: &CausalContext<I>) {
+        // intersection of the two sets, and keep elements that are not in the other context
+        self.set.retain(|dot|
                 // ((s ∩ s')
                 other.contains(dot) ||
                 // (s \ c')
-                !clock_other.contains(dot));
-        // add all elements of the other set which are not in our clock
+                !other_ctx.contains(dot));
+        // add all elements of the other set which are not in our context
         // (s' \ c)
-        for dot in &other.cloud {
-            if !clock.contains(dot) {
+        for dot in &other.set {
+            if !ctx.contains(dot) {
                 self.insert(*dot);
             }
         }
     }
 
-    fn unjoin(&self, diff: &DotSet<A>) -> Self {
+    fn unjoin(&self, diff: &DotSet<I>) -> Self {
         let mut cloud = BTreeSet::new();
-        for dot in &self.cloud {
+        for dot in &self.set {
             if diff.contains(dot) {
                 cloud.insert(*dot);
             }
         }
-        Self { cloud }
+        Self { set: cloud }
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[repr(C)]
-pub struct DotFun<A: Actor, T> {
-    fun: BTreeMap<Dot<A>, T>,
+pub struct DotFun<I: ReplicaId, T> {
+    fun: BTreeMap<Dot<I>, T>,
 }
 
-impl<A: Actor, T> DotFun<A, T> {
-    pub fn new(fun: BTreeMap<Dot<A>, T>) -> Self {
+impl<I: ReplicaId, T> DotFun<I, T> {
+    pub fn new(fun: BTreeMap<Dot<I>, T>) -> Self {
         Self { fun }
     }
 }
 
-impl<A: Actor, T> Default for DotFun<A, T> {
+impl<I: ReplicaId, T> Default for DotFun<I, T> {
     fn default() -> Self {
         Self::new(Default::default())
     }
 }
 
-impl<A: Actor, T> Deref for DotFun<A, T> {
-    type Target = BTreeMap<Dot<A>, T>;
+impl<I: ReplicaId, T> Deref for DotFun<I, T> {
+    type Target = BTreeMap<Dot<I>, T>;
 
     fn deref(&self) -> &Self::Target {
         &self.fun
     }
 }
 
-impl<A: Actor, T> DerefMut for DotFun<A, T> {
+impl<I: ReplicaId, T> DerefMut for DotFun<I, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.fun
     }
 }
 
-impl<A: Actor, T: Lattice + Clone> DotStore<A> for DotFun<A, T> {
+impl<I: ReplicaId, T: Lattice + Clone> DotStore<I> for DotFun<I, T> {
     fn is_empty(&self) -> bool {
         self.fun.is_empty()
     }
 
-    fn dots(&self, dots: &mut BTreeSet<Dot<A>>) {
+    fn dots(&self, dots: &mut BTreeSet<Dot<I>>) {
         for dot in self.fun.keys() {
             dots.insert(*dot);
         }
@@ -100,7 +100,7 @@ impl<A: Actor, T: Lattice + Clone> DotStore<A> for DotFun<A, T> {
     /// from the paper
     /// (m, c) ∐ (m', c') = ({ k -> m(k) ∐ m'(k), k ∈ dom m ∩ dom m' } ∪
     ///                      {(d, v) ∊ m | d ∉ c'} ∪ {(d, v) ∊ m' | d ∉ c}, c ∪ c')
-    fn join(&mut self, clock: &DotSet<A>, other: &Self, clock_other: &DotSet<A>) {
+    fn join(&mut self, ctx: &CausalContext<I>, other: &Self, other_ctx: &CausalContext<I>) {
         self.fun.retain(|dot, v| {
             if let Some(v2) = other.fun.get(dot) {
                 // join all elements that are in both funs
@@ -108,21 +108,21 @@ impl<A: Actor, T: Lattice + Clone> DotStore<A> for DotFun<A, T> {
                 v.join(v2);
                 true
             } else {
-                // keep all elements unmodified that are not in the other clock
+                // keep all elements unmodified that are not in the other causal context
                 // { (d, v) ∊ m | d ∉ c' }
-                !clock_other.contains(dot)
+                !other_ctx.contains(dot)
             }
         });
-        // copy all elements from the other fun, that are neither in our fun nor in our clock
+        // copy all elements from the other fun, that are neither in our fun nor in our causal context
         // { (d, v) ∊ m' | d ∉ c }
         for (d, v) in &other.fun {
-            if !self.fun.contains_key(d) && !clock.contains(d) {
+            if !self.fun.contains_key(d) && !ctx.contains(d) {
                 self.fun.insert(*d, v.clone());
             }
         }
     }
 
-    fn unjoin(&self, diff: &DotSet<A>) -> Self {
+    fn unjoin(&self, diff: &DotSet<I>) -> Self {
         let mut fun = BTreeMap::new();
         for (dot, v) in &self.fun {
             if diff.contains(dot) {
@@ -165,12 +165,12 @@ impl<K: Ord, V> DerefMut for DotMap<K, V> {
     }
 }
 
-impl<A: Actor, K: Clone + Ord, V: DotStore<A>> DotStore<A> for DotMap<K, V> {
+impl<I: ReplicaId, K: Clone + Ord, V: DotStore<I>> DotStore<I> for DotMap<K, V> {
     fn is_empty(&self) -> bool {
         self.map.is_empty()
     }
 
-    fn dots(&self, dots: &mut BTreeSet<Dot<A>>) {
+    fn dots(&self, dots: &mut BTreeSet<Dot<I>>) {
         for store in self.map.values() {
             store.dots(dots);
         }
@@ -179,11 +179,11 @@ impl<A: Actor, K: Clone + Ord, V: DotStore<A>> DotStore<A> for DotMap<K, V> {
     /// from the paper
     /// (m, c) ∐ (m', c') = ({ k -> v(k), k ∈ dom m ∪ dom m' ∧ v(k) ≠ ⊥ }, c ∪ c')
     ///                     where v(k) = fst ((m(k), c) ∐ (m'(k), c'))
-    fn join(&mut self, clock: &DotSet<A>, other: &Self, other_clock: &DotSet<A>) {
+    fn join(&mut self, ctx: &CausalContext<I>, other: &Self, other_ctx: &CausalContext<I>) {
         for (k, v2) in &other.map {
             if let Some(v) = self.map.get_mut(k) {
                 // we got a value in both maps, so we need to do the join
-                v.join(clock, v2, other_clock);
+                v.join(ctx, v2, other_ctx);
             } else {
                 // we don't have a value yet, just copy over the other one
                 self.map.insert(k.clone(), v2.clone());
@@ -192,7 +192,7 @@ impl<A: Actor, K: Clone + Ord, V: DotStore<A>> DotStore<A> for DotMap<K, V> {
         // all other values will remain unchanged
     }
 
-    fn unjoin(&self, diff: &DotSet<A>) -> Self {
+    fn unjoin(&self, diff: &DotSet<I>) -> Self {
         let mut map = BTreeMap::new();
         for (k, v) in &self.map {
             let v = v.unjoin(diff);

@@ -1,16 +1,18 @@
 //! Delta crdts
 
-mod dotset;
 mod crdts;
+mod dotset;
 #[cfg(any(feature = "proptest", test))]
 pub mod props;
 mod store;
 
-pub use crate::dotset::{Actor, Dot, DotSet};
 pub use crate::crdts::{EWFlag, MVReg, ORMap};
+pub use crate::dotset::{Dot, DotSet, ReplicaId};
 pub use crate::store::{DotFun, DotMap, DotStore};
 
-use dotset::CausalContext;
+/// A causal context is a grow only set of dots that describes the causal history of a replica.
+/// Every dot corresponds to an event. We use a DotSet for this.
+pub type CausalContext<I> = DotSet<I>;
 use rkyv::{Archive, Deserialize, Serialize};
 
 /// Join semilattice.
@@ -27,39 +29,39 @@ impl Lattice for u64 {
     }
 }
 
-pub struct CausalRef<'a, A: Actor, S> {
+pub struct CausalRef<'a, I: ReplicaId, S> {
     pub store: &'a S,
-    pub clock: &'a DotSet<A>,
+    pub ctx: &'a CausalContext<I>,
 }
 
-impl<'a, A: Actor, S> Clone for CausalRef<'a, A, S> {
+impl<'a, I: ReplicaId, S> Clone for CausalRef<'a, I, S> {
     fn clone(&self) -> Self {
         Self {
             store: self.store,
-            clock: self.clock,
+            ctx: self.ctx,
         }
     }
 }
 
-impl<'a, A: Actor, S> Copy for CausalRef<'a, A, S> {}
+impl<'a, I: ReplicaId, S> Copy for CausalRef<'a, I, S> {}
 
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[repr(C)]
-pub struct Causal<A: Actor, S> {
+pub struct Causal<I: ReplicaId, S> {
     pub store: S,
-    pub clock: CausalContext<A>,
+    pub ctx: CausalContext<I>,
 }
 
-impl<A: Actor, S: Default> Default for Causal<A, S> {
+impl<I: ReplicaId, S: Default> Default for Causal<I, S> {
     fn default() -> Self {
         Self {
             store: Default::default(),
-            clock: Default::default(),
+            ctx: Default::default(),
         }
     }
 }
 
-impl<A: Actor, S> Causal<A, S> {
+impl<I: ReplicaId, S> Causal<I, S> {
     pub fn new() -> Self
     where
         S: Default,
@@ -67,36 +69,36 @@ impl<A: Actor, S> Causal<A, S> {
         Self::default()
     }
 
-    pub fn as_ref(&self) -> CausalRef<'_, A, S> {
+    pub fn as_ref(&self) -> CausalRef<'_, I, S> {
         CausalRef {
             store: &self.store,
-            clock: &self.clock,
+            ctx: &self.ctx,
         }
     }
 
     pub fn join(&mut self, other: &Self)
     where
-        A: Clone,
-        S: DotStore<A>,
+        I: Clone,
+        S: DotStore<I>,
     {
-        self.store.join(&self.clock, &other.store, &other.clock);
-        self.clock.union(&other.clock);
+        self.store.join(&self.ctx, &other.store, &other.ctx);
+        self.ctx.union(&other.ctx);
     }
 
-    pub fn unjoin(&self, other: &DotSet<A>) -> Self
+    pub fn unjoin(&self, other: &DotSet<I>) -> Self
     where
-        A: Clone,
-        S: DotStore<A>,
+        I: Clone,
+        S: DotStore<I>,
     {
-        let diff = self.clock.difference(other);
+        let diff = self.ctx.difference(other);
         Self {
             store: self.store.unjoin(&diff),
-            clock: diff,
+            ctx: diff,
         }
     }
 }
 
-impl<A: Actor, S: DotStore<A>> Lattice for Causal<A, S> {
+impl<I: ReplicaId, S: DotStore<I>> Lattice for Causal<I, S> {
     fn join(&mut self, other: &Self) {
         self.join(other);
     }

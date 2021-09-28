@@ -1,4 +1,4 @@
-use crate::crdt::{Actor, Crdt, Prop};
+use crate::crdt::{Crdt, Prop, ReplicaId};
 use crate::schema::{PrimitiveKind, Schema};
 use anyhow::{anyhow, Result};
 use rkyv::ser::serializers::AllocSerializer;
@@ -198,7 +198,7 @@ impl<'a> LensRef<'a> {
         Ok(())
     }
 
-    pub fn transform_crdt<A: Actor>(&self, c: &mut Crdt<A>) {
+    pub fn transform_crdt<I: ReplicaId>(&self, c: &mut Crdt<I>) {
         match (self, c) {
             (Self::Make(k), v) => {
                 *v = match k {

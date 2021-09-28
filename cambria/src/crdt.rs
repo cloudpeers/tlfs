@@ -2,7 +2,7 @@ use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use tlfs_crdt::{DotSet, DotStore, EWFlag, Lattice, MVReg, ORMap};
 
-pub use tlfs_crdt::{Actor, Causal, CausalRef, Dot};
+pub use tlfs_crdt::{Causal, CausalRef, Dot, ReplicaId};
 
 pub type Prop = String;
 
@@ -23,21 +23,21 @@ impl Lattice for Primitive {
 
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[repr(C)]
-pub enum Crdt<A: Actor> {
+pub enum Crdt<I: ReplicaId> {
     Null,
-    Flag(EWFlag<A>),
-    Reg(MVReg<A, Primitive>),
-    Table(ORMap<Primitive, Crdt<A>>),
-    Struct(BTreeMap<Prop, Crdt<A>>),
+    Flag(EWFlag<I>),
+    Reg(MVReg<I, Primitive>),
+    Table(ORMap<Primitive, Crdt<I>>),
+    Struct(BTreeMap<Prop, Crdt<I>>),
 }
 
-impl<A: Actor> Default for Crdt<A> {
+impl<I: ReplicaId> Default for Crdt<I> {
     fn default() -> Self {
         Self::Null
     }
 }
 
-impl<A: Actor> DotStore<A> for Crdt<A> {
+impl<I: ReplicaId> DotStore<I> for Crdt<I> {
     fn is_empty(&self) -> bool {
         match self {
             Self::Null => true,
@@ -48,7 +48,7 @@ impl<A: Actor> DotStore<A> for Crdt<A> {
         }
     }
 
-    fn dots(&self, dots: &mut BTreeSet<Dot<A>>) {
+    fn dots(&self, dots: &mut BTreeSet<Dot<I>>) {
         match self {
             Self::Null => {}
             Self::Flag(f) => f.dots(dots),
@@ -62,7 +62,7 @@ impl<A: Actor> DotStore<A> for Crdt<A> {
         }
     }
 
-    fn join(&mut self, clock: &DotSet<A>, other: &Self, other_clock: &DotSet<A>) {
+    fn join(&mut self, clock: &DotSet<I>, other: &Self, other_clock: &DotSet<I>) {
         match (self, other) {
             (Self::Flag(f1), Self::Flag(f2)) => f1.join(clock, f2, other_clock),
             (Self::Reg(r1), Self::Reg(r2)) => r1.join(clock, r2, other_clock),
@@ -80,7 +80,7 @@ impl<A: Actor> DotStore<A> for Crdt<A> {
         }
     }
 
-    fn unjoin(&self, diff: &DotSet<A>) -> Self {
+    fn unjoin(&self, diff: &DotSet<I>) -> Self {
         match self {
             Self::Null => Self::Null,
             Self::Flag(f) => Self::Flag(f.unjoin(diff)),

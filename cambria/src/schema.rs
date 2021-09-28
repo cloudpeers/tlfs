@@ -1,4 +1,4 @@
-use crate::crdt::{Actor, Crdt, Primitive, Prop};
+use crate::crdt::{Crdt, Primitive, Prop, ReplicaId};
 use rkyv::{Archive, Serialize};
 use std::collections::BTreeMap;
 
@@ -37,7 +37,7 @@ pub enum Schema {
 }
 
 impl ArchivedSchema {
-    pub fn validate<A: Actor>(&self, v: &Crdt<A>) -> bool {
+    pub fn validate<I: ReplicaId>(&self, v: &Crdt<I>) -> bool {
         match (self, v) {
             (Self::Null, Crdt::Null) => true,
             (Self::Flag, Crdt::Flag(_)) => true,

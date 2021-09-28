@@ -5,7 +5,7 @@ mod precompile;
 pub mod props;
 mod schema;
 
-pub use crdt::{Actor, ArchivedCrdt, ArchivedPrimitive, Crdt, Primitive, Prop};
+pub use crdt::{ArchivedCrdt, ArchivedPrimitive, Crdt, Primitive, Prop, ReplicaId};
 pub use lens::{ArchivedLens, ArchivedLenses, Lens, LensRef, Lenses};
 pub use precompile::{precompile, write_tokens};
 pub use schema::{ArchivedSchema, PrimitiveKind, Schema};
@@ -14,12 +14,12 @@ pub use {aligned, anyhow, rkyv};
 use anyhow::Result;
 use rkyv::archived_root;
 
-pub trait Cambria<A: Actor> {
+pub trait Cambria<I: ReplicaId> {
     fn lenses() -> &'static [u8];
 
     fn schema() -> &'static ArchivedSchema;
 
-    fn transform(lenses: &[u8], crdt: &mut Crdt<A>) -> Result<()> {
+    fn transform(lenses: &[u8], crdt: &mut Crdt<I>) -> Result<()> {
         let a = unsafe { archived_root::<Lenses>(lenses) };
         let b = unsafe { archived_root::<Lenses>(Self::lenses()) };
         for lens in a.transform(b) {
