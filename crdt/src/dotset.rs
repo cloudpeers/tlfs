@@ -2,7 +2,7 @@
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-/// A replica id is an opaque identifier for a replica
+/// A replica id 𝕀 is an opaque identifier for a replica
 pub trait ReplicaId: Copy + std::fmt::Debug + Ord + rkyv::Archive<Archived = Self> {}
 
 impl<T: Copy + std::fmt::Debug + Ord + rkyv::Archive<Archived = Self>> ReplicaId for T {}
@@ -57,6 +57,10 @@ impl<I: ReplicaId> From<(I, u64)> for Dot<I> {
     }
 }
 
+/// An opaque set of dots.
+///
+/// Supports membership tests as well as the typical set operations union, intersection, difference.
+/// For the purpose of testing, also supports enumerating all elements.
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[repr(C)]
 pub struct DotSet<I: ReplicaId> {

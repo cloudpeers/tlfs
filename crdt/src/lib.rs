@@ -12,6 +12,8 @@ pub use crate::store::{DotFun, DotMap, DotStore};
 
 /// A causal context is a grow only set of dots that describes the causal history of a replica.
 /// Every dot corresponds to an event. We use a DotSet for this.
+///
+/// CausalContext = 𝑃(𝕀 ✕ ℕ)
 pub type CausalContext<I> = DotSet<I>;
 use rkyv::{Archive, Deserialize, Serialize};
 
