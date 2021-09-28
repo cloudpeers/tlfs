@@ -6,7 +6,7 @@ mod dotset;
 pub mod props;
 mod store;
 
-pub use crate::crdts::{EWFlag, MVReg, ORMap};
+pub use crate::crdts::{EWFlag, GSet, MVReg, ORMap};
 pub use crate::dotset::{Dot, DotSet, ReplicaId};
 pub use crate::store::{DotFun, DotMap, DotStore, Key};
 
@@ -15,6 +15,7 @@ pub use crate::store::{DotFun, DotMap, DotStore, Key};
 ///
 /// CausalContext = 𝑃(𝕀 ✕ ℕ)
 pub type CausalContext<I> = DotSet<I>;
+
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Deserialize, Serialize};
 

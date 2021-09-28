@@ -9,7 +9,7 @@ pub trait ReplicaId: Copy + std::fmt::Debug + Ord + rkyv::Archive<Archived = Sel
 impl<T: Copy + std::fmt::Debug + Ord + rkyv::Archive<Archived = Self>> ReplicaId for T {}
 
 /// Dot is a version marker for a single replica.
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Archive, Deserialize, Serialize)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Ord, PartialOrd, Archive, Deserialize, Serialize)]
 #[archive(as = "Dot<I>")]
 #[repr(C)]
 pub struct Dot<I: ReplicaId> {

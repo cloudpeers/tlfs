@@ -136,6 +136,71 @@ impl<I: ReplicaId, L: Lattice> MVReg<I, L> {
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(CheckBytes))]
 #[repr(C)]
+pub struct GSet<I: ReplicaId, L>(DotFun<I, L>);
+
+impl<I: ReplicaId, L> Default for GSet<I, L> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl<I: ReplicaId, L> Deref for GSet<I, L> {
+    type Target = DotFun<I, L>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<I: ReplicaId, L> DerefMut for GSet<I, L> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<I: ReplicaId, L: Lattice> DotStore<I> for GSet<I, L> {
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    fn dots(&self, dots: &mut BTreeSet<Dot<I>>) {
+        self.0.dots(dots)
+    }
+
+    fn join(&mut self, _: &CausalContext<I>, other: &Self, _: &CausalContext<I>) {
+        let clock = CausalContext::default();
+        let clock_other = CausalContext::default();
+        self.0.join(&clock, &other.0, &clock_other);
+    }
+
+    fn unjoin(&self, diff: &CausalContext<I>) -> Self {
+        Self(self.0.unjoin(diff))
+    }
+}
+
+impl<'a, I: ReplicaId, L: Lattice> CausalRef<'a, I, GSet<I, L>> {
+    pub fn add(&self, dot: Dot<I>, value: L) -> Causal<I, GSet<I, L>> {
+        let mut delta = Causal::<_, GSet<_, _>>::new();
+        delta.store = GSet::add(dot, value);
+        delta
+    }
+}
+
+impl<I: ReplicaId, L> GSet<I, L> {
+    pub fn add(dot: Dot<I>, value: L) -> GSet<I, L> {
+        let mut gset = Self::default();
+        gset.insert(dot, value);
+        gset
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = &L> {
+        self.0.values()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[archive_attr(derive(CheckBytes))]
+#[repr(C)]
 pub struct ORMap<K: Key, V>(DotMap<K, V>);
 
 impl<K: Key, V> Default for ORMap<K, V> {
@@ -266,5 +331,15 @@ mod tests {
         map.join(&op2);
         map.join(&op3);
         assert!(!map.store.get("flag").unwrap().value());
+    }
+
+    #[test]
+    fn test_gset() {
+        let mut gset: Causal<_, GSet<_, _>> = Causal::new();
+        let mut op1 = gset.as_ref().add(Dot::new(0, 1), 0);
+        op1.join(&gset.as_ref().add(Dot::new(0, 2), 0));
+        gset.join(&op1);
+        let values = gset.store.values().copied().collect::<Vec<_>>();
+        assert_eq!(values, vec![0, 0]);
     }
 }
