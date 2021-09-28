@@ -96,7 +96,6 @@ impl<I: ReplicaId, S> Causal<I, S> {
 
     pub fn join(&mut self, other: &Self)
     where
-        I: Clone,
         S: DotStore<I>,
     {
         self.store.join(&self.ctx, &other.store, &other.ctx);
@@ -105,7 +104,6 @@ impl<I: ReplicaId, S> Causal<I, S> {
 
     pub fn unjoin(&self, other: &DotSet<I>) -> Self
     where
-        I: Clone,
         S: DotStore<I>,
     {
         let diff = self.ctx.difference(other);
