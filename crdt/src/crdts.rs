@@ -255,14 +255,18 @@ mod tests {
     #[test]
     fn test_or_map() {
         let mut map: Causal<_, ORMap<_, EWFlag<_>>> = Causal::new();
-        let op1 = map
-            .as_ref()
-            .apply("flag".to_string(), |flag| flag.enable(Dot::new(0, 1)), Default::default);
+        let op1 = map.as_ref().apply(
+            "flag".to_string(),
+            |flag| flag.enable(Dot::new(0, 1)),
+            Default::default,
+        );
         map.join(&op1);
         assert!(map.store.get("flag").unwrap().value());
-        let op2 = map
-            .as_ref()
-            .apply("flag".to_string(), |flag| flag.disable(Dot::new(1, 1)), Default::default);
+        let op2 = map.as_ref().apply(
+            "flag".to_string(),
+            |flag| flag.disable(Dot::new(1, 1)),
+            Default::default,
+        );
         let op3 = map.as_ref().remove(Dot::new(0, 2), "flag");
         map.join(&op2);
         map.join(&op3);

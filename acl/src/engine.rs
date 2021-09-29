@@ -36,7 +36,7 @@ pub enum Permission {
 }
 
 impl Permission {
-    fn controllable(self) -> bool {
+    pub fn controllable(self) -> bool {
         matches!(self, Self::Sync | Self::Read | Self::Write)
     }
 }
