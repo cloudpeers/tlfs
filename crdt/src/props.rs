@@ -96,7 +96,7 @@ where
             .apply(k, |_| Causal {
                 store: v.clone(),
                 ctx: Default::default(),
-            })
+            }, Default::default)
             .store
     })
 }
