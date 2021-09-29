@@ -118,7 +118,7 @@ impl<'a, T> Cursor<'a, T> {
                 return Some(Cursor {
                     crdt: self.crdt.map(crdt),
                     label: LabelRef::Field(&self.label, key),
-                    engine: &self.engine,
+                    engine: self.engine,
                     w: (),
                 });
             }
@@ -215,7 +215,7 @@ impl<'a> Cursor<'a, W<'a>> {
                                 f(Cursor {
                                     crdt: self.crdt.map(crdt.store),
                                     label: LabelRef::Key(&self.label, &key),
-                                    engine: &self.engine,
+                                    engine: self.engine,
                                     w: W {
                                         peer_id: self.w.peer_id,
                                         counter: self.w.counter.clone(),
@@ -252,7 +252,7 @@ impl<'a> Cursor<'a, W<'a>> {
                 let cursor = Cursor {
                     crdt: self.crdt.map(crdt),
                     label: LabelRef::Field(&self.label, k),
-                    engine: &self.engine,
+                    engine: self.engine,
                     w: W {
                         peer_id: self.w.peer_id,
                         counter: self.w.counter.clone(),

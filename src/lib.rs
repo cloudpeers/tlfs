@@ -25,6 +25,12 @@ pub struct Sdk {
     docs: BTreeMap<DocId, Doc>,
 }
 
+impl Default for Sdk {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Sdk {
     pub fn new() -> Self {
         let mut state = State::default();
