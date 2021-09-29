@@ -54,8 +54,9 @@ impl Doc {
         self.id
     }
 
-    pub fn cursor(&self) -> Cursor<'_, W> {
-        Cursor::new(self.id, &self.crdt)
+    pub fn cursor<R, F: FnMut(Cursor<'_, ()>) -> R>(&self, mut f: F) -> R {
+        let state = self.state.borrow();
+        f(Cursor::<'_, ()>::new(self.id, &self.crdt, &state.engine))
     }
 
     pub fn hash(&self) -> Hash {
@@ -69,12 +70,20 @@ impl Doc {
             .add_key(Metadata::new().doc(self.id).peer(peer_id), key);
     }
 
-    pub fn transaction<'a, F>(&mut self, mut f: F) -> Result<Vec<u8>>
+    pub fn transaction<F>(&mut self, mut f: F) -> Result<Vec<u8>>
     where
-        F: FnMut(Cursor<'a, W>, Dot<PeerId>) -> Result<Causal>,
+        F: FnMut(Cursor<'_, W>) -> Result<Causal>,
     {
-        let cursor = Cursor::new(self.id, &self.crdt);
-        let delta = f(cursor, Dot::new(self.peer_id, self.counter))?;
+        let state = self.state.borrow();
+        let cursor = Cursor::<'_, W>::new(
+            self.id,
+            &self.crdt,
+            &state.engine,
+            self.peer_id,
+            self.counter,
+            state.registry.schema(&self.hash).unwrap(),
+        );
+        let delta = f(cursor)?;
         let counter = delta.ctx.max(&self.peer_id);
         if counter <= self.counter {
             return Err(anyhow!("invalid transaction"));
@@ -107,7 +116,8 @@ impl Doc {
             .key(&Metadata::new().doc(self.id).peer(*peer_id))
             .unwrap()
             .decrypt::<Signed>(payload)?;
-        let (peer_id, delta) = signed.verify::<Causal>()?;
+        // TODO: check peer_id permission
+        let (_peer_id, delta) = signed.verify::<Causal>()?;
         let mut delta: Causal = delta.deserialize(&mut rkyv::Infallible)?;
         let state = self.state.borrow();
         if !state
