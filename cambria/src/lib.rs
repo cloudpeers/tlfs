@@ -1,8 +1,10 @@
 mod lens;
+mod registry;
 //#[cfg(any(test, feature = "proptest"))]
 //pub mod props;
 
 pub use lens::{ArchivedLens, ArchivedLenses, Kind, Lens, LensRef, Lenses};
+pub use registry::{empty_hash, Hash, Registry};
 
 use tlfs_acl::Crdt;
 
