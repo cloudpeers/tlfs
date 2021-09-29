@@ -44,7 +44,7 @@ impl Doc {
             id,
             hash,
             peer_id,
-            counter: 1,
+            counter: 0,
             crdt,
             state,
         }
@@ -74,16 +74,18 @@ impl Doc {
     where
         F: FnMut(Cursor<'_, W>) -> Result<Causal>,
     {
-        let state = self.state.borrow();
-        let cursor = Cursor::<'_, W>::new(
-            self.id,
-            &self.crdt,
-            &state.engine,
-            self.peer_id,
-            self.counter,
-            state.registry.schema(&self.hash).unwrap(),
-        );
-        let delta = f(cursor)?;
+        let delta = {
+            let state = self.state.borrow();
+            let cursor = Cursor::<'_, W>::new(
+                self.id,
+                &self.crdt,
+                &state.engine,
+                self.peer_id,
+                self.counter,
+                state.registry.schema(&self.hash).unwrap(),
+            );
+            f(cursor)?
+        };
         let counter = delta.ctx.max(&self.peer_id);
         if counter <= self.counter {
             return Err(anyhow!("invalid transaction"));

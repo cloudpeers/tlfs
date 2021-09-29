@@ -109,7 +109,12 @@ impl Secrets {
     }
 
     pub fn key(&self, metadata: &Metadata) -> Option<&Key> {
-        self.secrets.get(metadata)?.key.as_ref()
+        let metadata = self.secrets.get(metadata)?;
+        if metadata.key.is_some() {
+            metadata.key.as_ref()
+        } else {
+            metadata.key_nonce.as_ref().map(|k| k.key())
+        }
     }
 
     pub fn key_nonce(&mut self, metadata: &Metadata) -> Option<&mut KeyNonce> {

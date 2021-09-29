@@ -62,11 +62,11 @@ impl ArchivedSchema {
                 true
             }
             (Self::Struct(schema), Data::Struct(map)) => {
-                for prop in schema.keys() {
+                /*for prop in schema.keys() {
                     if !map.contains_key(prop.as_str()) {
                         return false;
                     }
-                }
+                }*/
                 for (prop, crdt) in map {
                     if let Some(schema) = schema.get(prop.as_str()) {
                         if !schema.validate(crdt) {

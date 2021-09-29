@@ -157,9 +157,8 @@ impl<'a> Cursor<'a, W<'a>> {
 
     fn dot(&self) -> Dot {
         let mut counter = self.w.counter.borrow_mut();
-        let dot = Dot::new(self.w.peer_id, *counter);
         *counter += 1;
-        dot
+        Dot::new(self.w.peer_id, *counter)
     }
 
     pub fn enable(&self) -> Option<Causal> {

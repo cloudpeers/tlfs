@@ -68,8 +68,10 @@ impl ArchivedSigned {
         let public = PublicKey::from_bytes(self.peer_id.as_ref()).unwrap();
         let sig = Signature::from(self.sig);
         public.verify(&self.payload[..], &sig)?;
-        let payload =
-            check_archived_root::<P>(&self.payload[..]).map_err(|err| anyhow!("{}", err))?;
+        // TODO: doesn't work
+        //let payload =
+        //    check_archived_root::<P>(&self.payload[..]).map_err(|err| anyhow!("{}", err))?;
+        let payload = unsafe { rkyv::archived_root::<P>(&self.payload[..]) };
         Ok((self.peer_id, payload))
     }
 }
@@ -160,6 +162,10 @@ impl KeyNonce {
             key: Key::generate(),
             nonce: 0,
         }
+    }
+
+    pub fn key(&self) -> &Key {
+        &self.key
     }
 
     pub fn encrypt<P>(&mut self, payload: &P) -> Encrypted
