@@ -93,10 +93,14 @@ where
     (k, v).prop_map(|(k, v)| {
         let map = Causal::<_, ORMap<_, _>>::new();
         map.as_ref()
-            .apply(k, |_| Causal {
-                store: v.clone(),
-                ctx: Default::default(),
-            }, Default::default)
+            .apply(
+                k,
+                |_| Causal {
+                    store: v.clone(),
+                    ctx: Default::default(),
+                },
+                Default::default,
+            )
             .store
     })
 }

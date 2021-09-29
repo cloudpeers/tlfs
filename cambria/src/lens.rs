@@ -1,11 +1,10 @@
-use crate::crdt::{Crdt, Prop, ReplicaId};
-use crate::schema::{PrimitiveKind, Schema};
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
 use rkyv::ser::serializers::AllocSerializer;
 use rkyv::ser::Serializer;
 use rkyv::string::ArchivedString;
 use rkyv::{Archive, Serialize};
+use tlfs_acl::{Crdt, Data, PrimitiveKind, Prop, Schema};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Archive, Serialize)]
 #[archive_attr(derive(Clone, Copy, Debug, Eq, PartialEq, CheckBytes))]
@@ -221,53 +220,61 @@ impl<'a> LensRef<'a> {
         Ok(())
     }
 
-    pub fn transform_crdt<I: ReplicaId>(&self, c: &mut Crdt<I>) {
-        match (self, c) {
+    pub fn transform_crdt(&self, c: &mut Crdt) {
+        match (self, &mut c.data) {
             (Self::Make(k), v) => {
                 *v = match k {
-                    ArchivedKind::Null => Crdt::Null,
-                    ArchivedKind::Flag => Crdt::Flag(Default::default()),
-                    ArchivedKind::Reg(_) => Crdt::Reg(Default::default()),
-                    ArchivedKind::Table(_) => Crdt::Table(Default::default()),
-                    ArchivedKind::Struct => Crdt::Struct(Default::default()),
+                    ArchivedKind::Null => Data::Null,
+                    ArchivedKind::Flag => Data::Flag(Default::default()),
+                    ArchivedKind::Reg(_) => Data::Reg(Default::default()),
+                    ArchivedKind::Table(_) => Data::Table(Default::default()),
+                    ArchivedKind::Struct => Data::Struct(Default::default()),
                 };
             }
             (Self::Destroy(_), v) => {
-                *v = Crdt::Null;
+                *v = Data::Null;
             }
-            (Self::AddProperty(key), Crdt::Struct(m)) => {
-                m.insert(key.to_string(), Crdt::Null);
+            (Self::AddProperty(key), Data::Struct(m)) => {
+                m.insert(key.to_string(), Crdt::new(Data::Null));
             }
-            (Self::RemoveProperty(key), Crdt::Struct(m)) => {
+            (Self::RemoveProperty(key), Data::Struct(m)) => {
                 m.remove(key.as_str());
             }
-            (Self::RenameProperty(from, to), Crdt::Struct(m)) => {
+            (Self::RenameProperty(from, to), Data::Struct(m)) => {
                 if let Some(v) = m.remove(from.as_str()) {
                     m.insert(to.to_string(), v);
                 }
             }
-            (Self::HoistProperty(host, target), Crdt::Struct(m)) => {
-                if let Some(Crdt::Struct(host)) = m.get_mut(host.as_str()) {
+            (Self::HoistProperty(host, target), Data::Struct(m)) => {
+                if let Some(Crdt {
+                    data: Data::Struct(host),
+                    ..
+                }) = m.get_mut(host.as_str())
+                {
                     if let Some(v) = host.remove(target.as_str()) {
                         m.insert(target.to_string(), v);
                     }
                 }
             }
-            (Self::PlungeProperty(host, target), Crdt::Struct(m)) => {
+            (Self::PlungeProperty(host, target), Data::Struct(m)) => {
                 if let Some(v) = m.remove(target.as_str()) {
-                    if let Some(Crdt::Struct(host)) = m.get_mut(host.as_str()) {
+                    if let Some(Crdt {
+                        data: Data::Struct(host),
+                        ..
+                    }) = m.get_mut(host.as_str())
+                    {
                         host.insert(target.to_string(), v);
                     } else {
                         m.insert(target.to_string(), v);
                     }
                 }
             }
-            (Self::LensIn(rev, key, lens), Crdt::Struct(m)) => {
+            (Self::LensIn(rev, key, lens), Data::Struct(m)) => {
                 if let Some(v) = m.get_mut(key.as_str()) {
                     lens.to_ref().maybe_reverse(*rev).transform_crdt(v);
                 }
             }
-            (Self::LensMapValue(rev, lens), Crdt::Table(vs)) => {
+            (Self::LensMapValue(rev, lens), Data::Table(vs)) => {
                 for v in vs.values_mut() {
                     lens.to_ref().maybe_reverse(*rev).transform_crdt(v);
                 }

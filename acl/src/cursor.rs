@@ -259,15 +259,28 @@ impl<'a> Cursor<'a, W<'a>> {
         })
     }
 
-    pub fn say_can(&self, actor: Actor, perm: Permission) -> Causal {
-        Crdt::say(self.dot(), Policy::Can(actor, perm))
+    pub fn say_can(&self, actor: Actor, perm: Permission) -> Option<Causal> {
+        if !self.can(Actor::Peer(self.w.peer_id), Permission::Control) {
+            return None;
+        }
+        if !perm.controllable() && !self.can(Actor::Peer(self.w.peer_id), Permission::Own) {
+            return None;
+        }
+        Some(Crdt::say(self.dot(), Policy::Can(actor, perm)))
     }
 
-    pub fn say_can_if(&self, actor: Actor, perm: Permission, cond: Can) -> Causal {
-        Crdt::say(self.dot(), Policy::CanIf(actor, perm, cond))
+    pub fn say_can_if(&self, actor: Actor, perm: Permission, cond: Can) -> Option<Causal> {
+        if !self.can(Actor::Peer(self.w.peer_id), Permission::Control) {
+            return None;
+        }
+        if !perm.controllable() && !self.can(Actor::Peer(self.w.peer_id), Permission::Own) {
+            return None;
+        }
+        Some(Crdt::say(self.dot(), Policy::CanIf(actor, perm, cond)))
     }
 
-    pub fn revoke(&self, claim: Dot) -> Causal {
-        Crdt::say(self.dot(), Policy::Revokes(claim))
+    pub fn revoke(&self, claim: Dot) -> Option<Causal> {
+        // TODO: check permission to revoke
+        Some(Crdt::say(self.dot(), Policy::Revokes(claim)))
     }
 }
