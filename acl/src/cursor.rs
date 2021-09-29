@@ -25,6 +25,17 @@ pub struct Cursor<'a, T> {
     w: T,
 }
 
+impl<'a> Cursor<'a, ()> {
+    pub fn new(doc: DocId, crdt: &'a Causal, engine: &'a Engine) -> Self {
+        Self {
+            label: LabelRef::Root(doc),
+            crdt: crdt.as_ref(),
+            engine,
+            w: (),
+        }
+    }
+}
+
 impl<'a, T> Cursor<'a, T> {
     pub fn can(&self, actor: Actor, perm: Permission) -> bool {
         self.engine
@@ -87,7 +98,7 @@ impl<'a, T> Cursor<'a, T> {
         }))
     }
 
-    pub fn get(&'a self, key: &'a Primitive) -> Option<Cursor<'a, ()>> {
+    pub fn key(&'a self, key: &'a Primitive) -> Option<Cursor<'a, ()>> {
         if let Data::Table(t) = &self.crdt.store.data {
             if let Some(crdt) = t.get(key) {
                 return Some(Cursor {
@@ -119,10 +130,10 @@ impl<'a, T> Cursor<'a, T> {
 impl<'a> Cursor<'a, W<'a>> {
     pub fn new(
         doc: DocId,
-        peer_id: PeerId,
-        counter: u64,
         crdt: &'a Causal,
         engine: &'a Engine,
+        peer_id: PeerId,
+        counter: u64,
         schema: &'a ArchivedSchema,
     ) -> Self {
         Self {

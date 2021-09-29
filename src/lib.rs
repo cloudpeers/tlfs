@@ -10,6 +10,9 @@ use std::rc::Rc;
 use tlfs_acl::{DocId, Engine, PeerId};
 use tlfs_cambria::{Hash, Registry};
 
+pub use tlfs_acl::{Actor, Permission, Primitive, PrimitiveKind};
+pub use tlfs_cambria::{Kind, Lens, Lenses};
+
 #[derive(Default)]
 struct State {
     secrets: Secrets,
@@ -99,19 +102,17 @@ mod tests {
         let id = sdk.create_doc()?;
         sdk.doc_mut(id).unwrap().transform(hash)?;
         let doc = sdk.doc(id).unwrap();
-        assert!(doc.authorized(doc.cursor().can(Actor::Peer(peer_id), Permission::Write)));
+        assert!(doc.cursor(|c| c.can(Actor::Peer(peer_id), Permission::Write)));
 
-        let title = Primitive::Str("something that needs to be done".into());
+        let title = "something that needs to be done";
 
-        let mut delta = sdk.doc_mut(id).unwrap().transaction(|cursor, mut dot| {
+        let mut delta = sdk.doc_mut(id).unwrap().transaction(|cursor| {
             Ok(cursor
-                .update("todos", |cursor| {
+                .field_mut("todos", |cursor| {
                     cursor
-                        .apply(&Primitive::U64(0), |cursor| {
+                        .key_mut(0u64, |cursor| {
                             cursor
-                                .update("title", |cursor| {
-                                    cursor.assign(dot.inc(), title.clone()).unwrap()
-                                })
+                                .field_mut("title", |cursor| cursor.assign(title).unwrap())
                                 .unwrap()
                         })
                         .unwrap()
@@ -119,21 +120,19 @@ mod tests {
                 .unwrap())
         })?;
         sdk.doc_mut(id).unwrap().join(&peer_id, &hash, &mut delta)?;
-        let value = sdk
-            .doc(id)
-            .unwrap()
-            .cursor()
-            .dot("todos")
-            .unwrap()
-            .get(&Primitive::U64(0))
-            .unwrap()
-            .dot("title")
-            .unwrap()
-            .values()
-            .unwrap()
-            .next()
-            .unwrap()
-            .clone();
+        let value = sdk.doc(id).unwrap().cursor(|c| {
+            c.field("todos")
+                .unwrap()
+                .key(&0u64.into())
+                .unwrap()
+                .field("title")
+                .unwrap()
+                .strs()
+                .unwrap()
+                .next()
+                .unwrap()
+                .to_string()
+        });
         assert_eq!(value, title);
         Ok(())
     }
