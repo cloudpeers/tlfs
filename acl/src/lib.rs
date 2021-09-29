@@ -10,14 +10,16 @@ mod schema;
 pub use crate::crypto::{
     ArchivedEncrypted, ArchivedSigned, Encrypted, Key, KeyNonce, Keypair, Signed,
 };
-pub use crate::cursor::Cursor;
+pub use crate::cursor::{Cursor, W};
 pub use crate::data::{Crdt, Data, Label, LabelRef, Primitive, Prop};
-pub use crate::engine::{Actor, Can, Engine, Permission};
+pub use crate::engine::{Actor, Can, Engine, Permission, Policy};
 pub use crate::id::{DocId, Id, PeerId};
 pub use crate::schema::{ArchivedSchema, PrimitiveKind, Schema};
+pub use tlfs_crdt::Dot;
 
 pub type Causal = tlfs_crdt::Causal<PeerId, Crdt>;
 pub type CausalRef<'a> = tlfs_crdt::CausalRef<'a, PeerId, Crdt>;
+pub type CausalContext = tlfs_crdt::CausalContext<PeerId>;
 
 /*#[cfg(test)]
 mod tests {
