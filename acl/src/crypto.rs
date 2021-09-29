@@ -22,17 +22,17 @@ impl Keypair {
         Self(secret)
     }
 
-    fn to_keypair(&self) -> ed25519_dalek::Keypair {
+    fn to_keypair(self) -> ed25519_dalek::Keypair {
         let secret = SecretKey::from_bytes(&self.0).unwrap();
         let public = PublicKey::from(&secret);
         ed25519_dalek::Keypair { secret, public }
     }
 
-    pub fn peer_id(&self) -> PeerId {
+    pub fn peer_id(self) -> PeerId {
         PeerId::new(self.to_keypair().public.to_bytes())
     }
 
-    pub fn sign<P>(&self, payload: &P) -> Signed
+    pub fn sign<P>(self, payload: &P) -> Signed
     where
         P: Serialize<AllocSerializer<256>>,
     {
@@ -125,7 +125,7 @@ impl Key {
         ChaCha8Poly1305::new(&self.0.into())
             .decrypt_in_place_detached(&nonce.into(), &[], bytes, &payload.tag.into())
             .map_err(|err| anyhow!("{}", err))?;
-        Ok(check_archived_root::<P>(bytes).map_err(|err| anyhow!("{}", err))?)
+        check_archived_root::<P>(bytes).map_err(|err| anyhow!("{}", err))
     }
 }
 

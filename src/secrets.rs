@@ -116,6 +116,7 @@ impl Secrets {
         self.secrets.get_mut(metadata)?.key_nonce.as_mut()
     }
 
+    #[allow(unused)]
     pub fn peer_id(&self, metadata: &Metadata) -> Option<&PeerId> {
         self.secrets.get(metadata)?.peer_id.as_ref()
     }
