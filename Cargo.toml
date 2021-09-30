@@ -13,6 +13,7 @@ edition = "2018"
 
 [dependencies]
 anyhow = "1.0.44"
+bytecheck = "0.6.5"
 rkyv = "0.7.18"
 tlfs-acl = { version = "0.1.0", path = "acl" }
 tlfs-cambria = { version = "0.1.0", path = "cambria" }
