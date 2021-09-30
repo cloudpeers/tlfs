@@ -79,6 +79,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4c527152e37cf757a3f78aae5a06fbeefdb07ccc535c980a3208ee3060dd544"
 
 [[package]]
+name = "arrayvec"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be4dc07131ffa69b8072d35f5007352af944213cde02545e2103680baed38fcd"
+
+[[package]]
 name = "asn1_der"
 version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -300,6 +306,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "blake3"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dcd555c66291d5f836dbb6883b48660ece810fe25a31f3bdfb911945dff2691f"
+dependencies = [
+ "arrayref",
+ "arrayvec",
+ "cc",
+ "cfg-if 1.0.0",
+ "constant_time_eq",
+ "digest",
+]
+
+[[package]]
 name = "block-buffer"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -393,13 +413,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "chacha20"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "01b72a433d0cf2aef113ba70f62634c56fddb0f244e6377185c56a7cadbd8f91"
+dependencies = [
+ "cfg-if 1.0.0",
+ "cipher",
+ "cpufeatures",
+ "zeroize",
+]
+
+[[package]]
 name = "chacha20poly1305"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6547abe025f4027edacd9edaa357aded014eecec42a5070d9b885c3c334aba2"
 dependencies = [
  "aead",
- "chacha20",
+ "chacha20 0.7.3",
+ "cipher",
+ "poly1305",
+ "zeroize",
+]
+
+[[package]]
+name = "chacha20poly1305"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b84ed6d1d5f7aa9bdde921a5090e0ca4d934d250ea3b402a5fab3a994e28a2a"
+dependencies = [
+ "aead",
+ "chacha20 0.8.1",
  "cipher",
  "poly1305",
  "zeroize",
@@ -468,6 +513,12 @@ dependencies = [
  "log",
  "web-sys",
 ]
+
+[[package]]
+name = "constant_time_eq"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "245097e9a4535ee1e3e3931fcfcd55a796a44c643e8596ff6566d68f09b87bbc"
 
 [[package]]
 name = "cpp_build"
@@ -1017,9 +1068,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.103"
+version = "0.2.102"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd8f7255a17a627354f321ef0055d63b898c6fb27eff628af4d1b66b7331edf6"
+checksum = "a2a5ac8f984bfcf3a823267e5fde638acc3325f6496633a5da6bb6eb2171e103"
 
 [[package]]
 name = "libloading"
@@ -2325,7 +2376,7 @@ checksum = "6142f7c25e94f6fd25a32c3348ec230df9109b463f59c8c7acc4bd34936babb7"
 dependencies = [
  "aes-gcm",
  "blake2",
- "chacha20poly1305",
+ "chacha20poly1305 0.8.2",
  "rand 0.8.4",
  "rand_core 0.6.3",
  "ring",
@@ -2474,14 +2525,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
+name = "tlfs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytecheck",
+ "rkyv",
+ "tlfs-acl",
+ "tlfs-cambria",
+]
+
+[[package]]
 name = "tlfs-acl"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.13.0",
  "bytecheck",
+ "chacha20poly1305 0.9.0",
  "crepe",
+ "ed25519-dalek",
+ "getrandom 0.2.3",
+ "proptest",
  "rkyv",
+ "tlfs-crdt",
 ]
 
 [[package]]
@@ -2489,10 +2556,11 @@ name = "tlfs-cambria"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "blake3",
  "bytecheck",
  "proptest",
  "rkyv",
- "tlfs-crdt",
+ "tlfs-acl",
 ]
 
 [[package]]

@@ -1,4 +1,5 @@
 //! This module contains an efficient set of dots for use as both a dot store and a causal context
+use bytecheck::CheckBytes;
 use itertools::Itertools;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -9,7 +10,9 @@ pub trait ReplicaId: Copy + std::fmt::Debug + Ord + rkyv::Archive<Archived = Sel
 impl<T: Copy + std::fmt::Debug + Ord + rkyv::Archive<Archived = Self>> ReplicaId for T {}
 
 /// Dot is a version marker for a single replica.
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Archive, Deserialize, Serialize)]
+#[derive(
+    Clone, Copy, Eq, PartialEq, Hash, Ord, PartialOrd, Archive, CheckBytes, Deserialize, Serialize,
+)]
 #[archive(as = "Dot<I>")]
 #[repr(C)]
 pub struct Dot<I: ReplicaId> {
@@ -27,9 +30,10 @@ impl<I: ReplicaId> Dot<I> {
     }
 
     /// Generate the successor of this dot
-    pub fn inc(mut self) -> Self {
+    pub fn inc(&mut self) -> Self {
+        let res = *self;
         self.counter += 1;
-        self
+        res
     }
 
     pub fn counter(&self) -> u64 {
@@ -63,6 +67,7 @@ impl<I: ReplicaId> From<(I, u64)> for Dot<I> {
 /// Supports membership tests as well as the typical set operations union, intersection, difference.
 /// For the purpose of testing, also supports enumerating all elements.
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[archive_attr(derive(CheckBytes))]
 #[repr(C)]
 pub struct DotSet<I: ReplicaId> {
     pub(crate) set: BTreeSet<Dot<I>>,

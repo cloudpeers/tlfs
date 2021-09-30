@@ -5,11 +5,12 @@ edition = "2018"
 
 [dependencies]
 anyhow = "1.0.43"
+blake3 = "1.0.0"
 bytecheck = "0.6.5"
 proptest = { version = "1.0.0", optional = true }
 rkyv = { version = "0.7.14", features = ["validation"] }
-tlfs-crdt = { version = "0.1.0", path = "../crdt" }
+tlfs-acl = { version = "0.1.0", path = "../acl" }
 
 [dev-dependencies]
 proptest = "1.0.0"
-tlfs-crdt = { version = "0.1.0", path = "../crdt", features = ["proptest"] }
+tlfs-acl = { version = "0.1.0", path = "../acl", features = ["proptest"] }
