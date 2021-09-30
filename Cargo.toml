@@ -2,5 +2,9 @@
 members = [
     "acl",
     "cambria",
+    "cloud-relay",
     "crdt",
 ]
+
+[patch.crates-io]
+libp2p = { git = "https://github.com/wngr/rust-libp2p", branch = "ow/wasm" }
