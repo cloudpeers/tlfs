@@ -24,7 +24,7 @@ use libp2p::{
     tcp::TokioTcpConfig,
     websocket::{self, WsConfig},
     yamux::YamuxConfig,
-    Multiaddr, NetworkBehaviour, Swarm, Transport,
+    Multiaddr, NetworkBehaviour, PeerId, Swarm, Transport,
 };
 use tracing::*;
 use tracing_subscriber::fmt;
@@ -71,6 +71,7 @@ async fn main() -> anyhow::Result<()> {
         p
     };
     let kp = identity::Keypair::Ed25519(private_key.into());
+    info!("Peer ID: {}", PeerId::from(kp.public()));
 
     let tls = if opts.wss {
         if let (Some(email), Some(domain)) = (opts.tls_email, opts.tls_domain) {
