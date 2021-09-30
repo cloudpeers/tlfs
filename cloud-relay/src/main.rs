@@ -75,7 +75,7 @@ async fn main() -> anyhow::Result<()> {
     let tls = if opts.wss {
         if let (Some(email), Some(domain)) = (opts.tls_email, opts.tls_domain) {
             if !opts.tls_cert.is_file() {
-                info!("Certificate doesn't exist, requesting one");
+                info!("Certificate doesn't exist, requesting one via HTTP challenge.");
                 acme::get_cert(domain, email, &opts.tls_cert, &opts.tls_private_key).await?;
             }
 
@@ -83,7 +83,9 @@ async fn main() -> anyhow::Result<()> {
                 fs::File::open(&opts.tls_private_key)?,
             ))
             .map_err(|_| anyhow::anyhow!("Reading TLS private key"))?
-            .remove(0);
+            .into_iter()
+            .next()
+            .context("Extracting private key")?;
             let private_key = websocket::tls::PrivateKey::new(der.0);
 
             let certs = rustls::internal::pemfile::certs(&mut BufReader::new(fs::File::open(
@@ -111,8 +113,10 @@ async fn main() -> anyhow::Result<()> {
     };
     for base in &["/ip4/0.0.0.0", "/ip6/::0"] {
         let m: Multiaddr = base.parse().unwrap();
-        let on = m.with(Protocol::Tcp(4001)).with(ws_or_wss.clone());
-        swarm.listen_on(on)?;
+        let tcp = m.clone().with(Protocol::Tcp(4001));
+        let ws = m.with(Protocol::Tcp(4002)).with(ws_or_wss.clone());
+        swarm.listen_on(tcp)?;
+        swarm.listen_on(ws)?;
     }
     while let Some(event) = swarm.next().await {
         debug!("Swarm {:?}", event);
