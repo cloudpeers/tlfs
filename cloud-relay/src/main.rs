@@ -14,7 +14,7 @@ use libp2p::{
     },
     dns::TokioDnsConfig,
     futures::StreamExt,
-    identity,
+    identify, identity,
     multiaddr::Protocol,
     noise,
     pnet::{PnetConfig, PreSharedKey},
@@ -126,17 +126,23 @@ async fn main() -> anyhow::Result<()> {
 }
 #[derive(Debug)]
 enum Event {
-    RelayEvent,
+    Relay,
     Rendezvous(rendezvous::server::Event),
+    Identify(identify::IdentifyEvent),
 }
 impl From<()> for Event {
     fn from(_: ()) -> Self {
-        Self::RelayEvent
+        Self::Relay
     }
 }
 impl From<rendezvous::server::Event> for Event {
     fn from(event: rendezvous::server::Event) -> Self {
         Event::Rendezvous(event)
+    }
+}
+impl From<identify::IdentifyEvent> for Event {
+    fn from(e: identify::IdentifyEvent) -> Self {
+        Event::Identify(e)
     }
 }
 #[derive(NetworkBehaviour)]
@@ -145,6 +151,7 @@ impl From<rendezvous::server::Event> for Event {
 struct Behaviour {
     relay: Relay,
     rendezvous: rendezvous::server::Behaviour,
+    identify: identify::Identify,
 }
 
 async fn build_swarm(
@@ -198,6 +205,10 @@ async fn build_swarm(
         transport,
         Behaviour {
             relay: relay_behaviour,
+            identify: identify::Identify::new(identify::IdentifyConfig::new(
+                "tlfs-rendezvous".into(),
+                key_pair.public(),
+            )),
             rendezvous: rendezvous::server::Behaviour::new(rendezvous::server::Config::default()),
         },
         key_pair.public().into(),
