@@ -266,5 +266,8 @@ mod tests {
         map.join(&op2);
         map.join(&op3);
         assert!(!map.store.get("flag").unwrap().value());
+        let op4 = map.as_ref().remove(Dot::new(0, 3), "flag");
+        map.join(&op4);
+        assert!(map.store.get("flag").is_none());
     }
 }
