@@ -5,3 +5,9 @@ members = [
     "crdt",
     "wasm-ffi"
 ]
+
+[profile.release]
+lto = true
+
+[patch.crates-io]
+libp2p = { git = "https://github.com/wngr/rust-libp2p", branch = "ow/wasm" }
