@@ -17,13 +17,26 @@ js-sys = "0.3.55"
 parking_lot = { version = "0.11.2", features = ["wasm-bindgen"] }
 wee_alloc = "0.4.5"
 web-sys = "0.3.55"
-libp2p = { version = "0.40.0", features = ["ping", "gossipsub", "noise", "mplex", "request-response", "yamux", "wasm-bindgen"], default_features = false }
+libp2p = { version = "0.40.0", features = [
+  "ping",
+  "gossipsub",
+  "noise",
+  "mplex",
+  "identify",
+  "rendezvous",
+  "request-response",
+  "yamux",
+  "wasm-bindgen",
+  "wasm-ext-websocket"
+], default_features = false }
 libp2p-webrtc = { git = "https://github.com/wngr/libp2p-webrtc" }
+anyhow = "1.0.44"
+futures-timer = { version = "3.0.2", features = ["wasm-bindgen"] }
+serde = { version = "1.0.130", features = ["derive"] }
+void = "1.0.2"
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3.28"
 
 [dependencies]
-anyhow = "1.0.44"
-serde = { version = "1.0.130", features = ["derive"] }
-
+instant = { version = "0.1.11", features = ["wasm-bindgen"] }

@@ -227,6 +227,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "904dfeac50f3cdaba28fc6f57fdcddb75f49ed61346676a78c4ffe55877802fd"
 
 [[package]]
+name = "bimap"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "50ae17cabbc8a38a1e3e4c1a6a664e9a09672dc14d0896fa8d865d3a5a446b07"
+
+[[package]]
 name = "bindgen"
 version = "0.59.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -965,8 +971,7 @@ dependencies = [
 [[package]]
 name = "instant"
 version = "0.1.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "716d3d89f35ac6a34fd0eed635395f4c3b76fa889338a4632e5231a8684216bd"
+source = "git+https://github.com/wngr/instant?branch=systemtime#c59ec9068d7484a07967980e2a4c3aa2fece9674"
 dependencies = [
  "cfg-if 1.0.0",
  "js-sys",
@@ -1012,9 +1017,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.102"
+version = "0.2.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2a5ac8f984bfcf3a823267e5fde638acc3325f6496633a5da6bb6eb2171e103"
+checksum = "dd8f7255a17a627354f321ef0055d63b898c6fb27eff628af4d1b66b7331edf6"
 
 [[package]]
 name = "libloading"
@@ -1029,7 +1034,7 @@ dependencies = [
 [[package]]
 name = "libp2p"
 version = "0.40.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#3c0bd001f121cbd7289ea137c22519b4c63334cc"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
 dependencies = [
  "atomic",
  "bytes",
@@ -1040,13 +1045,16 @@ dependencies = [
  "lazy_static",
  "libp2p-core",
  "libp2p-gossipsub",
+ "libp2p-identify",
  "libp2p-metrics",
  "libp2p-mplex",
  "libp2p-noise",
  "libp2p-ping",
+ "libp2p-rendezvous",
  "libp2p-request-response",
  "libp2p-swarm",
  "libp2p-swarm-derive",
+ "libp2p-wasm-ext",
  "libp2p-yamux",
  "multiaddr",
  "parking_lot",
@@ -1058,7 +1066,7 @@ dependencies = [
 [[package]]
 name = "libp2p-core"
 version = "0.30.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#3c0bd001f121cbd7289ea137c22519b4c63334cc"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
 dependencies = [
  "asn1_der",
  "bs58",
@@ -1092,7 +1100,7 @@ dependencies = [
 [[package]]
 name = "libp2p-gossipsub"
 version = "0.33.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#3c0bd001f121cbd7289ea137c22519b4c63334cc"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
 dependencies = [
  "asynchronous-codec",
  "base64 0.13.0",
@@ -1116,11 +1124,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "libp2p-identify"
+version = "0.31.0"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+dependencies = [
+ "futures",
+ "futures-timer",
+ "libp2p-core",
+ "libp2p-swarm",
+ "log",
+ "prost",
+ "prost-build",
+ "smallvec",
+]
+
+[[package]]
 name = "libp2p-metrics"
 version = "0.1.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#3c0bd001f121cbd7289ea137c22519b4c63334cc"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
 dependencies = [
  "libp2p-core",
+ "libp2p-identify",
  "libp2p-ping",
  "libp2p-swarm",
  "open-metrics-client",
@@ -1129,7 +1153,7 @@ dependencies = [
 [[package]]
 name = "libp2p-mplex"
 version = "0.30.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#3c0bd001f121cbd7289ea137c22519b4c63334cc"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
 dependencies = [
  "asynchronous-codec",
  "bytes",
@@ -1146,7 +1170,7 @@ dependencies = [
 [[package]]
 name = "libp2p-noise"
 version = "0.33.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#3c0bd001f121cbd7289ea137c22519b4c63334cc"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
 dependencies = [
  "bytes",
  "curve25519-dalek",
@@ -1167,7 +1191,7 @@ dependencies = [
 [[package]]
 name = "libp2p-ping"
 version = "0.31.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#3c0bd001f121cbd7289ea137c22519b4c63334cc"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
 dependencies = [
  "futures",
  "futures-timer",
@@ -1179,9 +1203,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "libp2p-rendezvous"
+version = "0.1.0"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+dependencies = [
+ "asynchronous-codec",
+ "bimap",
+ "futures",
+ "futures-timer",
+ "libp2p-core",
+ "libp2p-swarm",
+ "log",
+ "prost",
+ "prost-build",
+ "rand 0.8.4",
+ "sha2",
+ "thiserror",
+ "unsigned-varint",
+ "void",
+]
+
+[[package]]
 name = "libp2p-request-response"
 version = "0.13.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#3c0bd001f121cbd7289ea137c22519b4c63334cc"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1198,7 +1243,7 @@ dependencies = [
 [[package]]
 name = "libp2p-swarm"
 version = "0.31.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#3c0bd001f121cbd7289ea137c22519b4c63334cc"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
 dependencies = [
  "either",
  "futures",
@@ -1213,16 +1258,29 @@ dependencies = [
 [[package]]
 name = "libp2p-swarm-derive"
 version = "0.25.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#3c0bd001f121cbd7289ea137c22519b4c63334cc"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
 dependencies = [
  "quote",
  "syn",
 ]
 
 [[package]]
+name = "libp2p-wasm-ext"
+version = "0.30.0"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+dependencies = [
+ "futures",
+ "js-sys",
+ "libp2p-core",
+ "parity-send-wrapper",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
 name = "libp2p-webrtc"
 version = "0.1.2"
-source = "git+https://github.com/wngr/libp2p-webrtc#7fb6a16f6475cede4979a583355ce1250ef80585"
+source = "git+https://github.com/wngr/libp2p-webrtc#a1e573d6c3b3b1af63e8bf3bfa0d250f2d2adbaf"
 dependencies = [
  "anyhow",
  "async-datachannel",
@@ -1246,7 +1304,7 @@ dependencies = [
 [[package]]
 name = "libp2p-yamux"
 version = "0.34.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#3c0bd001f121cbd7289ea137c22519b4c63334cc"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
 dependencies = [
  "futures",
  "libp2p-core",
@@ -1424,7 +1482,7 @@ checksum = "e5ce46fe64a9d73be07dcbe690a38ce1b293be448fd8ce1e6c1b8062c9f72c6a"
 [[package]]
 name = "multistream-select"
 version = "0.11.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#3c0bd001f121cbd7289ea137c22519b4c63334cc"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
 dependencies = [
  "bytes",
  "futures",
@@ -1561,6 +1619,12 @@ checksum = "6ff55baddef9e4ad00f88b6c743a2a8062d4c6ade126c2a528644b8e444d52ce"
 dependencies = [
  "stable_deref_trait",
 ]
+
+[[package]]
+name = "parity-send-wrapper"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aa9777aa91b8ad9dd5aaa04a9b6bcb02c7f1deb952fca5a66034d5e63afc5c6f"
 
 [[package]]
 name = "parking_lot"
@@ -2249,9 +2313,9 @@ checksum = "c307a32c1c5c437f38c7fd45d753050587732ba8628319fbdf12a7e289ccc590"
 
 [[package]]
 name = "smallvec"
-version = "1.6.1"
+version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe0f37c9e8f3c5a4a66ad655a93c74daac4ad00c441533bf5c6e7990bb42604e"
+checksum = "1ecab6c735a6bb4139c0caafd0cc3635748bbb3acf4550e8138122099251f309"
 
 [[package]]
 name = "snow"
@@ -2761,12 +2825,15 @@ dependencies = [
  "anyhow",
  "console_error_panic_hook",
  "console_log",
+ "futures-timer",
+ "instant",
  "js-sys",
  "libp2p",
  "libp2p-webrtc",
  "log",
  "parking_lot",
  "serde",
+ "void",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-bindgen-test",

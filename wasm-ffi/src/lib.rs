@@ -1,7 +1,7 @@
 use std::future::Future;
 
 use js_sys::Promise;
-use libp2p::{futures::channel::mpsc, identity, Multiaddr};
+use libp2p::{identity, Multiaddr};
 use log::*;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -45,7 +45,9 @@ impl LocalFirst {
         let signaling_server: Multiaddr = "/dns4/local1st.net/tcp/443/wss/p2p-webrtc-star"
             .parse()
             .unwrap();
-        Self::spawn(kp, signaling_server).map_err(map_err)
+        let cloud_relay=
+            vec!["/dns4/local1st.net/tcp/4002/wss/p2p/12D3KooWCL3666CJUm6euzw34jMure6rgkQmW21qK4m4DEd9iWGy".parse().unwrap()];
+        Self::spawn(kp, signaling_server, cloud_relay, "demo".into()).map_err(map_err)
     }
 
     #[wasm_bindgen(js_name = "doSomething")]
@@ -72,8 +74,13 @@ impl LocalFirst {
         to_promise(async move { inner.info().await })
     }
 
-    fn spawn(identity: identity::Keypair, signaling_server: Multiaddr) -> anyhow::Result<Self> {
-        let inner = SwarmWrapper::new(identity, signaling_server);
+    fn spawn(
+        identity: identity::Keypair,
+        signaling_server: Multiaddr,
+        bootstrap: Vec<Multiaddr>,
+        discovery_namespace: String,
+    ) -> anyhow::Result<Self> {
+        let inner = SwarmWrapper::new(identity, signaling_server, bootstrap, discovery_namespace);
         Ok(Self { inner })
     }
 }
