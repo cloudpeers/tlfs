@@ -37,11 +37,13 @@ impl<'a> Cursor<'a, ()> {
 }
 
 impl<'a, T> Cursor<'a, T> {
+    /// Checks permissions.
     pub fn can(&self, actor: Actor, perm: Permission) -> bool {
         self.engine
             .can(CanRef::new(actor, perm, LabelCow::LabelRef(self.label)))
     }
 
+    /// Returns if a flag is enabled.
     pub fn enabled(&self) -> Option<bool> {
         if let Data::Flag(f) = &self.crdt.store.data {
             Some(f.value())
@@ -58,6 +60,7 @@ impl<'a, T> Cursor<'a, T> {
         }
     }
 
+    /// Returns an iterator of bools.
     pub fn bools(&'a self) -> Option<impl Iterator<Item = bool> + 'a> {
         Some(self.values()?.filter_map(|p| {
             if let Primitive::Bool(v) = p {
@@ -68,6 +71,7 @@ impl<'a, T> Cursor<'a, T> {
         }))
     }
 
+    /// Returns an iterator of u64s.
     pub fn u64s(&'a self) -> Option<impl Iterator<Item = u64> + 'a> {
         Some(self.values()?.filter_map(|p| {
             if let Primitive::U64(v) = p {
@@ -78,6 +82,7 @@ impl<'a, T> Cursor<'a, T> {
         }))
     }
 
+    /// Returns an iterator of i64s.
     pub fn i64s(&'a self) -> Option<impl Iterator<Item = i64> + 'a> {
         Some(self.values()?.filter_map(|p| {
             if let Primitive::I64(v) = p {
@@ -88,6 +93,7 @@ impl<'a, T> Cursor<'a, T> {
         }))
     }
 
+    /// Returns an iterator of strs.
     pub fn strs(&'a self) -> Option<impl Iterator<Item = &'a str> + 'a> {
         Some(self.values()?.filter_map(|p| {
             if let Primitive::Str(v) = p {
@@ -98,6 +104,7 @@ impl<'a, T> Cursor<'a, T> {
         }))
     }
 
+    /// Returns a cursor to a value in a table.
     pub fn key(&'a self, key: &'a Primitive) -> Option<Cursor<'a, ()>> {
         if let Data::Table(t) = &self.crdt.store.data {
             if let Some(crdt) = t.get(key) {
@@ -112,6 +119,7 @@ impl<'a, T> Cursor<'a, T> {
         None
     }
 
+    /// Returns a cursor to a field in a struct.
     pub fn field(&'a self, key: &'a str) -> Option<Cursor<'a, ()>> {
         if let Data::Struct(fields) = &self.crdt.store.data {
             if let Some(crdt) = fields.get(key) {
@@ -161,6 +169,7 @@ impl<'a> Cursor<'a, W<'a>> {
         Dot::new(self.w.peer_id, *counter)
     }
 
+    /// Enables a flag.
     pub fn enable(&self) -> Option<Causal> {
         self.mutate(|data| {
             if let Data::Flag(f) = &data.store {
@@ -171,6 +180,7 @@ impl<'a> Cursor<'a, W<'a>> {
         })
     }
 
+    /// Disables a flag.
     pub fn disable(&self) -> Option<Causal> {
         self.mutate(|data| {
             if let Data::Flag(f) = &data.store {
@@ -180,6 +190,8 @@ impl<'a> Cursor<'a, W<'a>> {
             }
         })
     }
+
+    /// Assigns a value to a register.
     pub fn assign(&self, value: impl Into<Primitive>) -> Option<Causal> {
         let value = value.into();
         match self.w.schema {
@@ -195,6 +207,7 @@ impl<'a> Cursor<'a, W<'a>> {
         })
     }
 
+    /// Mutates the value for key in the table.
     pub fn key_mut<F>(&self, key: impl Into<Primitive>, mut f: F) -> Option<Causal>
     where
         F: FnMut(Cursor<'_, W>) -> Causal,
@@ -232,6 +245,7 @@ impl<'a> Cursor<'a, W<'a>> {
         })
     }
 
+    /// Mutates the field of a struct.
     pub fn field_mut<F>(&self, k: &'a str, mut f: F) -> Option<Causal>
     where
         F: FnMut(Cursor<'_, W>) -> Causal,
@@ -269,6 +283,7 @@ impl<'a> Cursor<'a, W<'a>> {
         })
     }
 
+    /// Gives permission to a peer.
     pub fn say_can(&self, actor: Actor, perm: Permission) -> Option<Causal> {
         if !self.can(Actor::Peer(self.w.peer_id), Permission::Control) {
             return None;
@@ -279,6 +294,7 @@ impl<'a> Cursor<'a, W<'a>> {
         Some(Crdt::say(self.dot(), Policy::Can(actor, perm)))
     }
 
+    /// Gives conditional permission to a peer.
     pub fn say_can_if(&self, actor: Actor, perm: Permission, cond: Can) -> Option<Causal> {
         if !self.can(Actor::Peer(self.w.peer_id), Permission::Control) {
             return None;
@@ -289,6 +305,7 @@ impl<'a> Cursor<'a, W<'a>> {
         Some(Crdt::say(self.dot(), Policy::CanIf(actor, perm, cond)))
     }
 
+    /// Revokes a policy.
     pub fn revoke(&self, claim: Dot) -> Option<Causal> {
         // TODO: check permission to revoke
         Some(Crdt::say(self.dot(), Policy::Revokes(claim)))
