@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use tlfs_acl::{DocId, Key, KeyNonce, Keypair, PeerId};
 
+/// Information attached to a secret for queries.
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 pub struct Metadata {
     label: Option<String>,
@@ -9,20 +10,24 @@ pub struct Metadata {
 }
 
 impl Metadata {
+    /// Creates a top level query. This will return the defaults.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Queries a secret based on a label.
     pub fn label(mut self, label: &str) -> Self {
         self.label = Some(label.into());
         self
     }
 
+    /// Queries a secret based on a doc.
     pub fn doc(mut self, doc: DocId) -> Self {
         self.doc = Some(doc);
         self
     }
 
+    /// Queries a secret based on a peer.
     pub fn peer(mut self, peer: PeerId) -> Self {
         self.peer = Some(peer);
         self

@@ -32,6 +32,7 @@ impl Default for Sdk {
 }
 
 impl Sdk {
+    /// Creates a new in memory sdk. A new keypair will be generated.
     pub fn new() -> Self {
         let mut state = State::default();
         state.secrets.generate_keypair(Metadata::new());
@@ -41,6 +42,7 @@ impl Sdk {
         }
     }
 
+    /// Returns the `PeerId` of this instance.
     pub fn peer_id(&self) -> PeerId {
         self.state
             .borrow()
@@ -50,14 +52,19 @@ impl Sdk {
             .peer_id()
     }
 
+    /// Adds a bootstrapped peer. This is a peer that was authenticated via
+    /// physical proximity like NFC or a preshared secret.
     pub fn boostrap(&mut self, metadata: Metadata, peer_id: PeerId) {
         self.state.borrow_mut().secrets.add_peer(metadata, peer_id)
     }
 
+    /// Registers a new schema and returns the hash.
     pub fn register_lenses(&mut self, lenses: Vec<u8>) -> Result<Hash> {
         self.state.borrow_mut().registry.register(lenses)
     }
 
+    /// Creates a new document, authorizing the current instance as the
+    /// owner of the document.
     pub fn create_doc(&mut self) -> Result<DocId> {
         let doc = Doc::new(self.state.clone());
         let id = doc.id();
@@ -65,10 +72,12 @@ impl Sdk {
         Ok(id)
     }
 
+    /// Returns reference to a document.
     pub fn doc(&self, id: DocId) -> Option<&Doc> {
         self.docs.get(&id)
     }
 
+    /// Returns a mutable reference to a document.
     pub fn doc_mut(&mut self, id: DocId) -> Option<&mut Doc> {
         self.docs.get_mut(&id)
     }
@@ -125,7 +134,7 @@ mod tests {
                 })
                 .unwrap())
         })?;
-        sdk.doc_mut(id).unwrap().join(&peer_id, &hash, &mut delta)?;
+        sdk.doc_mut(id).unwrap().join(&peer_id, &mut delta)?;
         let value = sdk.doc(id).unwrap().cursor(|c| {
             c.field("todos")
                 .unwrap()
