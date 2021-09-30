@@ -180,14 +180,15 @@ where
 }
 
 impl<'a, I: ReplicaId, K: Key, V: DotStore<I>> CausalRef<'a, I, ORMap<K, V>> {
-    pub fn apply<F>(self, k: K, mut f: F) -> Causal<I, ORMap<K, V>>
+    pub fn apply<F, D>(self, k: K, mut f: F, mut default: D) -> Causal<I, ORMap<K, V>>
     where
         F: FnMut(CausalRef<'_, I, V>) -> Causal<I, V>,
+        D: FnMut() -> V,
     {
         let inner_delta = if let Some(v) = self.store.get(&k) {
             f(self.map(v))
         } else {
-            let v = V::default();
+            let v = default();
             let vref = self.map(&v);
             f(vref)
         };
@@ -254,17 +255,24 @@ mod tests {
     #[test]
     fn test_or_map() {
         let mut map: Causal<_, ORMap<_, EWFlag<_>>> = Causal::new();
-        let op1 = map
-            .as_ref()
-            .apply("flag".to_string(), |flag| flag.enable(Dot::new(0, 1)));
+        let op1 = map.as_ref().apply(
+            "flag".to_string(),
+            |flag| flag.enable(Dot::new(0, 1)),
+            Default::default,
+        );
         map.join(&op1);
         assert!(map.store.get("flag").unwrap().value());
-        let op2 = map
-            .as_ref()
-            .apply("flag".to_string(), |flag| flag.disable(Dot::new(1, 1)));
+        let op2 = map.as_ref().apply(
+            "flag".to_string(),
+            |flag| flag.disable(Dot::new(1, 1)),
+            Default::default,
+        );
         let op3 = map.as_ref().remove(Dot::new(0, 2), "flag");
         map.join(&op2);
         map.join(&op3);
         assert!(!map.store.get("flag").unwrap().value());
+        let op4 = map.as_ref().remove(Dot::new(0, 3), "flag");
+        map.join(&op4);
+        assert!(map.store.get("flag").is_none());
     }
 }

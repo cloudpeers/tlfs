@@ -1,7 +1,6 @@
 use crate::{Causal, Dot, DotFun, DotMap, DotSet, DotStore, EWFlag, Key, Lattice, MVReg, ORMap};
 use proptest::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
-use std::iter::FromIterator;
 use std::ops::Range;
 
 pub fn arb_dot_in(counter: Range<u64>) -> impl Strategy<Value = Dot<u8>> {
@@ -14,7 +13,7 @@ pub fn arb_dot() -> impl Strategy<Value = Dot<u8>> {
 
 pub fn arb_ctx() -> impl Strategy<Value = DotSet<u8>> {
     prop::collection::btree_set(arb_dot_in(1u64..5), 0..50)
-        .prop_map(|dots| DotSet::from_iter(dots.into_iter()))
+        .prop_map(|dots| dots.into_iter().collect())
 }
 
 pub fn to_causal<S: DotStore<u8>>(store: S) -> Causal<u8, S> {
@@ -93,10 +92,14 @@ where
     (k, v).prop_map(|(k, v)| {
         let map = Causal::<_, ORMap<_, _>>::new();
         map.as_ref()
-            .apply(k, |_| Causal {
-                store: v.clone(),
-                ctx: Default::default(),
-            })
+            .apply(
+                k,
+                |_| Causal {
+                    store: v.clone(),
+                    ctx: Default::default(),
+                },
+                Default::default,
+            )
             .store
     })
 }

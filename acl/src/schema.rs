@@ -1,4 +1,4 @@
-use crate::crdt::{Crdt, Primitive, Prop, ReplicaId};
+use crate::data::{Crdt, Data, Primitive, Prop};
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Serialize};
 use std::collections::BTreeMap;
@@ -38,11 +38,11 @@ pub enum Schema {
 }
 
 impl ArchivedSchema {
-    pub fn validate<I: ReplicaId>(&self, v: &Crdt<I>) -> bool {
-        match (self, v) {
-            (Self::Null, Crdt::Null) => true,
-            (Self::Flag, Crdt::Flag(_)) => true,
-            (Self::Reg(kind), Crdt::Reg(reg)) => {
+    pub fn validate(&self, v: &Crdt) -> bool {
+        match (self, &v.data) {
+            (Self::Null, Data::Null) => true,
+            (Self::Flag, Data::Flag(_)) => true,
+            (Self::Reg(kind), Data::Reg(reg)) => {
                 for v in reg.values() {
                     if !kind.validate(v) {
                         return false;
@@ -50,7 +50,7 @@ impl ArchivedSchema {
                 }
                 true
             }
-            (Self::Table(kind, schema), Crdt::Table(map)) => {
+            (Self::Table(kind, schema), Data::Table(map)) => {
                 for (key, crdt) in map.iter() {
                     if !kind.validate(key) {
                         return false;
@@ -61,12 +61,12 @@ impl ArchivedSchema {
                 }
                 true
             }
-            (Self::Struct(schema), Crdt::Struct(map)) => {
-                for prop in schema.keys() {
+            (Self::Struct(schema), Data::Struct(map)) => {
+                /*for prop in schema.keys() {
                     if !map.contains_key(prop.as_str()) {
                         return false;
                     }
-                }
+                }*/
                 for (prop, crdt) in map {
                     if let Some(schema) = schema.get(prop.as_str()) {
                         if !schema.validate(crdt) {
@@ -80,5 +80,15 @@ impl ArchivedSchema {
             }
             _ => false,
         }
+    }
+
+    pub fn default(&self) -> Crdt {
+        Crdt::new(match self {
+            Self::Null => Data::Null,
+            Self::Flag => Data::Flag(Default::default()),
+            Self::Reg(_) => Data::Reg(Default::default()),
+            Self::Table(_, _) => Data::Table(Default::default()),
+            Self::Struct(_) => Data::Struct(Default::default()),
+        })
     }
 }
