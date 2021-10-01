@@ -38,9 +38,12 @@ impl<'a> Cursor<'a, ()> {
 
 impl<'a, T> Cursor<'a, T> {
     /// Checks permissions.
-    pub fn can(&self, actor: Actor, perm: Permission) -> bool {
-        self.engine
-            .can(CanRef::new(actor, perm, LabelCow::LabelRef(self.label)))
+    pub fn can(&self, peer: PeerId, perm: Permission) -> bool {
+        self.engine.can(CanRef::new(
+            Actor::Peer(peer),
+            perm,
+            LabelCow::LabelRef(self.label),
+        ))
     }
 
     /// Returns if a flag is enabled.
@@ -157,7 +160,7 @@ impl<'a> Cursor<'a, W<'a>> {
     }
 
     fn mutate<F: FnOnce(CausalRefData) -> Option<CausalData>>(&self, f: F) -> Option<Causal> {
-        if !self.can(Actor::Peer(self.w.peer_id), Permission::Write) {
+        if !self.can(self.w.peer_id, Permission::Write) {
             return None;
         }
         Some(f(self.crdt.map(&self.crdt.store.data))?.map(Crdt::new))
@@ -284,25 +287,28 @@ impl<'a> Cursor<'a, W<'a>> {
     }
 
     /// Gives permission to a peer.
-    pub fn say_can(&self, actor: Actor, perm: Permission) -> Option<Causal> {
-        if !self.can(Actor::Peer(self.w.peer_id), Permission::Control) {
+    pub fn say_can(&self, actor: Option<PeerId>, perm: Permission) -> Option<Causal> {
+        if !self.can(self.w.peer_id, Permission::Control) {
             return None;
         }
-        if !perm.controllable() && !self.can(Actor::Peer(self.w.peer_id), Permission::Own) {
+        if !perm.controllable() && !self.can(self.w.peer_id, Permission::Own) {
             return None;
         }
-        Some(Crdt::say(self.dot(), Policy::Can(actor, perm)))
+        Some(Crdt::say(self.dot(), Policy::Can(actor.into(), perm)))
     }
 
     /// Gives conditional permission to a peer.
     pub fn say_can_if(&self, actor: Actor, perm: Permission, cond: Can) -> Option<Causal> {
-        if !self.can(Actor::Peer(self.w.peer_id), Permission::Control) {
+        if !self.can(self.w.peer_id, Permission::Control) {
             return None;
         }
-        if !perm.controllable() && !self.can(Actor::Peer(self.w.peer_id), Permission::Own) {
+        if !perm.controllable() && !self.can(self.w.peer_id, Permission::Own) {
             return None;
         }
-        Some(Crdt::say(self.dot(), Policy::CanIf(actor, perm, cond)))
+        Some(Crdt::say(
+            self.dot(),
+            Policy::CanIf(actor.into(), perm, cond),
+        ))
     }
 
     /// Revokes a policy.
