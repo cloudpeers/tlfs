@@ -1085,7 +1085,7 @@ dependencies = [
 [[package]]
 name = "libp2p"
 version = "0.40.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "atomic",
  "bytes",
@@ -1117,7 +1117,7 @@ dependencies = [
 [[package]]
 name = "libp2p-core"
 version = "0.30.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "asn1_der",
  "bs58",
@@ -1151,7 +1151,7 @@ dependencies = [
 [[package]]
 name = "libp2p-gossipsub"
 version = "0.33.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "asynchronous-codec",
  "base64 0.13.0",
@@ -1177,7 +1177,7 @@ dependencies = [
 [[package]]
 name = "libp2p-identify"
 version = "0.31.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "futures",
  "futures-timer",
@@ -1192,7 +1192,7 @@ dependencies = [
 [[package]]
 name = "libp2p-metrics"
 version = "0.1.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "libp2p-core",
  "libp2p-identify",
@@ -1204,7 +1204,7 @@ dependencies = [
 [[package]]
 name = "libp2p-mplex"
 version = "0.30.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "asynchronous-codec",
  "bytes",
@@ -1221,7 +1221,7 @@ dependencies = [
 [[package]]
 name = "libp2p-noise"
 version = "0.33.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "bytes",
  "curve25519-dalek",
@@ -1242,7 +1242,7 @@ dependencies = [
 [[package]]
 name = "libp2p-ping"
 version = "0.31.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "futures",
  "futures-timer",
@@ -1256,7 +1256,7 @@ dependencies = [
 [[package]]
 name = "libp2p-rendezvous"
 version = "0.1.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "asynchronous-codec",
  "bimap",
@@ -1277,7 +1277,7 @@ dependencies = [
 [[package]]
 name = "libp2p-request-response"
 version = "0.13.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1294,7 +1294,7 @@ dependencies = [
 [[package]]
 name = "libp2p-swarm"
 version = "0.31.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "either",
  "futures",
@@ -1309,7 +1309,7 @@ dependencies = [
 [[package]]
 name = "libp2p-swarm-derive"
 version = "0.25.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "quote",
  "syn",
@@ -1318,7 +1318,7 @@ dependencies = [
 [[package]]
 name = "libp2p-wasm-ext"
 version = "0.30.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "futures",
  "js-sys",
@@ -1355,7 +1355,7 @@ dependencies = [
 [[package]]
 name = "libp2p-yamux"
 version = "0.34.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "futures",
  "libp2p-core",
@@ -1533,7 +1533,7 @@ checksum = "e5ce46fe64a9d73be07dcbe690a38ce1b293be448fd8ce1e6c1b8062c9f72c6a"
 [[package]]
 name = "multistream-select"
 version = "0.11.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "bytes",
  "futures",

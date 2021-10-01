@@ -5,12 +5,14 @@ use std::{
 };
 
 use futures_timer::Delay;
+use instant::SystemTime;
 use libp2p::{
     core::{self, either::EitherError, upgrade::AuthenticationVersion},
     futures::{
         channel::{mpsc, oneshot},
         pin_mut, select, stream, StreamExt,
     },
+    gossipsub::{self, error::GossipsubHandlerError, GossipsubEvent},
     identify, identity, mplex,
     multiaddr::Protocol,
     noise,
@@ -33,10 +35,12 @@ pub(crate) struct Behaviour {
     ping: Ping,
     rendezvous: rendezvous::client::Behaviour,
     identify: identify::Identify,
+    gossipsub: gossipsub::Gossipsub,
 }
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum Event {
+    Gossipsub(GossipsubEvent),
     Ping(PingEvent),
     Rendezvous(rendezvous::client::Event),
     Identify(identify::IdentifyEvent),
@@ -55,6 +59,11 @@ impl From<rendezvous::client::Event> for Event {
 impl From<identify::IdentifyEvent> for Event {
     fn from(e: identify::IdentifyEvent) -> Self {
         Event::Identify(e)
+    }
+}
+impl From<gossipsub::GossipsubEvent> for Event {
+    fn from(e: gossipsub::GossipsubEvent) -> Self {
+        Event::Gossipsub(e)
     }
 }
 enum SwarmCommand {
@@ -129,6 +138,8 @@ impl SwarmWrapper {
                 .boxed()
         };
 
+        let mut gossipsub_config = gossipsub::GossipsubConfigBuilder::default();
+        gossipsub_config.validation_mode(gossipsub::ValidationMode::Permissive);
         let mut swarm = SwarmBuilder::new(
             transport,
             Behaviour {
@@ -142,6 +153,11 @@ impl SwarmWrapper {
                     identity.public(),
                 )),
                 rendezvous: rendezvous::client::Behaviour::new(identity),
+                gossipsub: gossipsub::Gossipsub::new(
+                    gossipsub::MessageAuthenticity::Author(peer_id),
+                    gossipsub_config.build().expect("Valid gossipsub config"),
+                )
+                .expect("Valid gossipsub configuration"),
             },
             peer_id,
         )
@@ -170,6 +186,8 @@ impl SwarmWrapper {
             })
             .fuse();
             pin_mut!(ticker);
+            let topic = gossipsub::IdentTopic::new(discovery_namespace.clone());
+            swarm.behaviour_mut().gossipsub.subscribe(&topic).unwrap();
             let mut state = State {
                 swarm,
                 info: SwarmInfo::default(),
@@ -189,6 +207,10 @@ impl SwarmWrapper {
                     },
                     _ = ticker.next() => {
                         state.discover_peers();
+                        let _  = state.swarm.behaviour_mut().gossipsub.publish(
+                            topic.clone(),
+                            format!("Hello World {:?}!", SystemTime::now()).as_bytes().to_vec()
+                        );
                     }
                 }
             }
@@ -208,6 +230,10 @@ struct State {
     bootstrap: Vec<Multiaddr>,
     discovery_namespace: rendezvous::Namespace,
 }
+type HandlerError = EitherError<
+    EitherError<EitherError<PingFailure, void::Void>, io::Error>,
+    GossipsubHandlerError,
+>;
 impl State {
     fn handle_command(&mut self, cmd: SwarmCommand) -> bool {
         match cmd {
@@ -224,10 +250,7 @@ impl State {
         }
         true
     }
-    fn handle_swarm_event(
-        &mut self,
-        event: SwarmEvent<Event, EitherError<EitherError<PingFailure, void::Void>, io::Error>>,
-    ) {
+    fn handle_swarm_event(&mut self, event: SwarmEvent<Event, HandlerError>) {
         match event {
             SwarmEvent::NewListenAddr { address, .. } => {
                 self.info.own_addrs.insert(address);
@@ -272,6 +295,15 @@ impl State {
             }
             SwarmEvent::Behaviour(Event::Ping(PingEvent { peer, result })) => {
                 debug!("PingEvent to {}: {:?}", peer, result);
+            }
+            SwarmEvent::Behaviour(Event::Gossipsub(GossipsubEvent::Message {
+                message, ..
+            })) => {
+                info!(
+                    "Gossipsub: New message from {:?}: \"{}\"",
+                    message.source,
+                    String::from_utf8_lossy(&message.data)
+                );
             }
 
             SwarmEvent::ConnectionEstablished {
