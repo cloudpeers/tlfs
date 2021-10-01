@@ -1,3 +1,4 @@
+use crate::store::CheckBottom;
 use crate::{
     Causal, CausalContext, CausalRef, Dot, DotFun, DotMap, DotSet, DotStore, Key, Lattice,
     ReplicaId,
@@ -30,6 +31,12 @@ impl<I: ReplicaId> Deref for EWFlag<I> {
 impl<I: ReplicaId> DerefMut for EWFlag<I> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+impl<I: ReplicaId> CheckBottom for EWFlag<I> {
+    fn is_bottom(&self) -> bool {
+        self.0.is_empty()
     }
 }
 
@@ -99,6 +106,12 @@ impl<I: ReplicaId, L> DerefMut for MVReg<I, L> {
     }
 }
 
+impl<I: ReplicaId, L> CheckBottom for MVReg<I, L> {
+    fn is_bottom(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 impl<I: ReplicaId, L: Lattice + Clone> DotStore<I> for MVReg<I, L> {
     fn is_empty(&self) -> bool {
         self.0.is_empty()
@@ -155,6 +168,12 @@ impl<K: Key, V> Deref for ORMap<K, V> {
 impl<K: Key, V> DerefMut for ORMap<K, V> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+impl<K: Key, V> CheckBottom for ORMap<K, V> {
+    fn is_bottom(&self) -> bool {
+        self.0.is_empty()
     }
 }
 

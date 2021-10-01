@@ -8,7 +8,11 @@ pub trait Key: Clone + Ord + Archive {}
 
 impl<T: Clone + Ord + Archive> Key for T {}
 
-pub trait DotStore<I: ReplicaId>: Archive + Clone + Default {
+pub trait CheckBottom {
+    fn is_bottom(&self) -> bool;
+}
+
+pub trait DotStore<I: ReplicaId>: Archive + Clone + Default + CheckBottom {
     /// Returns true if there are no dots in the store.
     fn is_empty(&self) -> bool;
     /// Returns the set of dots in the store.
@@ -17,6 +21,12 @@ pub trait DotStore<I: ReplicaId>: Archive + Clone + Default {
     fn join(&mut self, ctx: &CausalContext<I>, other: &Self, other_ctx: &CausalContext<I>);
     /// Unjoin a state based on a diff (context \ other_context).
     fn unjoin(&self, diff: &DotSet<I>) -> Self;
+}
+
+impl<I: ReplicaId> CheckBottom for DotSet<I> {
+    fn is_bottom(&self) -> bool {
+        self.set.is_empty()
+    }
 }
 
 impl<I: ReplicaId> DotStore<I> for DotSet<I> {
@@ -92,6 +102,12 @@ impl<I: ReplicaId, T> DerefMut for DotFun<I, T> {
     }
 }
 
+impl<I: ReplicaId, T> CheckBottom for DotFun<I, T> {
+    fn is_bottom(&self) -> bool {
+        self.fun.is_empty()
+    }
+}
+
 impl<I: ReplicaId, T: Lattice + Clone> DotStore<I> for DotFun<I, T> {
     fn is_empty(&self) -> bool {
         self.fun.is_empty()
@@ -146,15 +162,27 @@ pub struct DotMap<K: Ord, V> {
     map: BTreeMap<K, V>,
 }
 
-impl<K: Ord, V> DotMap<K, V> {
-    pub fn new(map: BTreeMap<K, V>) -> Self {
+impl<K: Ord, V: CheckBottom> DotMap<K, V> {
+    pub fn new(mut map: BTreeMap<K, V>) -> Self {
+        // make sure empty values are not explicitly stored
+        map.retain(|_, v| !v.is_bottom());
         Self { map }
+    }
+
+    pub fn insert(&mut self, key: K, value: V) {
+        if !value.is_bottom() {
+            self.map.insert(key, value);
+        } else {
+            self.map.remove(&key);
+        }
     }
 }
 
 impl<K: Ord, V> Default for DotMap<K, V> {
     fn default() -> Self {
-        Self::new(Default::default())
+        Self {
+            map: Default::default(),
+        }
     }
 }
 
@@ -166,9 +194,16 @@ impl<K: Ord, V> Deref for DotMap<K, V> {
     }
 }
 
+// TODO: get rid of this, since it allows the outside to break the invariants
 impl<K: Ord, V> DerefMut for DotMap<K, V> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.map
+    }
+}
+
+impl<K: Key, V> CheckBottom for DotMap<K, V> {
+    fn is_bottom(&self) -> bool {
+        self.map.is_empty()
     }
 }
 
@@ -194,6 +229,9 @@ where
             if let Some(v) = self.map.get_mut(k) {
                 // we got a value in both maps, so we need to do the join
                 v.join(ctx, v2, other_ctx);
+                if v.is_bottom() {
+                    self.map.remove(k);
+                }
             } else {
                 // we don't have a value yet, just copy over the other one
                 self.map.insert(k.clone(), v2.clone());

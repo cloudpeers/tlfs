@@ -4,7 +4,7 @@ use crate::Causal;
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use tlfs_crdt::{DotStore, EWFlag, Lattice, MVReg, ORMap};
+use tlfs_crdt::{CheckBottom, DotStore, EWFlag, Lattice, MVReg, ORMap};
 
 pub type CausalContext = tlfs_crdt::CausalContext<PeerId>;
 pub type Dot = tlfs_crdt::Dot<PeerId>;
@@ -70,6 +70,12 @@ pub enum Data {
 impl Default for Data {
     fn default() -> Self {
         Self::Null
+    }
+}
+
+impl CheckBottom for Data {
+    fn is_bottom(&self) -> bool {
+        self.is_empty()
     }
 }
 
@@ -148,6 +154,12 @@ pub struct Crdt {
     #[archive_attr(omit_bounds)]
     pub data: Data,
     pub policy: BTreeMap<Dot, Policy>,
+}
+
+impl CheckBottom for Crdt {
+    fn is_bottom(&self) -> bool {
+        self.is_empty()
+    }
 }
 
 impl DotStore<PeerId> for Crdt {

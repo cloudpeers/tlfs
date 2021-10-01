@@ -8,7 +8,7 @@ mod store;
 
 pub use crate::crdts::{EWFlag, MVReg, ORMap};
 pub use crate::dotset::{Dot, DotSet, ReplicaId};
-pub use crate::store::{DotFun, DotMap, DotStore, Key};
+pub use crate::store::{CheckBottom, DotFun, DotMap, DotStore, Key};
 
 /// A causal context is a grow only set of dots that describes the causal history of a replica.
 /// Every dot corresponds to an event. We use a DotSet for this.
