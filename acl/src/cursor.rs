@@ -301,10 +301,7 @@ impl<'a> Cursor<'a, W<'a>> {
         if !perm.controllable() && !self.can(self.w.peer_id, Permission::Own) {
             return None;
         }
-        Some(Crdt::say(
-            self.dot(),
-            Policy::CanIf(actor.into(), perm, cond),
-        ))
+        Some(Crdt::say(self.dot(), Policy::CanIf(actor, perm, cond)))
     }
 
     /// Revokes a policy.

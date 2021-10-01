@@ -268,7 +268,7 @@ impl Engine {
         self.claims.insert(dot, Says::Revokes(dot.id.into(), claim));
     }
 
-    pub fn apply_policy<'a>(&mut self, dot: Dot, policy: Policy, label: LabelRef<'a>) {
+    pub fn apply_policy(&mut self, dot: Dot, policy: Policy, label: LabelRef<'_>) {
         match policy {
             Policy::Can(actor, perm) => self.says(dot, Can::new(actor, perm, label.to_label())),
             Policy::CanIf(actor, perm, cond) => {
@@ -291,7 +291,7 @@ impl Engine {
         })
     }
 
-    pub fn can<'a>(&self, peer: PeerId, perm: Permission, label: LabelCow<'a>) -> bool {
+    pub fn can(&self, peer: PeerId, perm: Permission, label: LabelCow<'_>) -> bool {
         let can = CanRef::new(Actor::Peer(peer), perm, label);
         for rule in self.rules() {
             if rule.implies(can) {
