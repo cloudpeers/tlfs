@@ -210,7 +210,13 @@ async fn build_swarm(
                 "tlfs-rendezvous".into(),
                 key_pair.public(),
             )),
-            rendezvous: rendezvous::server::Behaviour::new(rendezvous::server::Config::default()),
+            rendezvous: rendezvous::server::Behaviour::new(
+                rendezvous::server::Config::default()
+                    // min: 10 min
+                    .with_min_ttl(60 * 10)
+                    // max: 24 h
+                    .with_max_ttl(60 * 60 * 24),
+            ),
         },
         key_pair.public().into(),
     )
