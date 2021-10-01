@@ -58,7 +58,9 @@ if [ ! -f $WASMOPT ]; then
   chmod +x $WASMOPT
 fi
 
-echo "Optimizing wasm bindings with default optimization (this might take some time)"
-./wasm-opt $OUT/local_first_bg.wasm -O -g --output $OUT/local_first_bg.opt.wasm
+if [ -z "${NO_OPTIMIZE}" ]; then
+  echo "Optimizing wasm bindings with default optimization (this might take some time)"
+  ./wasm-opt $OUT/local_first_bg.wasm -O -g --output $OUT/local_first_bg.opt.wasm
+fi
 
 echo "Find your wasm package in $OUT"

@@ -1,4 +1,8 @@
-use std::{collections::BTreeSet, io, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    io,
+    time::Duration,
+};
 
 use futures_timer::Delay;
 use libp2p::{
@@ -18,7 +22,7 @@ use libp2p::{
 };
 use libp2p_webrtc::WebRtcTransport;
 use log::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::{future_to_promise, spawn_local};
 
@@ -64,21 +68,18 @@ enum SwarmCommand {
     Shutdown,
 }
 
+#[derive(Clone, Serialize, Deserialize, Ord, Eq, PartialEq, PartialOrd, Debug)]
+struct WrappedPeerId(#[serde(with = "crate::util::serde_str")] PeerId);
+
 #[derive(Debug, Serialize, Default, Clone)]
 pub(crate) struct SwarmInfo {
-    connected_peers: BTreeSet<Multiaddr>,
+    connected_peers: BTreeMap<WrappedPeerId, BTreeSet<Multiaddr>>,
     own_addrs: BTreeSet<Multiaddr>,
 }
 
 #[derive(Clone)]
 pub(crate) struct SwarmWrapper {
     tx: mpsc::Sender<SwarmCommand>,
-}
-
-impl Drop for SwarmWrapper {
-    fn drop(&mut self) {
-        let _ = self.tx.start_send(SwarmCommand::Shutdown);
-    }
 }
 
 impl std::fmt::Debug for SwarmWrapper {
@@ -133,7 +134,7 @@ impl SwarmWrapper {
             Behaviour {
                 ping: Ping::new(
                     PingConfig::new()
-                        .with_interval(Duration::from_secs(1))
+                        .with_interval(Duration::from_secs(30))
                         .with_keep_alive(true),
                 ),
                 identify: identify::Identify::new(identify::IdentifyConfig::new(
@@ -242,7 +243,9 @@ impl State {
                     self.swarm.behaviour_mut().rendezvous.register(
                         self.discovery_namespace.clone(),
                         p,
-                        None,
+                        // low ttl, as this is running in an ephemeral browser.
+                        // registration happens every 5 min through identify.
+                        Some(60 * 11),
                     );
                 }
             }
@@ -267,12 +270,42 @@ impl State {
                     }
                 }
             }
+            SwarmEvent::Behaviour(Event::Ping(PingEvent { peer, result })) => {
+                debug!("PingEvent to {}: {:?}", peer, result);
+            }
 
-            SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+            SwarmEvent::ConnectionEstablished {
+                peer_id, endpoint, ..
+            } => {
+                self.info
+                    .connected_peers
+                    .entry(WrappedPeerId(peer_id))
+                    .or_default()
+                    .insert(endpoint.get_remote_address().clone());
                 info!("Connection established to {}", peer_id)
             }
-            SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
-                info!("Connection closed to {} ({:?}", peer_id, cause)
+            SwarmEvent::ConnectionClosed {
+                peer_id,
+                endpoint,
+                cause,
+                num_established,
+            } => {
+                let set = self
+                    .info
+                    .connected_peers
+                    .entry(WrappedPeerId(peer_id))
+                    .or_default();
+                set.remove(endpoint.get_remote_address());
+                if set.is_empty() {
+                    debug_assert!(num_established == 0);
+                    self.info.connected_peers.remove(&WrappedPeerId(peer_id));
+                    info!("All connections closed to {} ({:?}", peer_id, cause);
+                } else {
+                    debug!(
+                        "Connection closed to {} ({:?}). Remaining: {}",
+                        peer_id, cause, num_established
+                    );
+                }
             }
             SwarmEvent::ListenerError { listener_id, error } => {
                 error!("Listener error: {:?} {}", listener_id, error);

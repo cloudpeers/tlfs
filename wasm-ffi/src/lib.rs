@@ -10,6 +10,7 @@ use wasm_bindgen_futures::future_to_promise;
 use crate::p2p::SwarmWrapper;
 
 mod p2p;
+mod util;
 
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
@@ -45,7 +46,7 @@ impl LocalFirst {
         let signaling_server: Multiaddr = "/dns4/local1st.net/tcp/443/wss/p2p-webrtc-star"
             .parse()
             .unwrap();
-        let cloud_relay=
+        let cloud_relay =
             vec!["/dns4/local1st.net/tcp/4002/wss/p2p/12D3KooWCL3666CJUm6euzw34jMure6rgkQmW21qK4m4DEd9iWGy".parse().unwrap()];
         Self::spawn(kp, signaling_server, cloud_relay, "demo".into()).map_err(map_err)
     }
