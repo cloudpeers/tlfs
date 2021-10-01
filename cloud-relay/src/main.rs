@@ -125,6 +125,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 enum Event {
     Relay,
     Rendezvous(rendezvous::server::Event),

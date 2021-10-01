@@ -21,3 +21,4 @@ tlfs-cambria = { version = "0.1.0", path = "cambria" }
 
 [patch.crates-io]
 libp2p = { git = "https://github.com/wngr/rust-libp2p", branch = "ow/wasm" }
+instant = { git = "https://github.com/wngr/instant", branch = "systemtime" }

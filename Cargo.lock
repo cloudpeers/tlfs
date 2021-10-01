@@ -1021,8 +1021,7 @@ dependencies = [
 [[package]]
 name = "instant"
 version = "0.1.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "716d3d89f35ac6a34fd0eed635395f4c3b76fa889338a4632e5231a8684216bd"
+source = "git+https://github.com/wngr/instant?branch=systemtime#c59ec9068d7484a07967980e2a4c3aa2fece9674"
 dependencies = [
  "cfg-if",
 ]
