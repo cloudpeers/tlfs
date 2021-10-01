@@ -105,20 +105,25 @@ impl DotStore<PeerId> for Data {
     }
 
     fn join(&mut self, ctx: &CausalContext, other: &Self, other_ctx: &CausalContext) {
-        match (self, other) {
-            (Self::Flag(f1), Self::Flag(f2)) => f1.join(ctx, f2, other_ctx),
-            (Self::Reg(r1), Self::Reg(r2)) => r1.join(ctx, r2, other_ctx),
-            (Self::Table(t1), Self::Table(t2)) => t1.join(ctx, t2, other_ctx),
-            (Self::Struct(s1), Self::Struct(s2)) => {
-                for (k, v2) in s2 {
-                    if let Some(v1) = s1.get_mut(k) {
-                        v1.join(ctx, v2, other_ctx);
-                    } else {
-                        s1.insert(k.clone(), v2.clone());
+        if let Self::Null = self {
+            *self = other.clone();
+        } else {
+            match (self, other) {
+                (Self::Flag(f1), Self::Flag(f2)) => f1.join(ctx, f2, other_ctx),
+                (Self::Reg(r1), Self::Reg(r2)) => r1.join(ctx, r2, other_ctx),
+                (Self::Table(t1), Self::Table(t2)) => t1.join(ctx, t2, other_ctx),
+                (Self::Struct(s1), Self::Struct(s2)) => {
+                    for (k, v2) in s2 {
+                        if let Some(v1) = s1.get_mut(k) {
+                            v1.join(ctx, v2, other_ctx);
+                        } else {
+                            s1.insert(k.clone(), v2.clone());
+                        }
                     }
                 }
+                (_, Self::Null) => {}
+                (x, y) => panic!("invalid data\n l: {:?}\n r: {:?}", x, y),
             }
-            (x, y) => panic!("invalid data\n l: {:?}\n r: {:?}", x, y),
         }
     }
 
