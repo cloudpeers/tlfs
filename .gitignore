@@ -1,1 +1,6 @@
-/target
+target
+*.key
+*.crt
+*.pkcs8
+*.cert
+*.priv
