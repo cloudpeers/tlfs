@@ -118,7 +118,7 @@ impl DotStore<PeerId> for Data {
                     }
                 }
             }
-            (_, _) => panic!("invalid data"),
+            (x, y) => panic!("invalid data\n l: {:?}\n r: {:?}", x, y),
         }
     }
 
