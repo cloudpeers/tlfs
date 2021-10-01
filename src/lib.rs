@@ -117,7 +117,7 @@ mod tests {
         let id = sdk.create_doc()?;
         sdk.doc_mut(id).unwrap().transform(hash)?;
         let doc = sdk.doc(id).unwrap();
-        assert!(doc.cursor(|c| c.can(Actor::Peer(peer_id), Permission::Write)));
+        assert!(doc.cursor(|c| c.can(peer_id, Permission::Write)));
 
         let title = "something that needs to be done";
 

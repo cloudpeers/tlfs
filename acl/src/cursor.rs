@@ -1,5 +1,5 @@
-use crate::data::{Crdt, Data, Dot, LabelCow, LabelRef, Primitive};
-use crate::engine::{Actor, Can, CanRef, Engine, Permission, Policy};
+use crate::data::{Crdt, Data, Dot, LabelRef, Primitive};
+use crate::engine::{Actor, Can, Engine, Permission, Policy};
 use crate::id::{DocId, PeerId};
 use crate::schema::ArchivedSchema;
 use crate::{Causal, CausalRef};
@@ -39,11 +39,7 @@ impl<'a> Cursor<'a, ()> {
 impl<'a, T> Cursor<'a, T> {
     /// Checks permissions.
     pub fn can(&self, peer: PeerId, perm: Permission) -> bool {
-        self.engine.can(CanRef::new(
-            Actor::Peer(peer),
-            perm,
-            LabelCow::LabelRef(self.label),
-        ))
+        self.engine.can(peer, perm, self.label.as_ref())
     }
 
     /// Returns if a flag is enabled.
