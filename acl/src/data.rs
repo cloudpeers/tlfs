@@ -1,4 +1,4 @@
-use crate::engine::Policy;
+use crate::engine::{Engine, Permission, Policy};
 use crate::id::{DocId, PeerId};
 use crate::Causal;
 use bytecheck::CheckBytes;
@@ -204,6 +204,66 @@ impl Crdt {
         causal.store.policy.insert(dot, policy);
         causal
     }
+
+    pub fn policy<F>(&self, label: LabelRef<'_>, f: &mut F)
+    where
+        F: FnMut(&Dot, &Policy, LabelRef<'_>),
+    {
+        for (k, v) in &self.policy {
+            f(k, v, label)
+        }
+        match &self.data {
+            Data::Table(t) => {
+                for (k, v) in &***t {
+                    v.policy(LabelRef::Key(&label, k), f);
+                }
+            }
+            Data::Struct(fields) => {
+                for (k, v) in fields {
+                    v.policy(LabelRef::Field(&label, k), f);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Engine {
+    pub fn filter(&self, label: LabelRef<'_>, peer: PeerId, perm: Permission, crdt: &Crdt) -> Crdt {
+        let data = if self.can(peer, perm, label.as_ref()) {
+            crdt.data.clone()
+        } else {
+            match &crdt.data {
+                Data::Null => Data::Null,
+                Data::Flag(_) => Data::Null,
+                Data::Reg(_) => Data::Null,
+                Data::Table(t) => {
+                    let mut delta = ORMap::default();
+                    for (k, v) in &***t {
+                        let v2 = self.filter(LabelRef::Key(&label, k), peer, perm, v);
+                        if v2.data != Data::Null {
+                            delta.insert(k.clone(), v2);
+                        }
+                    }
+                    Data::Table(delta)
+                }
+                Data::Struct(fields) => {
+                    let mut delta = BTreeMap::new();
+                    for (k, v) in fields {
+                        let v2 = self.filter(LabelRef::Field(&label, k), peer, perm, v);
+                        if v2.data != Data::Null {
+                            delta.insert(k.clone(), v2);
+                        }
+                    }
+                    Data::Struct(delta)
+                }
+            }
+        };
+        Crdt {
+            data,
+            policy: crdt.policy.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Archive, Deserialize, Serialize)]
@@ -236,6 +296,10 @@ impl Label {
             Self::Field(l, _) => l.root(),
             Self::Key(l, _) => l.root(),
         }
+    }
+
+    pub fn as_ref(&self) -> LabelCow<'_> {
+        LabelCow::Label(self)
     }
 }
 
@@ -277,6 +341,10 @@ impl<'a> LabelRef<'a> {
             Self::Field(l, s) => Label::Field(Box::new(l.to_label()), s.to_string()),
             Self::Key(l, s) => Label::Key(Box::new(l.to_label()), s.clone()),
         }
+    }
+
+    pub fn as_ref(self) -> LabelCow<'a> {
+        LabelCow::LabelRef(self)
     }
 }
 

@@ -1,8 +1,9 @@
-use crate::data::{Label, LabelCow};
+use crate::data::{Label, LabelCow, LabelRef};
 use crate::id::{DocId, Id, PeerId};
 use bytecheck::CheckBytes;
 use crepe::crepe;
 use rkyv::{Archive, Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 pub type Dot = tlfs_crdt::Dot<Id>;
 
@@ -250,25 +251,36 @@ crepe! {
 
 #[derive(Default)]
 pub struct Engine {
-    claims: Vec<Says>,
+    claims: BTreeMap<Dot, Says>,
 }
 
 impl Engine {
     pub fn says(&mut self, dot: Dot, can: Can) {
-        self.claims.push(Says::Can(dot, dot.id.into(), can));
+        self.claims.insert(dot, Says::Can(dot, dot.id.into(), can));
     }
 
     pub fn says_if(&mut self, dot: Dot, can: Can, cond: Can) {
-        self.claims.push(Says::CanIf(dot, dot.id.into(), can, cond));
+        self.claims
+            .insert(dot, Says::CanIf(dot, dot.id.into(), can, cond));
     }
 
     pub fn revokes(&mut self, dot: Dot, claim: Dot) {
-        self.claims.push(Says::Revokes(dot.id.into(), claim));
+        self.claims.insert(dot, Says::Revokes(dot.id.into(), claim));
+    }
+
+    pub fn apply_policy<'a>(&mut self, dot: Dot, policy: Policy, label: LabelRef<'a>) {
+        match policy {
+            Policy::Can(actor, perm) => self.says(dot, Can::new(actor, perm, label.to_label())),
+            Policy::CanIf(actor, perm, cond) => {
+                self.says_if(dot, Can::new(actor, perm, label.to_label()), cond)
+            }
+            Policy::Revokes(claim) => self.revokes(dot, Dot::new(claim.id.into(), claim.counter())),
+        }
     }
 
     pub fn rules(&self) -> impl Iterator<Item = CanRef<'_>> {
         let mut runtime = Crepe::new();
-        runtime.extend(self.claims.iter().map(Input));
+        runtime.extend(self.claims.values().map(Input));
         let (authorized, revoked) = runtime.run();
         authorized.into_iter().filter_map(move |auth| {
             if !revoked.contains(&Revoked(auth.0)) {
@@ -279,7 +291,8 @@ impl Engine {
         })
     }
 
-    pub fn can(&self, can: CanRef) -> bool {
+    pub fn can<'a>(&self, peer: PeerId, perm: Permission, label: LabelCow<'a>) -> bool {
+        let can = CanRef::new(Actor::Peer(peer), perm, label);
         for rule in self.rules() {
             if rule.implies(can) {
                 return true;
@@ -294,12 +307,16 @@ mod tests {
     use super::*;
     use Permission::*;
 
-    fn doc(i: u8) -> Id {
-        Id::Doc(DocId::new([i; 32]))
+    fn dot(id: impl Into<Id>, c: u64) -> Dot {
+        Dot::new(id.into(), c)
     }
 
-    fn peer(i: char) -> Id {
-        Id::Peer(PeerId::new([i as u8; 32]))
+    fn doc(i: u8) -> DocId {
+        DocId::new([i; 32])
+    }
+
+    fn peer(i: char) -> PeerId {
+        PeerId::new([i as u8; 32])
     }
 
     fn root(i: u8) -> Label {
@@ -311,109 +328,103 @@ mod tests {
     }
 
     fn can(p: char, perm: Permission, l: Label) -> Can {
-        Can::new(peer(p).into(), perm, l)
+        Can::new(Id::Peer(peer(p)).into(), perm, l)
     }
 
     #[test]
     fn test_la_says_can() {
         let mut engine = Engine::default();
-        engine.says(Dot::new(doc(9), 1), can('a', Write, root(9)));
-        engine.says(Dot::new(doc(9), 2), can('a', Read, root(42)));
+        engine.says(dot(doc(9), 1), can('a', Write, root(9)));
+        engine.says(dot(doc(9), 2), can('a', Read, root(42)));
 
-        assert!(!engine.can(can('b', Read, root(9)).as_ref()));
+        assert!(!engine.can(peer('b'), Read, root(9).as_ref()));
 
-        assert!(engine.can(can('a', Write, root(9)).as_ref()));
-        assert!(engine.can(can('a', Read, root(9)).as_ref()));
-        assert!(!engine.can(can('a', Own, root(9)).as_ref()));
+        assert!(engine.can(peer('a'), Write, root(9).as_ref()));
+        assert!(engine.can(peer('a'), Read, root(9).as_ref()));
+        assert!(!engine.can(peer('a'), Own, root(9).as_ref()));
 
-        assert!(engine.can(can('a', Write, field(root(9), "contacts")).as_ref()));
-        assert!(!engine.can(can('a', Read, root(42)).as_ref()));
+        assert!(engine.can(peer('a'), Write, field(root(9), "contacts").as_ref()));
+        assert!(!engine.can(peer('a'), Read, root(42).as_ref()));
     }
 
     #[test]
     fn test_says_if() {
         let mut engine = Engine::default();
         engine.says_if(
-            Dot::new(doc(9), 1),
+            dot(doc(9), 1),
             can('a', Write, root(9)),
             can('a', Read, field(root(42), "contacts")),
         );
-        assert!(!engine.can(can('a', Read, root(9)).as_ref()));
+        assert!(!engine.can(peer('a'), Read, root(9).as_ref()));
 
-        engine.says(Dot::new(doc(42), 1), can('a', Write, root(42)));
-        assert!(engine.can(can('a', Read, root(9)).as_ref()));
+        engine.says(dot(doc(42), 1), can('a', Write, root(42)));
+        assert!(engine.can(peer('a'), Read, root(9).as_ref()));
     }
 
     #[test]
     fn test_says_if_unbound() {
         let mut engine = Engine::default();
         engine.says_if(
-            Dot::new(doc(9), 1),
+            dot(doc(9), 1),
             Can::new(Actor::Unbound, Write, root(9)),
             Can::new(Actor::Unbound, Read, field(root(42), "contacts")),
         );
-        assert!(!engine.can(can('a', Read, root(9)).as_ref()));
+        assert!(!engine.can(peer('a'), Read, root(9).as_ref()));
 
-        engine.says(Dot::new(doc(42), 1), can('a', Write, root(42)));
-        assert!(engine.can(can('a', Read, root(9)).as_ref()));
+        engine.says(dot(doc(42), 1), can('a', Write, root(42)));
+        assert!(engine.can(peer('a'), Read, root(9).as_ref()));
     }
 
     #[test]
     fn test_own_and_control() {
         let mut engine = Engine::default();
-        engine.says(Dot::new(doc(0), 1), can('a', Own, root(0)));
-        engine.says(Dot::new(peer('a'), 1), can('b', Control, root(0)));
+        engine.says(dot(doc(0), 1), can('a', Own, root(0)));
+        engine.says(dot(peer('a'), 1), can('b', Control, root(0)));
+
+        engine.says(dot(peer('b'), 1), can('c', Own, field(root(0), "contacts")));
+        assert!(!engine.can(peer('c'), Read, field(root(0), "contacts").as_ref()));
 
         engine.says(
-            Dot::new(peer('b'), 1),
-            can('c', Own, field(root(0), "contacts")),
-        );
-        assert!(!engine.can(can('c', Read, field(root(0), "contacts")).as_ref()));
-
-        engine.says(
-            Dot::new(peer('b'), 3),
+            dot(peer('b'), 3),
             can('c', Read, field(root(0), "contacts")),
         );
-        assert!(engine.can(can('c', Read, field(root(0), "contacts")).as_ref()));
+        assert!(engine.can(peer('c'), Read, field(root(0), "contacts").as_ref()));
     }
 
     #[test]
     fn test_revoke() {
         let mut engine = Engine::default();
-        engine.says(Dot::new(doc(0), 1), can('a', Own, root(0)));
-        assert!(engine.can(can('a', Own, root(0)).as_ref()));
-        engine.revokes(Dot::new(doc(0), 2), Dot::new(doc(0), 1));
-        assert!(!engine.can(can('a', Own, root(0)).as_ref()));
+        engine.says(dot(doc(0), 1), can('a', Own, root(0)));
+        assert!(engine.can(peer('a'), Own, root(0).as_ref()));
+        engine.revokes(dot(doc(0), 2), dot(doc(0), 1));
+        assert!(!engine.can(peer('a'), Own, root(0).as_ref()));
     }
 
     #[test]
     fn test_revoke_trans() {
         let mut engine = Engine::default();
-        engine.says(Dot::new(doc(0), 1), can('a', Own, root(0)));
-        engine.says(Dot::new(peer('a'), 1), can('b', Own, root(0)));
-        assert!(engine.can(can('b', Own, root(0)).as_ref()));
-        engine.revokes(Dot::new(doc(0), 2), Dot::new(peer('a'), 1));
-        assert!(!engine.can(can('b', Own, root(0)).as_ref()));
+        engine.says(dot(doc(0), 1), can('a', Own, root(0)));
+        engine.says(dot(peer('a'), 1), can('b', Own, root(0)));
+        assert!(engine.can(peer('b'), Own, root(0).as_ref()));
+        engine.revokes(dot(doc(0), 2), dot(peer('a'), 1));
+        assert!(!engine.can(peer('b'), Own, root(0).as_ref()));
     }
 
     #[test]
     fn test_cant_revoke_inv() {
         let mut engine = Engine::default();
-        engine.says(Dot::new(doc(0), 1), can('a', Own, root(0)));
-        engine.says(Dot::new(peer('a'), 1), can('b', Own, root(0)));
-        assert!(engine.can(can('b', Own, root(0)).as_ref()));
-        engine.revokes(Dot::new(peer('b'), 1), Dot::new(peer('a'), 1));
-        assert!(engine.can(can('a', Own, root(0)).as_ref()));
+        engine.says(dot(doc(0), 1), can('a', Own, root(0)));
+        engine.says(dot(peer('a'), 1), can('b', Own, root(0)));
+        assert!(engine.can(peer('b'), Own, root(0).as_ref()));
+        engine.revokes(dot(peer('b'), 1), dot(peer('a'), 1));
+        assert!(engine.can(peer('a'), Own, root(0).as_ref()));
     }
 
     #[test]
     fn test_anonymous_can() {
         let mut engine = Engine::default();
-        assert!(!engine.can(can('a', Read, root(9)).as_ref()));
-        engine.says(
-            Dot::new(doc(9), 1),
-            Can::new(Actor::Anonymous, Read, root(9)),
-        );
-        assert!(engine.can(can('a', Read, root(9)).as_ref()));
+        assert!(!engine.can(peer('a'), Read, root(9).as_ref()));
+        engine.says(dot(doc(9), 1), Can::new(Actor::Anonymous, Read, root(9)));
+        assert!(engine.can(peer('a'), Read, root(9).as_ref()));
     }
 }

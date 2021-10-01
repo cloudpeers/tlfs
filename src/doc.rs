@@ -8,8 +8,8 @@ use rkyv::{Archive, Deserialize, Serialize};
 use std::cell::RefCell;
 use std::rc::Rc;
 use tlfs_acl::{
-    Actor, Can, Causal, CausalContext, Crdt, Cursor, DocId, Dot, Id, Key, Keypair, Label, PeerId,
-    Permission, Policy, Signed, W,
+    Actor, Can, Causal, CausalContext, Crdt, Cursor, DocId, Dot, Id, Key, Keypair, Label, LabelRef,
+    PeerId, Permission, Policy, Signed, W,
 };
 use tlfs_cambria::Hash;
 
@@ -149,27 +149,42 @@ impl Doc {
             .unwrap()
             .decrypt::<Signed>(payload)?;
         let (peer_id, delta) = signed.verify::<Delta>()?;
-        // TODO: fine grained acl control.
-        let can_write = self.cursor(|c| c.can(Actor::Peer(peer_id), Permission::Write));
-        if !can_write {
-            return Err(anyhow!("peer is unauthorized to write"));
-        }
         let mut causal: Causal = delta.causal.deserialize(&mut rkyv::Infallible)?;
         let hash = Hash::from(delta.hash);
-        let state = self.state.borrow();
-        if !state
-            .registry
-            .schema(&hash)
-            .ok_or_else(|| anyhow!("missing lenses with hash {}", hash))?
-            .validate(&causal.store)
         {
-            return Err(anyhow!("crdt failed schema validation"));
+            let state = self.state.borrow();
+            if !state
+                .registry
+                .schema(&hash)
+                .ok_or_else(|| anyhow!("missing lenses with hash {}", hash))?
+                .validate(&causal.store)
+            {
+                return Err(anyhow!("crdt failed schema validation"));
+            }
+            let from_lenses = state.registry.lenses(&hash).expect("schema fetched");
+            let to_lenses = state.registry.lenses(&self.hash).expect("current schema");
+            tlfs_cambria::transform(from_lenses, &mut causal.store, to_lenses);
+            causal.store = state.engine.filter(
+                LabelRef::Root(self.id),
+                peer_id,
+                Permission::Write,
+                &causal.store,
+            );
         }
-        let from_lenses = state.registry.lenses(&hash).expect("schema fetched");
-        let to_lenses = state.registry.lenses(&self.hash).expect("current schema");
-        tlfs_cambria::transform(from_lenses, &mut causal.store, to_lenses);
         self.crdt.join(&causal);
-        // TODO: update engine with new policies
+        let mut state = self.state.borrow_mut();
+        self.crdt
+            .store
+            .policy(LabelRef::Root(self.id), &mut |dot, policy, label| {
+                let id = if dot.id.as_ref() == self.id.as_ref() {
+                    Id::Doc(DocId::new(dot.id.into()))
+                } else {
+                    Id::Peer(dot.id)
+                };
+                state
+                    .engine
+                    .apply_policy(Dot::new(id, dot.counter()), policy.clone(), label);
+            });
         Ok(())
     }
 
@@ -182,14 +197,17 @@ impl Doc {
     /// is neither signed nor encrypted as it is assumed to be transmitted over a
     /// secure channel.
     pub fn unjoin(&self, peer_id: PeerId, ctx: &[u8]) -> Result<Vec<u8>> {
-        let can_read = self.cursor(|c| c.can(Actor::Peer(peer_id), Permission::Read));
-        if !can_read {
-            return Err(anyhow!("peer is unauthorized to read"));
-        }
         let ctx = rkyv::check_archived_root::<CausalContext>(ctx)
             .map_err(|err| anyhow!("{}", err))?
             .deserialize(&mut rkyv::Infallible)?;
-        let causal = self.crdt.unjoin(&ctx);
+        let mut causal = self.crdt.unjoin(&ctx);
+        let state = self.state.borrow();
+        causal.store = state.engine.filter(
+            LabelRef::Root(self.id),
+            peer_id,
+            Permission::Read,
+            &causal.store,
+        );
         let delta = Delta {
             causal,
             hash: self.hash.into(),
