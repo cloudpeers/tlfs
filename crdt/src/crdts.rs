@@ -274,6 +274,7 @@ mod tests {
     #[test]
     fn test_or_map() {
         let mut map: Causal<_, ORMap<_, EWFlag<_>>> = Causal::new();
+        // set the flag to true
         let op1 = map.as_ref().apply(
             "flag".to_string(),
             |flag| flag.enable(Dot::new(0, 1)),
@@ -281,17 +282,27 @@ mod tests {
         );
         map.join(&op1);
         assert!(map.store.get("flag").unwrap().value());
+        // set it to false
         let op2 = map.as_ref().apply(
             "flag".to_string(),
             |flag| flag.disable(Dot::new(1, 1)),
             Default::default,
         );
-        let op3 = map.as_ref().remove(Dot::new(0, 2), "flag");
         map.join(&op2);
+        // flag will be gone
+        assert!(map.store.get("flag").is_none());
+        // set the flag to true again
+        let op3 = map.as_ref().apply(
+            "flag".to_string(),
+            |flag| flag.enable(Dot::new(0, 3)),
+            Default::default,
+        );
         map.join(&op3);
-        assert!(!map.store.get("flag").unwrap().value());
+        assert!(map.store.get("flag").unwrap().value());
+        // remove the flag field entirely
         let op4 = map.as_ref().remove(Dot::new(0, 3), "flag");
         map.join(&op4);
+        // flag will be gone
         assert!(map.store.get("flag").is_none());
     }
 }

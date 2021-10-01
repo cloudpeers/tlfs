@@ -225,19 +225,17 @@ where
     /// (m, c) ∐ (m', c') = ({ k -> v(k), k ∈ dom m ∪ dom m' ∧ v(k) ≠ ⊥ }, c ∪ c')
     ///                     where v(k) = fst ((m(k), c) ∐ (m'(k), c'))
     fn join(&mut self, ctx: &CausalContext<I>, other: &Self, other_ctx: &CausalContext<I>) {
-        for (k, v2) in &other.map {
-            if let Some(v) = self.map.get_mut(k) {
-                // we got a value in both maps, so we need to do the join
-                v.join(ctx, v2, other_ctx);
-                if v.is_bottom() {
-                    self.map.remove(k);
-                }
-            } else {
-                // we don't have a value yet, just copy over the other one
-                self.map.insert(k.clone(), v2.clone());
+        let t = V::default();
+        let mut all = self.map.keys().cloned().collect::<Vec<_>>();
+        all.extend(other.map.keys().cloned());
+        for key in all {
+            let v1 = self.map.entry(key.clone()).or_default();
+            let v2 = other.map.get(&key).unwrap_or(&t);
+            v1.join(ctx, v2, other_ctx);
+            if v1.is_bottom() {
+                self.map.remove(&key);
             }
         }
-        // all other values will remain unchanged
     }
 
     fn unjoin(&self, diff: &DotSet<I>) -> Self {
