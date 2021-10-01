@@ -66,6 +66,15 @@ impl From<Id> for Actor {
     }
 }
 
+impl From<Option<PeerId>> for Actor {
+    fn from(actor: Option<PeerId>) -> Self {
+        match actor {
+            Some(peer) => Actor::Peer(peer),
+            None => Actor::Anonymous,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Archive, CheckBytes, Deserialize, Serialize)]
 #[archive_attr(derive(Debug, Eq, PartialEq, CheckBytes))]
 #[repr(C)]
@@ -126,7 +135,10 @@ impl<'a> CanRef<'a> {
     }
 
     fn implies(self, other: CanRef<'a>) -> bool {
-        if other.actor != self.actor && other.actor != Actor::Unbound {
+        if other.actor != self.actor
+            && other.actor != Actor::Unbound
+            && self.actor != Actor::Anonymous
+        {
             return false;
         }
         other.perm <= self.perm() && self.label().is_ancestor(other.label())
@@ -392,5 +404,16 @@ mod tests {
         assert!(engine.can(can('b', Own, root(0)).as_ref()));
         engine.revokes(Dot::new(peer('b'), 1), Dot::new(peer('a'), 1));
         assert!(engine.can(can('a', Own, root(0)).as_ref()));
+    }
+
+    #[test]
+    fn test_anonymous_can() {
+        let mut engine = Engine::default();
+        assert!(!engine.can(can('a', Read, root(9)).as_ref()));
+        engine.says(
+            Dot::new(doc(9), 1),
+            Can::new(Actor::Anonymous, Read, root(9)),
+        );
+        assert!(engine.can(can('a', Read, root(9)).as_ref()));
     }
 }
