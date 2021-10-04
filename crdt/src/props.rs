@@ -1,161 +1,80 @@
-use crate::{Causal, Dot, DotFun, DotMap, DotSet, DotStore, EWFlag, Key, Lattice, MVReg, ORMap};
+use crate::path::DotStore;
+use crate::{Causal, CausalContext, DocId, Dot, PeerId, Primitive};
 use proptest::prelude::*;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::ops::Range;
 
-pub fn arb_dot_in(counter: Range<u64>) -> impl Strategy<Value = Dot<u8>> {
-    (0u8..5, counter).prop_map(|(a, c)| Dot::new(a, c))
+pub fn arb_peer_id() -> impl Strategy<Value = PeerId> {
+    (0u8..5).prop_map(|i| PeerId::new([i; 32]))
 }
 
-pub fn arb_dot() -> impl Strategy<Value = Dot<u8>> {
+pub fn arb_doc_id() -> impl Strategy<Value = DocId> {
+    (0u8..5).prop_map(|i| DocId::new([i; 32]))
+}
+
+pub fn arb_dot_in(counter: Range<u64>) -> impl Strategy<Value = Dot> {
+    (arb_peer_id(), counter).prop_map(|(a, c)| Dot::new(a, c))
+}
+
+pub fn arb_dot() -> impl Strategy<Value = Dot> {
     arb_dot_in(1u64..25)
 }
 
-pub fn arb_ctx() -> impl Strategy<Value = DotSet<u8>> {
+pub fn arb_ctx() -> impl Strategy<Value = CausalContext> {
     prop::collection::btree_set(arb_dot_in(1u64..5), 0..50)
         .prop_map(|dots| dots.into_iter().collect())
 }
 
-pub fn to_causal<S: DotStore<u8>>(store: S) -> Causal<u8, S> {
-    let mut dots = BTreeSet::new();
-    store.dots(&mut dots);
-    let mut present = BTreeMap::new();
-    for dot in dots {
-        let counter = dot.counter();
-        let id = dot.id;
-        if counter > 0 && counter > present.get(&id).copied().unwrap_or_default() {
-            present.insert(id, counter);
+pub fn arb_primitive() -> impl Strategy<Value = Primitive> {
+    prop_oneof![
+        any::<bool>().prop_map(Primitive::Bool),
+        any::<u64>().prop_map(Primitive::U64),
+        any::<i64>().prop_map(Primitive::I64),
+        ".*".prop_map(Primitive::Str),
+    ]
+}
+
+fn arb_dotstore() -> impl Strategy<Value = DotStore> {
+    let leaf = prop_oneof![
+        prop::collection::btree_set(arb_dot(), 0..10).prop_map(DotStore::DotSet),
+        prop::collection::btree_map(arb_dot(), arb_primitive(), 0..10).prop_map(DotStore::DotFun),
+    ];
+    leaf.prop_recursive(8, 256, 10, |inner| {
+        prop_oneof![
+            prop::collection::btree_map(arb_primitive(), inner.clone(), 0..10)
+                .prop_map(DotStore::DotMap),
+            prop::collection::btree_map(".*", inner, 0..10).prop_map(DotStore::Struct),
+        ]
+    })
+}
+
+pub fn arb_causal() -> impl Strategy<Value = Causal> {
+    arb_dotstore().prop_map(|store| {
+        let mut dots = CausalContext::default();
+        store.dots(&mut dots);
+        let mut present = BTreeMap::new();
+        for dot in dots.iter() {
+            let counter = dot.counter();
+            let id = dot.id;
+            if counter > 0 && counter > present.get(&id).copied().unwrap_or_default() {
+                present.insert(id, counter);
+            }
         }
-    }
-    let ctx = DotSet::from_map(present);
-    Causal { store, ctx }
-}
-
-pub fn arb_causal<S, P, F>(s: F) -> impl Strategy<Value = Causal<u8, S>>
-where
-    S: DotStore<u8> + std::fmt::Debug,
-    P: Strategy<Value = S>,
-    F: Fn() -> P,
-{
-    s().prop_map(to_causal)
-}
-
-pub fn arb_dotset() -> impl Strategy<Value = DotSet<u8>> {
-    prop::collection::btree_set(arb_dot(), 0..50).prop_map(DotSet::new)
-}
-
-pub fn arb_dotfun<L, P>(s: P) -> impl Strategy<Value = DotFun<u8, L>>
-where
-    L: Lattice + std::fmt::Debug,
-    P: Strategy<Value = L>,
-{
-    prop::collection::btree_map(arb_dot(), s, 0..10).prop_map(DotFun::new)
-}
-
-pub fn arb_dotmap<S, P>(s: P) -> impl Strategy<Value = DotMap<u8, S>>
-where
-    S: DotStore<u8> + std::fmt::Debug,
-    P: Strategy<Value = S>,
-{
-    prop::collection::btree_map(0u8..10, s, 0..5).prop_map(DotMap::new)
-}
-
-pub fn arb_ewflag() -> impl Strategy<Value = EWFlag<u8>> {
-    (arb_dot(), any::<bool>()).prop_map(|(dot, b)| {
-        let flag = Causal::<_, EWFlag<_>>::new();
-        if b {
-            flag.as_ref().enable(dot).store
-        } else {
-            flag.as_ref().disable(dot).store
-        }
+        let ctx = CausalContext::from_map(present);
+        Causal { store, ctx }
     })
 }
 
-pub fn arb_mvreg<L>(v: impl Strategy<Value = L>) -> impl Strategy<Value = MVReg<u8, L>>
-where
-    L: Lattice + std::fmt::Debug,
-{
-    (arb_dot(), v).prop_map(|(dot, v)| {
-        let reg = Causal::<_, MVReg<_, _>>::new();
-        reg.as_ref().write(dot, v).store
-    })
-}
-
-pub fn arb_ormap<K, V>(
-    k: impl Strategy<Value = K>,
-    v: impl Strategy<Value = V>,
-) -> impl Strategy<Value = ORMap<K, V>>
-where
-    K: Key + std::fmt::Debug,
-    V: DotStore<u8> + std::fmt::Debug,
-{
-    (k, v).prop_map(|(k, v)| {
-        let map = Causal::<_, ORMap<_, _>>::new();
-        map.as_ref()
-            .apply(
-                k,
-                |_| Causal {
-                    store: v.clone(),
-                    ctx: Default::default(),
-                },
-                Default::default,
-            )
-            .store
-    })
-}
-
-pub fn union(a: &DotSet<u8>, b: &DotSet<u8>) -> DotSet<u8> {
+pub fn union(a: &CausalContext, b: &CausalContext) -> CausalContext {
     let mut a = a.clone();
     a.union(b);
     a
 }
 
-pub fn intersect(a: &DotSet<u8>, b: &DotSet<u8>) -> DotSet<u8> {
+pub fn intersect(a: &CausalContext, b: &CausalContext) -> CausalContext {
     a.intersection(b)
 }
 
-pub fn difference(a: &DotSet<u8>, b: &DotSet<u8>) -> DotSet<u8> {
+pub fn difference(a: &CausalContext, b: &CausalContext) -> CausalContext {
     a.difference(b)
-}
-
-pub fn join<L: Lattice>(a: &L, b: &L) -> L {
-    let mut a = a.clone();
-    a.join(b);
-    a
-}
-
-#[macro_export]
-macro_rules! lattice {
-    ($module:ident, $arb:expr) => {
-        mod $module {
-            use super::*;
-            use $crate::props::*;
-
-            proptest! {
-                #[test]
-                fn idempotent(a in arb_causal($arb)) {
-                    prop_assert_eq!(join(&a, &a), a);
-                }
-
-                #[test]
-                fn commutative(a in arb_causal($arb), b in arb_causal($arb)) {
-                    prop_assert_eq!(join(&a, &b), join(&b, &a));
-                }
-
-                #[test]
-                fn unjoin(a in arb_causal($arb), b in arb_ctx()) {
-                    let b = a.unjoin(&b);
-                    prop_assert_eq!(join(&a, &b), a);
-                }
-
-                #[test]
-                fn associative(dots in arb_causal($arb), a in arb_ctx(), b in arb_ctx(), c in arb_ctx()) {
-                    let a = dots.unjoin(&a);
-                    let b = dots.unjoin(&b);
-                    let c = dots.unjoin(&c);
-                    prop_assert_eq!(join(&join(&a, &b), &c), join(&a, &join(&b, &c)));
-                }
-            }
-        }
-    };
 }

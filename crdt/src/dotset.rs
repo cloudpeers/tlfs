@@ -66,7 +66,7 @@ impl<I: ReplicaId> From<(I, u64)> for Dot<I> {
 ///
 /// Supports membership tests as well as the typical set operations union, intersection, difference.
 /// For the purpose of testing, also supports enumerating all elements.
-#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(CheckBytes))]
 #[repr(C)]
 pub struct DotSet<I: ReplicaId> {
@@ -210,30 +210,42 @@ fn is_causal_for_replica<'a, I: ReplicaId + 'a>(
 
 #[cfg(test)]
 mod tests {
+    use crate::props::*;
+    use crate::{CausalContext, Dot, PeerId};
+    use proptest::prelude::*;
     use std::collections::BTreeSet;
 
-    use crate::{props::*, Dot, DotSet};
-    use proptest::prelude::*;
-
     /// convert a dotset into a std set for reference ops
-    fn std_set(x: &DotSet<u8>) -> BTreeSet<Dot<u8>> {
+    fn std_set(x: &CausalContext) -> BTreeSet<Dot> {
         x.iter().cloned().collect()
     }
 
     /// convert an iterator into a dotset
-    fn dot_set<'a>(x: impl IntoIterator<Item = &'a Dot<u8>>) -> DotSet<u8> {
+    fn dot_set<'a>(x: impl IntoIterator<Item = &'a Dot>) -> CausalContext {
         x.into_iter().cloned().collect()
     }
 
-    fn from_tuples(x: impl IntoIterator<Item = (u8, u64)>) -> DotSet<u8> {
+    fn from_tuples(x: impl IntoIterator<Item = (PeerId, u64)>) -> CausalContext {
         x.into_iter().map(|(i, c)| Dot::new(i, c)).collect()
+    }
+
+    fn peer(i: u8) -> PeerId {
+        PeerId::new([i; 32])
     }
 
     #[test]
     fn is_causal() {
-        assert!(from_tuples([(1, 1), (1, 2), (1, 3)]).is_causal());
-        assert!(!from_tuples([(1, 1), (1, 2), (1, 4)]).is_causal());
-        assert!(!from_tuples([(1, 1), (1, 2), (1, 3), (2, 1), (2, 2), (2, 4)]).is_causal());
+        assert!(from_tuples([(peer(1), 1), (peer(1), 2), (peer(1), 3)]).is_causal());
+        assert!(!from_tuples([(peer(1), 1), (peer(1), 2), (peer(1), 4)]).is_causal());
+        assert!(!from_tuples([
+            (peer(1), 1),
+            (peer(1), 2),
+            (peer(1), 3),
+            (peer(2), 1),
+            (peer(2), 2),
+            (peer(2), 4)
+        ])
+        .is_causal());
     }
 
     proptest! {
