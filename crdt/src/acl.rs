@@ -1,11 +1,10 @@
-use crate::data::{Label, LabelCow, LabelRef};
-use crate::id::{DocId, Id, PeerId};
+use crate::id::{DocId, PeerId};
+use crate::path::{Path, PathBuf};
+use crate::Dot;
 use bytecheck::CheckBytes;
 use crepe::crepe;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::BTreeMap;
-
-pub type Dot = tlfs_crdt::Dot<Id>;
 
 #[derive(
     Clone,
@@ -42,8 +41,10 @@ impl Permission {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Archive, Deserialize, Serialize)]
-#[archive_attr(derive(Clone, Copy, Debug, Eq, Hash, PartialEq, CheckBytes))]
+#[derive(
+    Clone, Copy, Debug, Eq, Hash, PartialEq, Ord, PartialOrd, Archive, Deserialize, Serialize,
+)]
+#[archive_attr(derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Ord, PartialOrd, CheckBytes))]
 #[repr(C)]
 pub enum Actor {
     Doc(DocId),
@@ -58,65 +59,49 @@ impl Actor {
     }
 }
 
-impl From<Id> for Actor {
-    fn from(id: Id) -> Self {
-        match id {
-            Id::Doc(doc) => Actor::Doc(doc),
-            Id::Peer(peer) => Actor::Peer(peer),
-        }
-    }
-}
-
-impl From<Option<PeerId>> for Actor {
-    fn from(actor: Option<PeerId>) -> Self {
-        match actor {
-            Some(peer) => Actor::Peer(peer),
-            None => Actor::Anonymous,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Archive, CheckBytes, Deserialize, Serialize)]
-#[archive_attr(derive(Debug, Eq, PartialEq, CheckBytes))]
+#[derive(
+    Clone, Debug, Eq, Hash, PartialEq, Ord, PartialOrd, Archive, CheckBytes, Deserialize, Serialize,
+)]
+#[archive_attr(derive(Debug, Eq, Hash, PartialEq, Ord, PartialOrd, CheckBytes))]
 #[repr(C)]
 pub struct Can {
     actor: Actor,
     perm: Permission,
-    label: Label,
+    path: PathBuf,
 }
 
 impl Can {
-    pub fn new(actor: Actor, perm: Permission, label: Label) -> Self {
-        Self { actor, perm, label }
+    pub fn new(actor: Actor, perm: Permission, path: PathBuf) -> Self {
+        Self { actor, perm, path }
     }
 
     fn as_ref(&self) -> CanRef<'_> {
         CanRef {
             actor: self.actor,
             perm: self.perm,
-            label: LabelCow::Label(&self.label),
+            path: self.path.as_path(),
         }
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
-#[archive_attr(derive(Debug, Eq, PartialEq, CheckBytes))]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Ord, PartialOrd, Archive, Deserialize, Serialize)]
+#[archive_attr(derive(Debug, Eq, Hash, PartialEq, Ord, PartialOrd, CheckBytes))]
 pub enum Policy {
     Can(Actor, Permission),
     CanIf(Actor, Permission, Can),
-    Revokes(crate::data::Dot),
+    Revokes(Dot),
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct CanRef<'a> {
     actor: Actor,
     perm: Permission,
-    label: LabelCow<'a>,
+    path: Path<'a>,
 }
 
 impl<'a> CanRef<'a> {
-    pub fn new(actor: Actor, perm: Permission, label: LabelCow<'a>) -> Self {
-        Self { actor, perm, label }
+    pub fn new(actor: Actor, perm: Permission, path: Path<'a>) -> Self {
+        Self { actor, perm, path }
     }
 
     pub fn actor(self) -> Actor {
@@ -127,12 +112,12 @@ impl<'a> CanRef<'a> {
         self.perm
     }
 
-    pub fn label(self) -> LabelCow<'a> {
-        self.label
+    pub fn path(self) -> Path<'a> {
+        self.path
     }
 
     fn root(self) -> DocId {
-        self.label().root()
+        self.path().root().unwrap()
     }
 
     fn implies(self, other: CanRef<'a>) -> bool {
@@ -142,25 +127,31 @@ impl<'a> CanRef<'a> {
         {
             return false;
         }
-        other.perm <= self.perm() && self.label().is_ancestor(other.label())
+        other.perm <= self.perm() && self.path().is_ancestor(other.path())
     }
 
     fn bind(self, rule: CanRef<'a>) -> Self {
         Self {
             actor: rule.actor,
             perm: self.perm,
-            label: self.label,
+            path: self.path,
         }
     }
 }
 
 impl std::fmt::Display for Can {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?} can {:?} {}", self.actor, self.perm, self.label)
+        write!(
+            f,
+            "{:?} can {:?} {}",
+            self.actor,
+            self.perm,
+            self.path.as_path()
+        )
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Archive, Deserialize, Serialize)]
+/*#[derive(Clone, Debug, Eq, Hash, PartialEq, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(Debug, Eq, PartialEq, CheckBytes))]
 #[repr(C)]
 enum Says {
@@ -300,6 +291,42 @@ impl Engine {
         }
         false
     }
+
+    pub fn filter(&self, label: LabelRef<'_>, peer: PeerId, perm: Permission, crdt: &Crdt) -> Crdt {
+        let data = if self.can(peer, perm, label.as_ref()) {
+            crdt.data.clone()
+        } else {
+            match &crdt.data {
+                Data::Null => Data::Null,
+                Data::Flag(_) => Data::Null,
+                Data::Reg(_) => Data::Null,
+                Data::Table(t) => {
+                    let mut delta = ORMap::default();
+                    for (k, v) in &***t {
+                        let v2 = self.filter(LabelRef::Key(&label, k), peer, perm, v);
+                        if v2.data != Data::Null {
+                            delta.insert(k.clone(), v2);
+                        }
+                    }
+                    Data::Table(delta)
+                }
+                Data::Struct(fields) => {
+                    let mut delta = BTreeMap::new();
+                    for (k, v) in fields {
+                        let v2 = self.filter(LabelRef::Field(&label, k), peer, perm, v);
+                        if v2.data != Data::Null {
+                            delta.insert(k.clone(), v2);
+                        }
+                    }
+                    Data::Struct(delta)
+                }
+            }
+        };
+        Crdt {
+            data,
+            policy: crdt.policy.clone(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -427,4 +454,4 @@ mod tests {
         engine.says(dot(doc(9), 1), Can::new(Actor::Anonymous, Read, root(9)));
         assert!(engine.can(peer('a'), Read, root(9).as_ref()));
     }
-}
+}*/

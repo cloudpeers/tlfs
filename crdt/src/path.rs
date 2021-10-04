@@ -1,10 +1,11 @@
-use crate::{CausalContext, DocId, Dot, PeerId};
+use crate::{CausalContext, DocId, Dot, PeerId, Policy};
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
 use rkyv::ser::serializers::AllocSerializer;
 use rkyv::ser::Serializer;
 use rkyv::{archived_root, Archive, Archived, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::marker::PhantomData;
 
 fn archive<T>(t: &T) -> Vec<u8>
 where
@@ -56,17 +57,31 @@ impl From<&str> for Primitive {
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct PrimitiveRef(sled::IVec);
+pub struct Ref<T> {
+    marker: PhantomData<T>,
+    bytes: sled::IVec,
+}
 
-impl PrimitiveRef {
-    pub fn to_primitive(&self) -> Result<Primitive> {
+impl<T> Ref<T>
+where
+    T: Archive,
+    Archived<T>: Deserialize<T, rkyv::Infallible>,
+{
+    pub fn new(bytes: sled::IVec) -> Self {
+        Self {
+            marker: PhantomData,
+            bytes,
+        }
+    }
+
+    pub fn to_owned(&self) -> Result<T> {
         Ok(self.as_ref().deserialize(&mut rkyv::Infallible)?)
     }
 }
 
-impl AsRef<Archived<Primitive>> for PrimitiveRef {
-    fn as_ref(&self) -> &Archived<Primitive> {
-        unsafe { archived_root::<Primitive>(&self.0[..]) }
+impl<T: Archive> AsRef<Archived<T>> for Ref<T> {
+    fn as_ref(&self) -> &Archived<T> {
+        unsafe { archived_root::<T>(&self.bytes[..]) }
     }
 }
 
@@ -79,6 +94,7 @@ pub enum DotStore {
     DotFun(BTreeMap<Dot, Primitive>),
     DotMap(#[omit_bounds] BTreeMap<Primitive, DotStore>),
     Struct(#[omit_bounds] BTreeMap<String, DotStore>),
+    Policy(BTreeMap<Dot, Policy>),
 }
 
 #[derive(
@@ -92,6 +108,7 @@ pub enum DotStoreType {
     Fun,
     Map,
     Struct,
+    Policy,
 }
 
 impl DotStoreType {
@@ -115,6 +132,7 @@ impl DotStoreType {
             Fun => Some(DotStore::DotFun(Default::default())),
             Map => Some(DotStore::DotMap(Default::default())),
             Struct => Some(DotStore::Struct(Default::default())),
+            Policy => Some(DotStore::Policy(Default::default())),
         }
     }
 }
@@ -142,6 +160,11 @@ impl DotStore {
                     store.dots(ctx);
                 }
             }
+            Self::Policy(policy) => {
+                for dot in policy.keys() {
+                    ctx.insert(*dot);
+                }
+            }
         }
     }
 }
@@ -154,7 +177,11 @@ pub struct Causal {
     pub ctx: CausalContext,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Ord, PartialOrd)]
+#[derive(
+    Clone, Debug, Default, Eq, PartialEq, Hash, Ord, PartialOrd, Archive, Deserialize, Serialize,
+)]
+#[archive_attr(derive(Debug, Eq, Hash, PartialEq, Ord, PartialOrd, CheckBytes))]
+#[repr(C)]
 pub struct PathBuf(Vec<u8>);
 
 impl PathBuf {
@@ -193,17 +220,16 @@ impl PathBuf {
         self.extend(DotStoreType::Fun, &archive(dot));
     }
 
+    pub fn policy(&mut self, dot: &Dot) {
+        self.extend(DotStoreType::Policy, &archive(dot));
+    }
+
     pub fn pop(&mut self) {
         if let Some(path) = self.as_path().parent() {
             let len = path.0.len();
             self.0.truncate(len);
         }
     }
-
-    /*pub fn policy(mut self, dot: &Dot) -> Self {
-        self.extend(4, &archive(dot));
-        self
-    }*/
 
     pub fn as_path(&self) -> Path<'_> {
         Path(&self.0)
@@ -242,7 +268,7 @@ impl<'a> Path<'a> {
         &self.0[startpos..endpos]
     }
 
-    fn root(&self) -> Path<'_> {
+    fn first(&self) -> Path<'_> {
         let mut len = [0; 2];
         len.copy_from_slice(&self.0[1..3]);
         let len = u16::from_be_bytes(len) as usize;
@@ -260,10 +286,10 @@ impl<'a> Path<'a> {
         DocId::new(doc.try_into().unwrap())
     }
 
-    pub fn key(&self) -> PrimitiveRef {
+    pub fn key(&self) -> Ref<Primitive> {
         debug_assert_eq!(self.ty(), Some(DotStoreType::Map));
         let key = self.target();
-        PrimitiveRef(key.into())
+        Ref::new(key.into())
     }
 
     pub fn field(&self) -> &str {
@@ -273,7 +299,11 @@ impl<'a> Path<'a> {
     }
 
     pub fn dot(&self) -> Dot {
-        debug_assert!(self.ty() == Some(DotStoreType::Set) || self.ty() == Some(DotStoreType::Fun));
+        debug_assert!(
+            self.ty() == Some(DotStoreType::Set)
+                || self.ty() == Some(DotStoreType::Fun)
+                || self.ty() == Some(DotStoreType::Policy)
+        );
         let bytes = self.target();
         let mut dot = Dot::new(PeerId::new([0; 32]), 1);
         unsafe {
@@ -287,7 +317,7 @@ impl<'a> Path<'a> {
         match self.ty() {
             Some(Map) => {
                 let mut map = BTreeMap::new();
-                let key = self.key().to_primitive()?;
+                let key = self.key().to_owned()?;
                 map.insert(key, causal.store);
                 causal.store = DotStore::DotMap(map);
                 self.parent().unwrap().wrap(causal)
@@ -302,6 +332,19 @@ impl<'a> Path<'a> {
             ty => Err(anyhow!("invalid path {:?}", ty)),
         }
     }
+
+    pub fn root(&self) -> Option<DocId> {
+        let first = self.first();
+        if let Some(DotStoreType::Root) = first.ty() {
+            Some(first.doc())
+        } else {
+            None
+        }
+    }
+
+    pub fn is_ancestor(&self, other: Path) -> bool {
+        other.as_ref().starts_with(self.as_ref())
+    }
 }
 
 impl<'a> std::fmt::Display for Path<'a> {
@@ -312,11 +355,12 @@ impl<'a> std::fmt::Display for Path<'a> {
                 write!(f, "{}.", self.parent().unwrap())?;
             }
             match ty {
+                Root => write!(f, "{}", self.doc())?,
                 Set => write!(f, "{}", self.dot())?,
                 Fun => write!(f, "{}", self.dot())?,
-                Map => write!(f, "{:?}", self.key().to_primitive().unwrap())?,
+                Map => write!(f, "{:?}", self.key().as_ref())?,
                 Struct => write!(f, "{}", self.field())?,
-                Root => write!(f, "{}", self.doc())?,
+                Policy => write!(f, "{}", self.dot())?,
             }
         }
         Ok(())
@@ -340,12 +384,23 @@ impl Crdt {
         self.0.iter()
     }
 
-    pub fn primitive(&self, path: Path<'_>) -> Result<Option<PrimitiveRef>> {
+    pub fn primitive(&self, path: Path<'_>) -> Result<Option<Ref<Primitive>>> {
         if path.ty() != Some(DotStoreType::Fun) {
             return Err(anyhow!("is not a primitive path"));
         }
         if let Some(bytes) = self.0.get(path.as_ref())? {
-            Ok(Some(PrimitiveRef(bytes)))
+            Ok(Some(Ref::new(bytes)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn policy(&self, path: Path<'_>) -> Result<Option<Ref<BTreeSet<Policy>>>> {
+        if path.ty() != Some(DotStoreType::Policy) {
+            return Err(anyhow!("is not a policy path"));
+        }
+        if let Some(bytes) = self.0.get(path.as_ref())? {
+            Ok(Some(Ref::new(bytes)))
         } else {
             Ok(None)
         }
@@ -421,12 +476,12 @@ impl Crdt {
         for res in self.0.scan_prefix(&path).keys() {
             let leaf = res?;
             let key = Path::new(&leaf[path.as_ref().len()..])
-                .root()
+                .first()
                 .key()
-                .to_primitive()?;
+                .to_owned()?;
             path.key(&key);
             let default = Path::new(&leaf[path.as_ref().len()..])
-                .root()
+                .first()
                 .ty()
                 .unwrap()
                 .default()
@@ -457,7 +512,33 @@ impl Crdt {
                 DotStore::DotFun(fun) => self.join_dotfun(path, ctx, fun, other_ctx)?,
                 DotStore::DotMap(map) => self.join_dotmap(path, ctx, map, other_ctx)?,
                 DotStore::Struct(fields) => self.join_struct(path, ctx, fields, other_ctx)?,
+                DotStore::Policy(policy) => self.join_policy(path, ctx, policy, other_ctx)?,
             }
+            path.pop();
+        }
+        Ok(())
+    }
+
+    fn join_policy(
+        &self,
+        path: &mut PathBuf,
+        _: &CausalContext,
+        other: &BTreeMap<Dot, Policy>,
+        _: &CausalContext,
+    ) -> Result<()> {
+        for (dot, policy) in other {
+            path.policy(dot);
+            self.0.transaction::<_, _, std::io::Error>(|tree| {
+                let mut policies = if let Some(bytes) = tree.get(path.as_ref())? {
+                    Ref::<BTreeSet<Policy>>::new(bytes).to_owned().unwrap()
+                } else {
+                    Default::default()
+                };
+                policies.insert(policy.clone());
+                tree.insert(path.as_ref(), archive(&policies))?;
+                Ok(())
+            })?;
+            path.pop();
         }
         Ok(())
     }
@@ -474,6 +555,7 @@ impl Crdt {
             DotStore::DotFun(fun) => self.join_dotfun(path, ctx, fun, other_ctx)?,
             DotStore::DotMap(map) => self.join_dotmap(path, ctx, map, other_ctx)?,
             DotStore::Struct(fields) => self.join_struct(path, ctx, fields, other_ctx)?,
+            DotStore::Policy(policy) => self.join_policy(path, ctx, policy, other_ctx)?,
         }
         Ok(())
     }
@@ -526,11 +608,11 @@ impl Crdt {
         path.wrap(causal)
     }
 
-    pub fn values(&self, path: Path<'_>) -> impl Iterator<Item = sled::Result<PrimitiveRef>> {
+    pub fn values(&self, path: Path<'_>) -> impl Iterator<Item = sled::Result<Ref<Primitive>>> {
         self.0
             .scan_prefix(path)
             .values()
-            .map(|res| res.map(PrimitiveRef))
+            .map(|res| res.map(Ref::new))
     }
 
     pub fn remove(&self, path: Path<'_>, dot: Dot) -> Result<Causal> {
@@ -552,9 +634,6 @@ impl Crdt {
         };
         path.wrap(causal)
     }
-
-    /*pub fn policy(&self, path: Path<'_>) -> Result<Policy> {
-    }*/
 }
 
 #[cfg(test)]
