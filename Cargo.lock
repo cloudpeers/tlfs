@@ -2155,6 +2155,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "range-collections"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2d00acfb1c4aad07876c5c847301596369e6db20d608a418969abe6ca31426a"
+dependencies = [
+ "serde",
+ "smallvec",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2586,6 +2596,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "sorted-iter"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cbe9135ed5fd05813a47006636308dc34f5df43e6be5bf3f76744669248c2c8b"
+
+[[package]]
 name = "spin"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2866,7 +2882,9 @@ dependencies = [
  "bytecheck",
  "itertools",
  "proptest",
+ "range-collections",
  "rkyv",
+ "vec-collections",
 ]
 
 [[package]]
@@ -3230,6 +3248,18 @@ name = "vcpkg"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
+
+[[package]]
+name = "vec-collections"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f2390c4dc8ae8640c57d067b1a3d40bc05c124cc6bc7394d761b53435d41b76"
+dependencies = [
+ "num-traits",
+ "serde",
+ "smallvec",
+ "sorted-iter",
+]
 
 [[package]]
 name = "vec_map"

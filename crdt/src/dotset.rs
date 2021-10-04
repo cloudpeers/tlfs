@@ -5,9 +5,9 @@ use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// A replica id 𝕀 is an opaque identifier for a replica
-pub trait ReplicaId: Copy + std::fmt::Debug + Ord + rkyv::Archive<Archived = Self> {}
+pub trait ReplicaId: Copy + std::fmt::Debug + Ord + rkyv::Archive<Archived = Self> + 'static {}
 
-impl<T: Copy + std::fmt::Debug + Ord + rkyv::Archive<Archived = Self>> ReplicaId for T {}
+impl<T: Copy + std::fmt::Debug + Ord + rkyv::Archive<Archived = Self> + 'static> ReplicaId for T {}
 
 /// Dot is a version marker for a single replica.
 #[derive(
@@ -183,8 +183,8 @@ impl<I: ReplicaId> DotSet<I> {
     ///
     /// Note that this is mostly useful for testing, since iterating over all
     /// dots in a large dotset can be expensive.
-    pub fn iter(&self) -> impl Iterator<Item = &Dot<I>> {
-        self.set.iter()
+    pub fn iter(&self) -> impl Iterator<Item = Dot<I>> + '_ {
+        self.set.iter().cloned()
     }
 }
 
@@ -217,7 +217,7 @@ mod tests {
 
     /// convert a dotset into a std set for reference ops
     fn std_set(x: &DotSet<u8>) -> BTreeSet<Dot<u8>> {
-        x.iter().cloned().collect()
+        x.iter().collect()
     }
 
     /// convert an iterator into a dotset

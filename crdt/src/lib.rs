@@ -2,6 +2,7 @@
 
 mod crdts;
 mod dotset;
+mod dotset2;
 #[cfg(any(feature = "proptest", test))]
 pub mod props;
 mod store;
