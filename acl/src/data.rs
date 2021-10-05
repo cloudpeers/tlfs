@@ -148,7 +148,9 @@ impl DotStore<PeerId> for Data {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Archive, Deserialize, Serialize)]
-#[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
+#[archive(bound(
+    serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer + std::marker::Sized"
+))]
 #[archive_attr(derive(CheckBytes))]
 #[archive_attr(check_bytes(
     bound = "__C: rkyv::validation::ArchiveContext, <__C as rkyv::Fallible>::Error: std::error::Error"

@@ -44,7 +44,7 @@ impl<I: ReplicaId> DotStore<I> for DotSet<I> {
     /// (s, c) ∐ (s', c') = ((s ∩ s') ∪ (s \ c') (s' \ c), c ∪ c')
     fn join(&mut self, ctx: &CausalContext<I>, other: &Self, other_ctx: &CausalContext<I>) {
         // (s \ c')
-        let a = self.difference(&other_ctx);
+        let a = self.difference(other_ctx);
         // (s' \ c)
         let b = other.difference(ctx);
         // ((s ∩ s')
