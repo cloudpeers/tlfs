@@ -5,7 +5,10 @@ use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// A replica id 𝕀 is an opaque identifier for a replica
-pub trait ReplicaId: Copy + std::fmt::Debug + Ord + rkyv::Archive<Archived = Self> + 'static {}
+pub trait ReplicaId:
+    Copy + std::fmt::Debug + Ord + rkyv::Archive<Archived = Self> + 'static
+{
+}
 
 impl<T: Copy + std::fmt::Debug + Ord + rkyv::Archive<Archived = Self> + 'static> ReplicaId for T {}
 
@@ -210,7 +213,7 @@ fn is_causal_for_replica<'a, I: ReplicaId + 'a>(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
+    use std::{collections::BTreeSet, iter::FromIterator};
 
     use crate::{props::*, Dot, DotSet};
     use proptest::prelude::*;
