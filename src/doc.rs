@@ -1,4 +1,5 @@
 use crate::secrets::Metadata;
+use crate::crypto::{Key, Keypair, Signed};
 use crate::State;
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
@@ -7,11 +8,11 @@ use rkyv::ser::Serializer;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::cell::RefCell;
 use std::rc::Rc;
-use tlfs_acl::{
-    Actor, Can, Causal, CausalContext, Crdt, Cursor, DocId, Dot, Id, Key, Keypair, Label, LabelRef,
-    PeerId, Permission, Policy, Signed, W,
+use tlfs_crdt::{
+    empty_hash, transform,
+    Actor, Can, Causal, CausalContext, Crdt, Cursor, DocId, Dot, Path, PathBuf,
+    PeerId, Permission, Policy, W, Hash,
 };
-use tlfs_cambria::Hash;
 
 fn archive<T>(t: &T) -> Vec<u8>
 where
@@ -42,7 +43,7 @@ impl Doc {
     pub(crate) fn new(state: Rc<RefCell<State>>) -> Self {
         let la = Keypair::generate();
         let id = DocId::new(la.peer_id().into());
-        let hash = tlfs_cambria::empty_hash();
+        let hash = empty_hash();
         let peer_id = state
             .borrow()
             .secrets
@@ -56,7 +57,7 @@ impl Doc {
         let acl = Policy::Can(Actor::Peer(peer_id), Permission::Own);
         let crdt = Crdt::say(Dot::new(PeerId::new(id.into()), 1), acl);
         state.borrow_mut().engine.says(
-            Dot::new(Id::Doc(id), 1),
+            Dot::new(id, 1),
             Can::new(Actor::Peer(peer_id), Permission::Own, Label::Root(id)),
         );
         Self {
@@ -163,7 +164,7 @@ impl Doc {
             }
             let from_lenses = state.registry.lenses(&hash).expect("schema fetched");
             let to_lenses = state.registry.lenses(&self.hash).expect("current schema");
-            tlfs_cambria::transform(from_lenses, &mut causal.store, to_lenses);
+            transform(from_lenses, &mut causal.store, to_lenses);
             causal.store = state.engine.filter(
                 LabelRef::Root(self.id),
                 peer_id,
@@ -226,7 +227,7 @@ impl Doc {
             .registry
             .lenses(&hash)
             .ok_or_else(|| anyhow!("missing lenses with hash {}", hash))?;
-        tlfs_cambria::transform(from_lenses, &mut self.crdt.store, to_lenses);
+        transform(from_lenses, &mut self.crdt.store, to_lenses);
         self.hash = hash;
         Ok(())
     }

@@ -185,3 +185,131 @@ prop_compose! {
         (schema, crdt1, crdt2)
     }
 }
+
+pub fn arb_lens_for_schema(s: &Schema) -> BoxedStrategy<Lens> {
+    let mut strategy = vec![];
+    match s {
+        Schema::Null => {
+            strategy.push(
+                prop_oneof![
+                    Just(Lens::Make(Kind::Flag)),
+                    arb_primitive_kind().prop_map(|kind| Lens::Make(Kind::Reg(kind))),
+                    arb_primitive_kind().prop_map(|kind| Lens::Make(Kind::Table(kind))),
+                    Just(Lens::Make(Kind::Struct)),
+                ]
+                .boxed(),
+            );
+        }
+        Schema::Flag => strategy.push(Just(Lens::Destroy(Kind::Flag)).boxed()),
+        Schema::Reg(kind) => strategy.push(Just(Lens::Destroy(Kind::Reg(*kind))).boxed()),
+        Schema::Table(kind, s) => {
+            if **s == Schema::Null {
+                strategy.push(Just(Lens::Destroy(Kind::Table(*kind))).boxed());
+            }
+            strategy.push(
+                arb_lens_for_schema(s)
+                    .prop_map(|l| Lens::LensMapValue(Box::new(l)))
+                    .boxed(),
+            );
+        }
+        Schema::Struct(fields) => {
+            if fields.is_empty() {
+                strategy.push(Just(Lens::Destroy(Kind::Struct)).boxed());
+            }
+            strategy.push(arb_prop().prop_map(Lens::AddProperty).boxed());
+            for (k, s) in fields {
+                if let Schema::Null = s {
+                    strategy.push(Just(Lens::RemoveProperty(k.clone())).boxed());
+                }
+                let kk = k.clone();
+                strategy.push(
+                    arb_prop()
+                        .prop_map(move |k2| Lens::RenameProperty(kk.clone(), k2))
+                        .boxed(),
+                );
+                if let Schema::Struct(s2) = s {
+                    for k2 in s2.keys() {
+                        strategy.push(Just(Lens::HoistProperty(k.clone(), k2.clone())).boxed());
+                    }
+                    let kk = k.clone();
+                    strategy.push(
+                        arb_prop()
+                            .prop_map(move |k2| Lens::PlungeProperty(kk.clone(), k2))
+                            .boxed(),
+                    );
+                }
+                let kk = k.clone();
+                strategy.push(
+                    arb_lens_for_schema(s)
+                        .prop_map(move |l| Lens::LensIn(kk.clone(), Box::new(l)))
+                        .boxed(),
+                );
+            }
+        }
+    }
+    (0..strategy.len())
+        .prop_flat_map(move |i| strategy[i].clone())
+        .boxed()
+}
+
+fn arb_lenses_inner(
+    lenses: Vec<Lens>,
+    schema: Schema,
+) -> impl Strategy<Value = (Vec<Lens>, Schema)> {
+    arb_lens_for_schema(&schema).prop_flat_map(move |lens| {
+        let mut lenses = lenses.clone();
+        let mut schema = schema.clone();
+        let bytes = archive(&lens);
+        let archived = unsafe { archived_root::<Lens>(&bytes) }.to_ref();
+        archived.transform_schema(&mut schema).unwrap();
+        lenses.push(lens);
+        (Just(lenses), Just(schema))
+    })
+}
+
+fn arb_n_lenses(n: i32) -> BoxedStrategy<Lenses> {
+    if n < 1 {
+        return Just(Lenses::new(vec![Lens::Make(Kind::Struct)])).boxed();
+    }
+    let mut inner = arb_lenses_inner(Vec::with_capacity(n as usize), Schema::Null).boxed();
+    for _ in 1..n {
+        inner = inner
+            .prop_flat_map(|(lenses, schema)| arb_lenses_inner(lenses, schema))
+            .boxed();
+    }
+    inner.prop_map(|(lenses, _)| Lenses::new(lenses)).boxed()
+}
+
+prop_compose! {
+    pub fn arb_lenses()(n in 0..25)(lenses in arb_n_lenses(n)) -> Lenses {
+        lenses
+    }
+}
+
+fn lenses_to_schema(lenses: &Lenses) -> Schema {
+    let bytes = archive(lenses);
+    let lenses = unsafe { archived_root::<Lenses>(&bytes) };
+    let mut schema = Schema::Null;
+    for lens in lenses.lenses() {
+        lens.to_ref().transform_schema(&mut schema).unwrap();
+    }
+    schema
+}
+
+prop_compose! {
+    pub fn lens_schema_and_crdt()
+        ((lens, schema) in lens_and_schema())
+        (lens in Just(lens), schema in Just(schema.clone()), crdt in arb_crdt_for_schema(schema)) -> (Lens, Schema, Crdt<u8>)
+    {
+        (lens, schema, crdt)
+    }
+}
+
+prop_compose! {
+    pub fn lenses_and_crdt()
+        (lenses in arb_lenses())
+        (lenses in Just(lenses.clone()), crdt in arb_crdt_for_schema(lenses_to_schema(&lenses))) -> (Lenses, Crdt<u8>)
+    {
+        (lenses, crdt)
+    }
+}

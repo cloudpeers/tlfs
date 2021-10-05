@@ -32,6 +32,7 @@ impl PrimitiveKind {
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
 #[repr(C)]
 pub enum Schema {
+    Null,
     Flag,
     Reg(PrimitiveKind),
     Table(PrimitiveKind, #[omit_bounds] Box<Schema>),
@@ -41,6 +42,7 @@ pub enum Schema {
 impl ArchivedSchema {
     pub fn validate(&self, v: &DotStore) -> bool {
         match (self, v) {
+            (Self::Null, DotStore::Null) => true,
             (Self::Flag, DotStore::DotSet(_)) => true,
             (Self::Reg(kind), DotStore::DotFun(fun)) => {
                 for v in fun.values() {
@@ -84,6 +86,7 @@ impl ArchivedSchema {
 
     pub fn default(&self) -> DotStore {
         match self {
+            Self::Null => DotStore::Null,
             Self::Flag => DotStore::DotSet(Default::default()),
             Self::Reg(_) => DotStore::DotFun(Default::default()),
             Self::Table(_, _) => DotStore::DotMap(Default::default()),

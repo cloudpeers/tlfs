@@ -1,3 +1,4 @@
+mod crypto;
 mod doc;
 mod secrets;
 
@@ -5,41 +6,45 @@ use crate::doc::Doc;
 use crate::secrets::{Metadata, Secrets};
 use anyhow::Result;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::rc::Rc;
-use tlfs_acl::{DocId, Engine, PeerId};
-use tlfs_cambria::{Hash, Registry};
+use tlfs_crdt::{Engine, Hash, PeerId, Registry};
 
-pub use tlfs_acl::{Actor, Permission, Primitive, PrimitiveKind};
-pub use tlfs_cambria::{Kind, Lens, Lenses};
+pub use tlfs_crdt::{Actor, Crdt, Kind, Lens, Lenses, Permission, Primitive, PrimitiveKind};
 
-#[derive(Default)]
 struct State {
     secrets: Secrets,
     registry: Registry,
     engine: Engine,
+    crdt: Crdt,
 }
 
 pub struct Sdk {
     state: Rc<RefCell<State>>,
-    docs: BTreeMap<DocId, Doc>,
 }
 
 impl Default for Sdk {
     fn default() -> Self {
-        Self::new()
+        Self::new().unwrap()
     }
 }
 
 impl Sdk {
     /// Creates a new in memory sdk. A new keypair will be generated.
-    pub fn new() -> Self {
-        let mut state = State::default();
-        state.secrets.generate_keypair(Metadata::new());
-        Self {
+    pub fn new() -> Result<Self> {
+        let mut secrets = Secrets::default();
+        secrets.generate_keypair(Metadata::new());
+        let registry = Registry::default();
+        let crdt = Crdt::memory("memory")?;
+        let engine = Engine::new(crdt.clone())?;
+        let state = State {
+            secrets,
+            registry,
+            crdt,
+            engine,
+        };
+        Ok(Self {
             state: Rc::new(RefCell::new(state)),
-            docs: Default::default(),
-        }
+        })
     }
 
     /// Returns the `PeerId` of this instance.
@@ -63,23 +68,8 @@ impl Sdk {
         self.state.borrow_mut().registry.register(lenses)
     }
 
-    /// Creates a new document, authorizing the current instance as the
-    /// owner of the document.
-    pub fn create_doc(&mut self) -> Result<DocId> {
-        let doc = Doc::new(self.state.clone());
-        let id = doc.id();
-        self.docs.insert(id, doc);
-        Ok(id)
-    }
-
-    /// Returns reference to a document.
-    pub fn doc(&self, id: DocId) -> Option<&Doc> {
-        self.docs.get(&id)
-    }
-
-    /// Returns a mutable reference to a document.
-    pub fn doc_mut(&mut self, id: DocId) -> Option<&mut Doc> {
-        self.docs.get_mut(&id)
+    pub fn crdt(&self) -> Crdt {
+        self.state.borrow().crdt.clone()
     }
 }
 

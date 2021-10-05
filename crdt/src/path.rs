@@ -90,6 +90,7 @@ impl<T: Archive> AsRef<Archived<T>> for Ref<T> {
 #[archive_attr(derive(CheckBytes))]
 #[repr(C)]
 pub enum DotStore {
+    Null,
     DotSet(BTreeSet<Dot>),
     DotFun(BTreeMap<Dot, Primitive>),
     DotMap(#[omit_bounds] BTreeMap<Primitive, DotStore>),
@@ -140,6 +141,7 @@ impl DotStoreType {
 impl DotStore {
     pub fn dots(&self, ctx: &mut CausalContext) {
         match self {
+            Self::Null => {}
             Self::DotSet(set) => {
                 for dot in set {
                     ctx.insert(*dot);
@@ -538,6 +540,7 @@ impl Crdt {
         for (k, v) in other {
             path.field(k);
             match v {
+                DotStore::Null => {}
                 DotStore::DotSet(set) => self.join_dotset(path, ctx, set, other_ctx)?,
                 DotStore::DotFun(fun) => self.join_dotfun(path, ctx, fun, other_ctx)?,
                 DotStore::DotMap(map) => self.join_dotmap(path, ctx, map, other_ctx)?,
@@ -581,6 +584,7 @@ impl Crdt {
         other_ctx: &CausalContext,
     ) -> Result<()> {
         match other {
+            DotStore::Null => {}
             DotStore::DotSet(set) => self.join_dotset(path, ctx, set, other_ctx)?,
             DotStore::DotFun(fun) => self.join_dotfun(path, ctx, fun, other_ctx)?,
             DotStore::DotMap(map) => self.join_dotmap(path, ctx, map, other_ctx)?,

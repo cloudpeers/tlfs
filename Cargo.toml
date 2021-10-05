@@ -1,6 +1,5 @@
 [workspace]
 members = [
-    "cambria",
     "cloud-relay",
     "crdt",
     ".",
@@ -14,9 +13,11 @@ edition = "2018"
 [dependencies]
 anyhow = "1.0.44"
 bytecheck = "0.6.5"
+chacha20poly1305 = { version = "0.9.0", features = ["reduced-round"] }
+ed25519-dalek = "1.0.1"
+getrandom = "0.2.3"
 rkyv = "0.7.18"
 tlfs-crdt = { version = "0.1.0", path = "crdt" }
-tlfs-cambria = { version = "0.1.0", path = "cambria" }
 
 [patch.crates-io]
 libp2p = { git = "https://github.com/wngr/rust-libp2p", branch = "ow/wasm" }

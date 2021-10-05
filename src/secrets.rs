@@ -1,5 +1,6 @@
+use crate::crypto::{Key, KeyNonce, Keypair};
 use std::collections::BTreeMap;
-use tlfs_acl::{DocId, Key, KeyNonce, Keypair, PeerId};
+use tlfs_crdt::{DocId, PeerId};
 
 /// Information attached to a secret for queries.
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]

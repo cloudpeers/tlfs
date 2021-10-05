@@ -1,10 +1,9 @@
-use crate::lens::{ArchivedLenses, Lenses};
+use crate::{ArchivedLenses, ArchivedSchema, Lenses, Schema};
 use anyhow::{anyhow, Result};
 pub use blake3::Hash;
 use rkyv::archived_root;
 use rkyv::validation::validators::check_archived_root;
 use std::collections::BTreeMap;
-use tlfs_acl::{ArchivedSchema, Schema};
 
 const EMPTY_LENSES: [u8; 8] = [0; 8];
 
