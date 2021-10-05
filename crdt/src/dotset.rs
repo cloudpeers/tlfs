@@ -1,8 +1,9 @@
 //! This module contains an efficient set of dots for use as both a dot store and a causal context
 use bytecheck::CheckBytes;
 use itertools::Itertools;
+use range_collections::RangeSet;
 use rkyv::{Archive, Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::{collections::{BTreeMap, BTreeSet, btree_map}, iter::FromIterator, ops::{BitOrAssign, Bound, Range}};
 
 /// A replica id 𝕀 is an opaque identifier for a replica
 pub trait ReplicaId:
@@ -22,13 +23,12 @@ pub struct Dot<I: ReplicaId> {
     /// The replica identifier.
     pub id: I,
     /// The current version of this replica.
-    counter: u64,
+    pub counter: u64,
 }
 
 impl<I: ReplicaId> Dot<I> {
     /// Build a Dot from an replica id and counter.
     pub fn new(id: I, counter: u64) -> Self {
-        assert!(counter > 0);
         Self { id, counter }
     }
 
@@ -72,61 +72,84 @@ impl<I: ReplicaId> From<(I, u64)> for Dot<I> {
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(CheckBytes))]
 #[repr(C)]
-pub struct DotSet<I: ReplicaId> {
-    pub(crate) set: BTreeSet<Dot<I>>,
+pub struct DotSet<I>(BTreeMap<I, RangeSet<u64>>);
+
+impl<I: ReplicaId> FromIterator<Dot<I>> for DotSet<I> {
+    fn from_iter<T: IntoIterator<Item = Dot<I>>>(iter: T) -> Self {
+        let elems = iter
+            .into_iter()
+            .filter(|dot| dot.counter != 0)
+            .group_by(|x| x.id)
+            .into_iter()
+            .map(|(id, elems)| {
+                let entry: RangeSet<u64> = elems.fold(RangeSet::empty(), |mut set, dot| {
+                    let c = dot.counter();
+                    set |= RangeSet::from(c..c + 1);
+                    set
+                });
+                (id, entry)
+            })
+            .collect();
+        Self(elems)
+    }
 }
 
 impl<I: ReplicaId> Default for DotSet<I> {
     fn default() -> Self {
-        Self {
-            set: Default::default(),
-        }
+        Self(Default::default())
     }
 }
 
 impl<I: ReplicaId> DotSet<I> {
-    /// Returns a new instance.
-    pub fn new(set: BTreeSet<Dot<I>>) -> Self {
-        Self { set }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.set.is_empty()
+    pub fn new(elems: BTreeSet<Dot<I>>) -> Self {
+        elems.into_iter().collect()
     }
 
     /// creates a causal dot set from a map that contains the maximum dot for each replica (inclusive!)
     ///
     /// a maximum of 0 will be ignored
     pub fn from_map(x: BTreeMap<I, u64>) -> Self {
-        let mut cloud = BTreeSet::new();
-        for (id, max) in x {
-            for i in 1..=max {
-                cloud.insert(Dot::new(id, i));
+        Self(
+            x.into_iter()
+                .filter(|(_, max)| *max > 0)
+                .map(|(i, max)| (i, RangeSet::from(1..max)))
+                .collect(),
+        )
+    }
+
+    pub fn contains(&self, dot: &Dot<I>) -> bool {
+        if dot.counter == 0 {
+            return true
+        }
+        self.0
+            .get(&dot.id)
+            .map(|range| range.contains(&dot.counter))
+            .unwrap_or_default()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = Dot<I>> + '_ {
+        self.0.iter().flat_map(|(id, ranges)| {
+            ranges.iter().flat_map(move |(from, to)| {
+                elems(from, to).map(move |counter| Dot::new(*id, counter))
+            })
+        })
+    }
+
+    pub fn insert(&mut self, item: Dot<I>) {
+        if item.counter == 0 {
+            return;
+        }
+        let counter = item.counter();
+        let range = RangeSet::from(counter..counter + 1);
+        // todo: add entry API for VecMap?
+        match self.0.get_mut(&item.id) {
+            Some(existing) => {
+                *existing |= range;
+            }
+            None => {
+                self.0.insert(item.id, range);
             }
         }
-        Self { set: cloud }
-    }
-
-    /// Checks if the set is causal.
-    ///
-    /// a dot set is considered causal when there are only contiguous sequences of
-    /// counters for each replica, starting with 1
-    pub fn is_causal(&self) -> bool {
-        self.set
-            .iter()
-            .group_by(|x| x.id)
-            .into_iter()
-            .all(|(_, iter)| is_causal_for_replica(iter))
-    }
-
-    /// Checks if the dot is contained in the set.
-    pub fn contains(&self, dot: &Dot<I>) -> bool {
-        self.set.contains(dot)
-    }
-
-    /// Adds a dot to the set.
-    pub fn insert(&mut self, dot: Dot<I>) {
-        self.set.insert(dot);
     }
 
     /// Return the associated counter for this replica.
@@ -136,13 +159,14 @@ impl<I: ReplicaId> DotSet<I> {
     ///
     /// maxᵢ(c) = max({ n | (i, n) ∈ c} ∪ { 0 })
     pub fn max(&self, id: &I) -> u64 {
-        // using last() relies on set being sorted, which is the case for a BTreeSet
-        self.set
-            .iter()
-            .filter(|x| &x.id == id)
-            .map(|x| x.counter)
-            .last()
-            .unwrap_or_default()
+        if let Some(r) = self.0.get(id) {
+            r.boundaries()
+                .last()
+                .cloned()
+                .expect("must not have explicit empty ranges")
+        } else {
+            0
+        }
     }
 
     /// Returns the associated dot for this replica.
@@ -157,64 +181,83 @@ impl<I: ReplicaId> DotSet<I> {
         self.dot(id).inc()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     /// Returns the intersection of two dot sets.
     pub fn intersection(&self, other: &Self) -> Self {
-        Self {
-            set: self.set.intersection(&other.set).cloned().collect(),
-        }
+        Self(
+            self.0
+                .iter()
+                .filter_map(|(k, vl)| {
+                    other.0.get(k).and_then(|vr| {
+                        let r = vl & vr;
+                        if !r.is_empty() {
+                            Some((*k, r))
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect(),
+        )
     }
 
     /// Returns the difference of two dot sets.
-    pub fn difference(&self, other: &DotSet<I>) -> DotSet<I> {
-        let mut res = DotSet::default();
-        for dot in &self.set {
-            if !other.contains(dot) {
-                res.set.insert(*dot);
-            }
-        }
-        res
+    pub fn difference(&self, other: &Self) -> Self {
+        Self(
+            self.0
+                .iter()
+                .filter_map(|(k, vl)| {
+                    if let Some(vr) = other.0.get(k) {
+                        let r = vl - vr;
+                        if !r.is_empty() {
+                            Some((*k, r))
+                        } else {
+                            None
+                        }
+                    } else {
+                        Some((*k, vl.clone()))
+                    }
+                })
+                .collect(),
+        )
     }
 
     /// Merges with the other dot set.
-    pub fn union(&mut self, other: &DotSet<I>) {
-        for dot in &other.set {
-            self.insert(*dot);
+    pub fn union(&mut self, other: &Self) {
+        for (k, vr) in other.0.iter() {
+            match self.0.entry(*k) {
+                btree_map::Entry::Occupied(e) => {
+                    e.into_mut().bitor_assign(vr.clone());
+                }
+                btree_map::Entry::Vacant(e) => {
+                    e.insert(vr.clone());
+                }
+            }
         }
     }
 
-    /// Iterator over all dots in this dot set
-    ///
-    /// Note that this is mostly useful for testing, since iterating over all
-    /// dots in a large dotset can be expensive.
-    pub fn iter(&self) -> impl Iterator<Item = Dot<I>> + '_ {
-        self.set.iter().cloned()
+    pub fn is_causal(&self) -> bool {
+        self.0.iter().all(|(_, r)| {
+            let b = r.boundaries();
+            b.len() == 2 && b[0] == 1 && !r.contains(&0)
+        })
     }
 }
 
-impl<I: ReplicaId> std::iter::FromIterator<Dot<I>> for DotSet<I> {
-    fn from_iter<II: IntoIterator<Item = Dot<I>>>(iter: II) -> Self {
-        let mut res = DotSet::default();
-        for dot in iter {
-            res.insert(dot);
-        }
-        res
+fn elems(lower: Bound<&u64>, upper: Bound<&u64>) -> Range<u64> {
+    match (lower, upper) {
+        (Bound::Included(lower), Bound::Excluded(upper)) => *lower..*upper,
+        (Bound::Unbounded, Bound::Excluded(upper)) => 0..*upper,
+        _ => panic!(),
     }
-}
-
-fn is_causal_for_replica<'a, I: ReplicaId + 'a>(
-    mut iter: impl Iterator<Item = &'a Dot<I>>,
-) -> bool {
-    let mut prev = 0;
-    iter.all(|e| {
-        prev += 1;
-        e.counter == prev
-    })
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeSet, iter::FromIterator};
-
+    use std::collections::BTreeSet;
     use crate::{props::*, Dot, DotSet};
     use proptest::prelude::*;
 

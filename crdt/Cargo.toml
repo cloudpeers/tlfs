@@ -7,8 +7,7 @@ edition = "2018"
 bytecheck = "0.6.5"
 itertools = "0.10.1"
 proptest = { version = "1.0.0", optional = true }
-range-collections = "0.1.2"
-vec-collections = "0.3.6"
+range-collections = { version = "0.1.2", features = ["rkyv_validated"], default_features = false }
 rkyv = "0.7.18"
 
 [dev-dependencies]

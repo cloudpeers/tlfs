@@ -25,18 +25,18 @@ pub trait DotStore<I: ReplicaId>: Archive + Clone + Default + CheckBottom {
 
 impl<I: ReplicaId> CheckBottom for DotSet<I> {
     fn is_bottom(&self) -> bool {
-        self.set.is_empty()
+        self.is_empty()
     }
 }
 
 impl<I: ReplicaId> DotStore<I> for DotSet<I> {
     fn is_empty(&self) -> bool {
-        self.set.is_empty()
+        self.is_empty()
     }
 
     fn dots(&self, dots: &mut BTreeSet<Dot<I>>) {
-        for dot in &self.set {
-            dots.insert(*dot);
+        for dot in self.iter() {
+            dots.insert(dot);
         }
     }
 
@@ -44,28 +44,32 @@ impl<I: ReplicaId> DotStore<I> for DotSet<I> {
     /// (s, c) ∐ (s', c') = ((s ∩ s') ∪ (s \ c') (s' \ c), c ∪ c')
     fn join(&mut self, ctx: &CausalContext<I>, other: &Self, other_ctx: &CausalContext<I>) {
         // intersection of the two sets, and keep elements that are not in the other context
-        self.set.retain(|dot|
+        let mut elems: BTreeSet<_> = self.iter().collect();
+        elems.retain(|dot|
                 // ((s ∩ s')
                 other.contains(dot) ||
                 // (s \ c')
                 !other_ctx.contains(dot));
         // add all elements of the other set which are not in our context
         // (s' \ c)
-        for dot in &other.set {
-            if !ctx.contains(dot) {
-                self.insert(*dot);
+        for dot in other.iter() {
+            if !ctx.contains(&dot) {
+                elems.insert(dot);
             }
         }
+        // todo: this is horribly inefficient
+        *self = elems.into_iter().collect();
     }
 
-    fn unjoin(&self, diff: &DotSet<I>) -> Self {
+    fn unjoin(&self, diff: &DotSet<I>) -> Self {     
+        // todo: this is horribly inefficient   
         let mut cloud = BTreeSet::new();
-        for dot in &self.set {
-            if diff.contains(dot) {
-                cloud.insert(*dot);
+        for dot in self.iter() {
+            if diff.contains(&dot) {
+                cloud.insert(dot);
             }
         }
-        Self { set: cloud }
+        cloud.into_iter().collect()
     }
 }
 
