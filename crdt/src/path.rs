@@ -345,6 +345,10 @@ impl<'a> Path<'a> {
     pub fn is_ancestor(&self, other: Path) -> bool {
         other.as_ref().starts_with(self.as_ref())
     }
+
+    pub fn to_owned(&self) -> PathBuf {
+        PathBuf(self.0.to_vec())
+    }
 }
 
 impl<'a> std::fmt::Display for Path<'a> {
@@ -373,6 +377,7 @@ impl<'a> AsRef<[u8]> for Path<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct Crdt(sled::Tree);
 
 impl Crdt {
@@ -380,11 +385,21 @@ impl Crdt {
         Self(tree)
     }
 
+    pub fn memory(name: &str) -> Result<Self> {
+        let db = sled::Config::new().temporary(true).open()?;
+        let tree = db.open_tree(name)?;
+        Ok(Self(tree))
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = sled::Result<(sled::IVec, sled::IVec)>> {
         self.0.iter()
     }
 
-    pub fn primitive(&self, path: Path<'_>) -> Result<Option<Ref<Primitive>>> {
+    pub fn contains(&self, path: Path) -> bool {
+        self.0.scan_prefix(path).next().is_some()
+    }
+
+    pub fn primitive(&self, path: Path) -> Result<Option<Ref<Primitive>>> {
         if path.ty() != Some(DotStoreType::Fun) {
             return Err(anyhow!("is not a primitive path"));
         }
@@ -393,6 +408,17 @@ impl Crdt {
         } else {
             Ok(None)
         }
+    }
+
+    pub fn primitives(&self, path: Path) -> impl Iterator<Item = Result<Ref<Primitive>>> + '_ {
+        self.0
+            .scan_prefix(path)
+            .filter(|r| {
+                r.as_ref()
+                    .map(|(k, _)| Path::new(&k[..]).ty() == Some(DotStoreType::Fun))
+                    .unwrap_or(true)
+            })
+            .map(|r| r.map(|(_, v)| Ref::new(v)).map_err(Into::into))
     }
 
     pub fn policy(&self, path: Path<'_>) -> Result<Option<Ref<BTreeSet<Policy>>>> {
@@ -404,6 +430,10 @@ impl Crdt {
         } else {
             Ok(None)
         }
+    }
+
+    pub fn watch_path(&self, path: Path<'_>) -> sled::Subscriber {
+        self.0.watch_prefix(path)
     }
 
     fn join_dotset(
@@ -634,6 +664,18 @@ impl Crdt {
         };
         path.wrap(causal)
     }
+
+    pub fn say(&self, path: Path<'_>, dot: Dot, policy: Policy) -> Result<Causal> {
+        let mut ctx = CausalContext::default();
+        ctx.insert(dot);
+        let mut store = BTreeMap::new();
+        store.insert(dot, policy);
+        let causal = Causal {
+            store: DotStore::Policy(store),
+            ctx,
+        };
+        path.wrap(causal)
+    }
 }
 
 #[cfg(test)]
@@ -645,9 +687,7 @@ mod tests {
 
     #[test]
     fn test_ewflag() -> Result<()> {
-        let db = Config::new().temporary(true).open()?;
-        let tree = db.open_tree("test")?;
-        let crdt = Crdt::new(tree);
+        let crdt = Crdt::memory("test")?;
         let doc = DocId::new([0; 32]);
         let mut dot = Dot::new(PeerId::new([0; 32]), 1);
         let mut ctx = CausalContext::default();
@@ -666,9 +706,7 @@ mod tests {
 
     #[test]
     fn test_mvreg() -> Result<()> {
-        let db = Config::new().temporary(true).open()?;
-        let tree = db.open_tree("test")?;
-        let crdt = Crdt::new(tree);
+        let crdt = Crdt::memory("test")?;
         let doc = DocId::new([0; 32]);
         let mut dot1 = Dot::new(PeerId::new([0; 32]), 1);
         let mut dot2 = Dot::new(PeerId::new([1; 32]), 1);
@@ -683,7 +721,7 @@ mod tests {
 
         let mut values = BTreeSet::new();
         for value in crdt.values(path.as_path()) {
-            if let Primitive::U64(value) = value?.to_primitive()? {
+            if let Primitive::U64(value) = value?.to_owned()? {
                 values.insert(value);
             } else {
                 unreachable!();
@@ -698,7 +736,7 @@ mod tests {
 
         let mut values = BTreeSet::new();
         for value in crdt.values(path.as_path()) {
-            if let Primitive::U64(value) = value?.to_primitive()? {
+            if let Primitive::U64(value) = value?.to_owned()? {
                 values.insert(value);
             } else {
                 unreachable!();
@@ -712,9 +750,7 @@ mod tests {
 
     #[test]
     fn test_ormap() -> Result<()> {
-        let db = Config::new().temporary(true).open()?;
-        let tree = db.open_tree("test")?;
-        let crdt = Crdt::new(tree);
+        let crdt = Crdt::memory("test")?;
         let doc = DocId::new([0; 32]);
         let mut dot1 = Dot::new(PeerId::new([0; 32]), 1);
         let mut ctx = CausalContext::default();
@@ -726,7 +762,7 @@ mod tests {
 
         let mut values = BTreeSet::new();
         for value in crdt.values(path.as_path()) {
-            if let Primitive::U64(value) = value?.to_primitive()? {
+            if let Primitive::U64(value) = value?.to_owned()? {
                 values.insert(value);
             } else {
                 unreachable!();
@@ -742,7 +778,7 @@ mod tests {
 
         let mut values = BTreeSet::new();
         for value in crdt.values(path.as_path()) {
-            if let Primitive::U64(value) = value?.to_primitive()? {
+            if let Primitive::U64(value) = value?.to_owned()? {
                 values.insert(value);
             } else {
                 unreachable!();

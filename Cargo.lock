@@ -334,38 +334,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "chacha20"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01b72a433d0cf2aef113ba70f62634c56fddb0f244e6377185c56a7cadbd8f91"
-dependencies = [
- "cfg-if",
- "cipher",
- "cpufeatures",
- "zeroize",
-]
-
-[[package]]
 name = "chacha20poly1305"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6547abe025f4027edacd9edaa357aded014eecec42a5070d9b885c3c334aba2"
 dependencies = [
  "aead",
- "chacha20 0.7.3",
- "cipher",
- "poly1305",
- "zeroize",
-]
-
-[[package]]
-name = "chacha20poly1305"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b84ed6d1d5f7aa9bdde921a5090e0ca4d934d250ea3b402a5fab3a994e28a2a"
-dependencies = [
- "aead",
- "chacha20 0.8.1",
+ "chacha20",
  "cipher",
  "poly1305",
  "zeroize",
@@ -2603,7 +2578,7 @@ checksum = "6142f7c25e94f6fd25a32c3348ec230df9109b463f59c8c7acc4bd34936babb7"
 dependencies = [
  "aes-gcm",
  "blake2",
- "chacha20poly1305 0.8.2",
+ "chacha20poly1305",
  "rand 0.8.4",
  "rand_core 0.6.3",
  "ring",
@@ -2892,23 +2867,7 @@ dependencies = [
  "anyhow",
  "bytecheck",
  "rkyv",
- "tlfs-acl",
  "tlfs-cambria",
-]
-
-[[package]]
-name = "tlfs-acl"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64 0.13.0",
- "bytecheck",
- "chacha20poly1305 0.9.0",
- "crepe",
- "ed25519-dalek",
- "getrandom 0.2.3",
- "proptest",
- "rkyv",
  "tlfs-crdt",
 ]
 
@@ -2921,7 +2880,7 @@ dependencies = [
  "bytecheck",
  "proptest",
  "rkyv",
- "tlfs-acl",
+ "tlfs-crdt",
 ]
 
 [[package]]

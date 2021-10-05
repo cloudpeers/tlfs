@@ -1,7 +1,9 @@
-use crate::data::{Crdt, Data, Primitive, Prop};
+use crate::{DotStore, Primitive};
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Serialize};
 use std::collections::BTreeMap;
+
+pub type Prop = String;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Archive, CheckBytes, Serialize)]
 #[archive(as = "PrimitiveKind")]
@@ -30,7 +32,6 @@ impl PrimitiveKind {
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
 #[repr(C)]
 pub enum Schema {
-    Null,
     Flag,
     Reg(PrimitiveKind),
     Table(PrimitiveKind, #[omit_bounds] Box<Schema>),
@@ -38,19 +39,18 @@ pub enum Schema {
 }
 
 impl ArchivedSchema {
-    pub fn validate(&self, v: &Crdt) -> bool {
-        match (self, &v.data) {
-            (Self::Null, Data::Null) => true,
-            (Self::Flag, Data::Flag(_)) => true,
-            (Self::Reg(kind), Data::Reg(reg)) => {
-                for v in reg.values() {
+    pub fn validate(&self, v: &DotStore) -> bool {
+        match (self, v) {
+            (Self::Flag, DotStore::DotSet(_)) => true,
+            (Self::Reg(kind), DotStore::DotFun(fun)) => {
+                for v in fun.values() {
                     if !kind.validate(v) {
                         return false;
                     }
                 }
                 true
             }
-            (Self::Table(kind, schema), Data::Table(map)) => {
+            (Self::Table(kind, schema), DotStore::DotMap(map)) => {
                 for (key, crdt) in map.iter() {
                     if !kind.validate(key) {
                         return false;
@@ -61,15 +61,15 @@ impl ArchivedSchema {
                 }
                 true
             }
-            (Self::Struct(schema), Data::Struct(map)) => {
+            (Self::Struct(schema), DotStore::Struct(fields)) => {
                 /*for prop in schema.keys() {
                     if !map.contains_key(prop.as_str()) {
                         return false;
                     }
                 }*/
-                for (prop, crdt) in map {
+                for (prop, crdt) in fields {
                     if let Some(schema) = schema.get(prop.as_str()) {
-                        if !schema.validate(crdt) {
+                        if !schema.validate(&crdt) {
                             return false;
                         }
                     } else {
@@ -82,13 +82,12 @@ impl ArchivedSchema {
         }
     }
 
-    pub fn default(&self) -> Crdt {
-        Crdt::new(match self {
-            Self::Null => Data::Null,
-            Self::Flag => Data::Flag(Default::default()),
-            Self::Reg(_) => Data::Reg(Default::default()),
-            Self::Table(_, _) => Data::Table(Default::default()),
-            Self::Struct(_) => Data::Struct(Default::default()),
-        })
+    pub fn default(&self) -> DotStore {
+        match self {
+            Self::Flag => DotStore::DotSet(Default::default()),
+            Self::Reg(_) => DotStore::DotFun(Default::default()),
+            Self::Table(_, _) => DotStore::DotMap(Default::default()),
+            Self::Struct(_) => DotStore::Struct(Default::default()),
+        }
     }
 }

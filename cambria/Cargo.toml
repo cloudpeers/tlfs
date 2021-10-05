@@ -9,8 +9,8 @@ blake3 = "1.0.0"
 bytecheck = "0.6.5"
 proptest = { version = "1.0.0", optional = true }
 rkyv = { version = "0.7.14", features = ["validation"] }
-tlfs-acl = { version = "0.1.0", path = "../acl" }
+tlfs-crdt = { version = "0.1.0", path = "../crdt" }
 
 [dev-dependencies]
 proptest = "1.0.0"
-tlfs-acl = { version = "0.1.0", path = "../acl", features = ["proptest"] }
+tlfs-crdt = { version = "0.1.0", path = "../crdt", features = ["proptest"] }
