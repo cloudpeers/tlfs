@@ -3,7 +3,11 @@ use bytecheck::CheckBytes;
 use itertools::Itertools;
 use range_collections::RangeSet;
 use rkyv::{Archive, Deserialize, Serialize};
-use std::{collections::{BTreeMap, BTreeSet, btree_map}, iter::FromIterator, ops::{BitOrAssign, Bound, Range}};
+use std::{
+    collections::{btree_map, BTreeMap, BTreeSet},
+    iter::FromIterator,
+    ops::{BitOrAssign, Bound, Range},
+};
 
 /// A replica id 𝕀 is an opaque identifier for a replica
 pub trait ReplicaId:
@@ -82,11 +86,14 @@ impl<I: ReplicaId> FromIterator<Dot<I>> for DotSet<I> {
             .group_by(|x| x.id)
             .into_iter()
             .map(|(id, elems)| {
-                let entry: RangeSet<u64> = elems.fold(RangeSet::empty(), |mut set, dot| {
+                let mut entry: RangeSet<u64> = elems.fold(RangeSet::empty(), |mut set, dot| {
                     let c = dot.counter();
                     set |= RangeSet::from(c..c + 1);
                     set
                 });
+                if entry.contains(&1) {
+                    entry |= RangeSet::from(..1);
+                }
                 (id, entry)
             })
             .collect();
@@ -119,7 +126,7 @@ impl<I: ReplicaId> DotSet<I> {
 
     pub fn contains(&self, dot: &Dot<I>) -> bool {
         if dot.counter == 0 {
-            return true
+            return true;
         }
         self.0
             .get(&dot.id)
@@ -130,7 +137,9 @@ impl<I: ReplicaId> DotSet<I> {
     pub fn iter(&self) -> impl Iterator<Item = Dot<I>> + '_ {
         self.0.iter().flat_map(|(id, ranges)| {
             ranges.iter().flat_map(move |(from, to)| {
-                elems(from, to).map(move |counter| Dot::new(*id, counter))
+                elems(from, to)
+                    .filter(|counter| *counter != 0)
+                    .map(move |counter| Dot::new(*id, counter))
             })
         })
     }
@@ -140,8 +149,11 @@ impl<I: ReplicaId> DotSet<I> {
             return;
         }
         let counter = item.counter();
-        let range = RangeSet::from(counter..counter + 1);
-        // todo: add entry API for VecMap?
+        let range = if counter == 1 {
+            RangeSet::from(..2)
+        } else {
+            RangeSet::from(counter..counter + 1)
+        };
         match self.0.get_mut(&item.id) {
             Some(existing) => {
                 *existing |= range;
@@ -162,7 +174,7 @@ impl<I: ReplicaId> DotSet<I> {
         if let Some(r) = self.0.get(id) {
             r.boundaries()
                 .last()
-                .cloned()
+                .map(|x| *x - 1)
                 .expect("must not have explicit empty ranges")
         } else {
             0
@@ -242,7 +254,7 @@ impl<I: ReplicaId> DotSet<I> {
     pub fn is_causal(&self) -> bool {
         self.0.iter().all(|(_, r)| {
             let b = r.boundaries();
-            b.len() == 2 && b[0] == 1 && !r.contains(&0)
+            b.len() == 1 && !b.contains(&u64::max_value())
         })
     }
 }
@@ -257,9 +269,9 @@ fn elems(lower: Bound<&u64>, upper: Bound<&u64>) -> Range<u64> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
     use crate::{props::*, Dot, DotSet};
     use proptest::prelude::*;
+    use std::collections::BTreeSet;
 
     /// convert a dotset into a std set for reference ops
     fn std_set(x: &DotSet<u8>) -> BTreeSet<Dot<u8>> {
@@ -277,6 +289,8 @@ mod tests {
 
     #[test]
     fn is_causal() {
+        let a = from_tuples([(1, 1), (1, 2), (1, 3)]);
+        println!("{:?}", a);
         assert!(from_tuples([(1, 1), (1, 2), (1, 3)]).is_causal());
         assert!(!from_tuples([(1, 1), (1, 2), (1, 4)]).is_causal());
         assert!(!from_tuples([(1, 1), (1, 2), (1, 3), (2, 1), (2, 2), (2, 4)]).is_causal());

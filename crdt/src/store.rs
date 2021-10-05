@@ -43,33 +43,19 @@ impl<I: ReplicaId> DotStore<I> for DotSet<I> {
     /// from the paper
     /// (s, c) ∐ (s', c') = ((s ∩ s') ∪ (s \ c') (s' \ c), c ∪ c')
     fn join(&mut self, ctx: &CausalContext<I>, other: &Self, other_ctx: &CausalContext<I>) {
-        // intersection of the two sets, and keep elements that are not in the other context
-        let mut elems: BTreeSet<_> = self.iter().collect();
-        elems.retain(|dot|
-                // ((s ∩ s')
-                other.contains(dot) ||
-                // (s \ c')
-                !other_ctx.contains(dot));
-        // add all elements of the other set which are not in our context
+        // (s \ c')
+        let a = self.difference(&other_ctx);
         // (s' \ c)
-        for dot in other.iter() {
-            if !ctx.contains(&dot) {
-                elems.insert(dot);
-            }
-        }
-        // todo: this is horribly inefficient
-        *self = elems.into_iter().collect();
+        let b = other.difference(ctx);
+        // ((s ∩ s')
+        *self = self.intersection(other);
+        // (s ∩ s') ∪ (s \ c') (s' \ c)
+        self.union(&a);
+        self.union(&b);
     }
 
-    fn unjoin(&self, diff: &DotSet<I>) -> Self {     
-        // todo: this is horribly inefficient   
-        let mut cloud = BTreeSet::new();
-        for dot in self.iter() {
-            if diff.contains(&dot) {
-                cloud.insert(dot);
-            }
-        }
-        cloud.into_iter().collect()
+    fn unjoin(&self, diff: &DotSet<I>) -> Self {
+        self.intersection(diff)
     }
 }
 
