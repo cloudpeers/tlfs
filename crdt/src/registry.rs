@@ -1,38 +1,19 @@
-use crate::{ArchivedLenses, ArchivedSchema, Lenses, Schema};
+use crate::{Lenses, Ref, Schema};
 use anyhow::{anyhow, Result};
 pub use blake3::Hash;
-use rkyv::archived_root;
 use rkyv::validation::validators::check_archived_root;
-use std::collections::BTreeMap;
 
-const EMPTY_LENSES: [u8; 8] = [0; 8];
+pub const EMPTY_LENSES: [u8; 8] = [0; 8];
 
 pub fn empty_hash() -> Hash {
     blake3::hash(&EMPTY_LENSES)
 }
 
-struct ExpandedLenses {
-    lenses: Vec<u8>,
-    schema: Vec<u8>,
-}
-
-pub struct Registry {
-    lens: BTreeMap<[u8; 32], ExpandedLenses>,
-}
-
-impl Default for Registry {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+pub struct Registry(sled::Tree);
 
 impl Registry {
-    pub fn new() -> Self {
-        let mut reg = Self {
-            lens: Default::default(),
-        };
-        reg.register(EMPTY_LENSES.to_vec()).unwrap();
-        reg
+    pub fn new(tree: sled::Tree) -> Self {
+        Self(tree)
     }
 
     pub fn register(&mut self, lenses: Vec<u8>) -> Result<Hash> {
@@ -40,18 +21,46 @@ impl Registry {
             check_archived_root::<Lenses>(&lenses[..]).map_err(|err| anyhow!("{}", err))?;
         let schema = lenses_ref.to_schema()?;
         let hash = blake3::hash(&lenses[..]);
-        let expanded = ExpandedLenses { lenses, schema };
-        self.lens.insert(hash.into(), expanded);
+        let mut key1 = [0; 33];
+        key1[..32].copy_from_slice(hash.as_bytes());
+        let mut key2 = key1;
+        key2[33] = 1;
+        self.0.transaction::<_, _, std::io::Error>(|tree| {
+            tree.insert(&key1[..], &lenses[..])?;
+            tree.insert(&key2[..], &schema[..])?;
+            Ok(())
+        })?;
         Ok(hash)
     }
 
-    pub fn lenses(&self, hash: &Hash) -> Option<&ArchivedLenses> {
-        let lenses = &self.lens.get(hash.as_bytes())?.lenses[..];
-        Some(unsafe { archived_root::<Lenses>(lenses) })
+    pub fn contains(&self, hash: &Hash) -> Result<bool> {
+        let mut key = [0; 33];
+        key[..32].copy_from_slice(hash.as_bytes());
+        Ok(self.0.contains_key(key)?)
     }
 
-    pub fn schema(&self, hash: &Hash) -> Option<&ArchivedSchema> {
-        let schema = &self.lens.get(hash.as_bytes())?.schema[..];
-        Some(unsafe { archived_root::<Schema>(schema) })
+    pub fn lenses(&self, hash: &Hash) -> Result<Option<Ref<Lenses>>> {
+        let mut key = [0; 33];
+        key[..32].copy_from_slice(hash.as_bytes());
+        Ok(self.0.get(key)?.map(Ref::new))
+    }
+
+    pub fn schema(&self, hash: &Hash) -> Result<Option<Ref<Schema>>> {
+        let mut key = [1; 33];
+        key[..32].copy_from_slice(hash.as_bytes());
+        Ok(self.0.get(key)?.map(Ref::new))
+    }
+
+    pub fn remove(&self, hash: &Hash) -> Result<()> {
+        let mut key1 = [0; 33];
+        key1[..32].copy_from_slice(hash.as_bytes());
+        let mut key2 = key1;
+        key2[33] = 1;
+        self.0.transaction::<_, _, std::io::Error>(|tree| {
+            tree.remove(&key1[..])?;
+            tree.remove(&key2[..])?;
+            Ok(())
+        })?;
+        Ok(())
     }
 }

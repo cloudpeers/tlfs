@@ -3,73 +3,46 @@ mod doc;
 mod secrets;
 
 use crate::doc::Doc;
-use crate::secrets::{Metadata, Secrets};
+use crate::secrets::Secrets;
 use anyhow::Result;
-use std::cell::RefCell;
-use std::rc::Rc;
-use tlfs_crdt::{Engine, Hash, PeerId, Registry};
+use tlfs_crdt::{Engine, Registry};
 
 pub use tlfs_crdt::{Actor, Crdt, Kind, Lens, Lenses, Permission, Primitive, PrimitiveKind};
 
-struct State {
+pub struct Sdk {
     secrets: Secrets,
     registry: Registry,
     engine: Engine,
     crdt: Crdt,
 }
 
-pub struct Sdk {
-    state: Rc<RefCell<State>>,
-}
-
-impl Default for Sdk {
-    fn default() -> Self {
-        Self::new().unwrap()
-    }
-}
-
 impl Sdk {
     /// Creates a new in memory sdk. A new keypair will be generated.
-    pub fn new() -> Result<Self> {
-        let mut secrets = Secrets::default();
-        secrets.generate_keypair(Metadata::new());
-        let registry = Registry::default();
-        let crdt = Crdt::memory("memory")?;
+    pub fn new(config: sled::Config) -> Result<Self> {
+        let db = config.open()?;
+        let secrets = Secrets::new(db.open_tree("secrets")?);
+        let registry = Registry::new(db.open_tree("lenses")?);
+        let crdt = Crdt::new(db.open_tree("crdt")?);
         let engine = Engine::new(crdt.clone())?;
-        let state = State {
+        Ok(Self {
             secrets,
             registry,
             crdt,
             engine,
-        };
-        Ok(Self {
-            state: Rc::new(RefCell::new(state)),
         })
     }
 
-    /// Returns the `PeerId` of this instance.
-    pub fn peer_id(&self) -> PeerId {
-        self.state
-            .borrow()
-            .secrets
-            .keypair(&Metadata::new())
-            .unwrap()
-            .peer_id()
+    pub fn secrets(&self) -> &Secrets {
+        &self.secrets
     }
 
-    /// Adds a bootstrapped peer. This is a peer that was authenticated via
-    /// physical proximity like NFC or a preshared secret.
-    pub fn boostrap(&mut self, metadata: Metadata, peer_id: PeerId) {
-        self.state.borrow_mut().secrets.add_peer(metadata, peer_id)
+    pub fn registry(&self) -> &Registry {
+        &self.registry
     }
 
-    /// Registers a new schema and returns the hash.
-    pub fn register_lenses(&mut self, lenses: Vec<u8>) -> Result<Hash> {
-        self.state.borrow_mut().registry.register(lenses)
-    }
-
-    pub fn crdt(&self) -> Crdt {
-        self.state.borrow().crdt.clone()
+    // TODO: docs aren't persisted yet
+    pub fn doc(&self) -> Result<Doc> {
+        Doc::new(self)
     }
 }
 
@@ -102,7 +75,7 @@ mod tests {
                 .lens_map_value()
                 .lens_in("todos"),
         ]);
-        let hash = sdk.register_lenses(lenses.archive())?;
+        let hash = sdk.registry.register(lenses.archive())?;
 
         let id = sdk.create_doc()?;
         sdk.doc_mut(id).unwrap().transform(hash)?;

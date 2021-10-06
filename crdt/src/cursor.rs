@@ -16,14 +16,14 @@ pub struct W {
 //#[derive(Clone)]
 pub struct Cursor<'a, T> {
     path: PathBuf,
-    crdt: Crdt,
-    engine: Engine,
+    crdt: &'a Crdt,
+    engine: &'a Engine,
     schema: &'a ArchivedSchema,
     w: T,
 }
 
 impl<'a> Cursor<'a, ()> {
-    pub fn new(doc: DocId, crdt: Crdt, engine: Engine, schema: &'a ArchivedSchema) -> Self {
+    pub fn new(doc: DocId, crdt: &'a Crdt, engine: &'a Engine, schema: &'a ArchivedSchema) -> Self {
         Self {
             path: PathBuf::new(doc),
             crdt,
@@ -143,9 +143,9 @@ impl<'a, T> Cursor<'a, T> {
 impl<'a> Cursor<'a, W> {
     pub fn new(
         doc: DocId,
-        crdt: Crdt,
+        crdt: &'a Crdt,
         ctx: CausalContext,
-        engine: Engine,
+        engine: &'a Engine,
         peer_id: PeerId,
         counter: u64,
         schema: &'a ArchivedSchema,

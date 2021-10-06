@@ -62,11 +62,7 @@ pub struct Ref<T> {
     bytes: sled::IVec,
 }
 
-impl<T> Ref<T>
-where
-    T: Archive,
-    Archived<T>: Deserialize<T, rkyv::Infallible>,
-{
+impl<T: Archive> Ref<T> {
     pub fn new(bytes: sled::IVec) -> Self {
         Self {
             marker: PhantomData,
@@ -74,7 +70,10 @@ where
         }
     }
 
-    pub fn to_owned(&self) -> Result<T> {
+    pub fn to_owned(&self) -> Result<T>
+    where
+        Archived<T>: Deserialize<T, rkyv::Infallible>,
+    {
         Ok(self.as_ref().deserialize(&mut rkyv::Infallible)?)
     }
 }
@@ -88,13 +87,24 @@ impl<T: Archive> AsRef<Archived<T>> for Ref<T> {
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Archive, Deserialize, Serialize)]
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
 #[archive_attr(derive(CheckBytes))]
+#[archive_attr(check_bytes(
+    bound = "__C: rkyv::validation::ArchiveContext, <__C as rkyv::Fallible>::Error: std::error::Error"
+))]
 #[repr(C)]
 pub enum DotStore {
     Null,
     DotSet(BTreeSet<Dot>),
     DotFun(BTreeMap<Dot, Primitive>),
-    DotMap(#[omit_bounds] BTreeMap<Primitive, DotStore>),
-    Struct(#[omit_bounds] BTreeMap<String, DotStore>),
+    DotMap(
+        #[omit_bounds]
+        #[archive_attr(omit_bounds)]
+        BTreeMap<Primitive, DotStore>,
+    ),
+    Struct(
+        #[omit_bounds]
+        #[archive_attr(omit_bounds)]
+        BTreeMap<String, DotStore>,
+    ),
     Policy(BTreeMap<Dot, Policy>),
 }
 

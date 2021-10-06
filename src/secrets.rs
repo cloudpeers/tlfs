@@ -104,12 +104,15 @@ impl From<PeerId> for Secret {
     }
 }
 
-#[derive(Default)]
 pub struct Secrets {
     secrets: BTreeMap<Metadata, Secret>,
 }
 
 impl Secrets {
+    pub fn new(tree: sled::Tree) -> Self {
+        Self(Default::default())
+    }
+
     pub fn keypair(&self, metadata: &Metadata) -> Option<&Keypair> {
         self.secrets.get(metadata)?.keypair.as_ref()
     }
