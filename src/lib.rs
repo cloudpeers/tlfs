@@ -7,6 +7,7 @@ use crate::secrets::Secrets;
 use anyhow::Result;
 use tlfs_crdt::{Engine, Registry};
 
+pub use crate::secrets::Metadata;
 pub use tlfs_crdt::{Actor, Crdt, Kind, Lens, Lenses, Permission, Primitive, PrimitiveKind};
 
 pub struct Sdk {
@@ -52,8 +53,11 @@ mod tests {
 
     #[test]
     fn test_api() -> Result<()> {
-        let mut sdk = Sdk::new();
-        let peer_id = sdk.peer_id();
+        let sdk = Sdk::new(sled::Config::new().temporary(true))?;
+        sdk.secrets().generate_keypair(Metadata::new())?;
+        sdk.registry().register(tlfs_crdt::EMPTY_LENSES.to_vec())?;
+
+        let peer_id = sdk.secrets().keypair(Metadata::new())?.unwrap().peer_id();
 
         let lenses = Lenses::new(vec![
             Lens::Make(Kind::Struct),
@@ -75,42 +79,32 @@ mod tests {
                 .lens_map_value()
                 .lens_in("todos"),
         ]);
-        let hash = sdk.registry.register(lenses.archive())?;
+        let hash = sdk.registry().register(lenses.archive())?;
 
-        let id = sdk.create_doc()?;
-        sdk.doc_mut(id).unwrap().transform(hash)?;
-        let doc = sdk.doc(id).unwrap();
-        assert!(doc.cursor(|c| c.can(peer_id, Permission::Write)));
+        let mut doc = sdk.doc()?;
+        doc.transform(hash)?;
+        assert!(doc
+            .cursor(|c| Ok(c.can(peer_id, Permission::Write)))
+            .unwrap());
 
         let title = "something that needs to be done";
 
-        let mut delta = sdk.doc_mut(id).unwrap().transaction(|cursor| {
-            Ok(cursor
-                .field_mut("todos", |cursor| {
-                    cursor
-                        .key_mut(0u64, |cursor| {
-                            cursor
-                                .field_mut("title", |cursor| cursor.assign(title).unwrap())
-                                .unwrap()
-                        })
-                        .unwrap()
-                })
-                .unwrap())
+        let mut delta = doc.transaction(|cursor| {
+            cursor
+                .field("todos")?
+                .key(&0u64.into())?
+                .field("title")?
+                .assign(title)
         })?;
-        sdk.doc_mut(id).unwrap().join(&peer_id, &mut delta)?;
-        let value = sdk.doc(id).unwrap().cursor(|c| {
-            c.field("todos")
-                .unwrap()
-                .key(&0u64.into())
-                .unwrap()
-                .field("title")
-                .unwrap()
-                .strs()
-                .unwrap()
+        doc.join(&peer_id, &mut delta)?;
+        let value = doc.cursor(|c| {
+            c.field("todos")?
+                .key(&0u64.into())?
+                .field("title")?
+                .strs()?
                 .next()
                 .unwrap()
-                .to_string()
-        });
+        })?;
         assert_eq!(value, title);
         Ok(())
     }

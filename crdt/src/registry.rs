@@ -16,7 +16,7 @@ impl Registry {
         Self(tree)
     }
 
-    pub fn register(&mut self, lenses: Vec<u8>) -> Result<Hash> {
+    pub fn register(&self, lenses: Vec<u8>) -> Result<Hash> {
         let lenses_ref =
             check_archived_root::<Lenses>(&lenses[..]).map_err(|err| anyhow!("{}", err))?;
         let schema = lenses_ref.to_schema()?;
@@ -24,7 +24,7 @@ impl Registry {
         let mut key1 = [0; 33];
         key1[..32].copy_from_slice(hash.as_bytes());
         let mut key2 = key1;
-        key2[33] = 1;
+        key2[32] = 1;
         self.0.transaction::<_, _, std::io::Error>(|tree| {
             tree.insert(&key1[..], &lenses[..])?;
             tree.insert(&key2[..], &schema[..])?;
@@ -55,7 +55,7 @@ impl Registry {
         let mut key1 = [0; 33];
         key1[..32].copy_from_slice(hash.as_bytes());
         let mut key2 = key1;
-        key2[33] = 1;
+        key2[32] = 1;
         self.0.transaction::<_, _, std::io::Error>(|tree| {
             tree.remove(&key1[..])?;
             tree.remove(&key2[..])?;

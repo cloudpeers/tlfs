@@ -706,7 +706,6 @@ mod tests {
     use super::*;
     //use crate::props::*;
     //use proptest::prelude::*;
-    use sled::Config;
 
     #[test]
     fn test_ewflag() -> Result<()> {

@@ -1,5 +1,7 @@
 use crate::path::DotStore;
-use crate::{Causal, CausalContext, DocId, Dot, PeerId, Primitive, PrimitiveKind, Schema};
+use crate::{
+    Causal, CausalContext, DocId, Dot, Kind, Lens, Lenses, PeerId, Primitive, PrimitiveKind, Schema,
+};
 use proptest::prelude::*;
 use rkyv::ser::serializers::AllocSerializer;
 use rkyv::ser::Serializer;
@@ -139,6 +141,7 @@ pub fn arb_schema() -> impl Strategy<Value = Schema> {
 
 pub fn arb_dotstore_for_schema(s: Schema) -> BoxedStrategy<DotStore> {
     match s {
+        Schema::Null => Just(DotStore::Null).boxed(),
         Schema::Flag => arb_dotset().prop_map(DotStore::DotSet).boxed(),
         Schema::Reg(kind) => arb_dotfun(kind).prop_map(DotStore::DotFun).boxed(),
         Schema::Table(kind, schema) => arb_dotmap(kind, arb_dotstore_for_schema(*schema))
@@ -216,15 +219,14 @@ pub fn arb_lens_for_schema(s: &Schema) -> BoxedStrategy<Lens> {
             if fields.is_empty() {
                 strategy.push(Just(Lens::Destroy(Kind::Struct)).boxed());
             }
-            strategy.push(arb_prop().prop_map(Lens::AddProperty).boxed());
+            strategy.push(".*".prop_map(Lens::AddProperty).boxed());
             for (k, s) in fields {
                 if let Schema::Null = s {
                     strategy.push(Just(Lens::RemoveProperty(k.clone())).boxed());
                 }
                 let kk = k.clone();
                 strategy.push(
-                    arb_prop()
-                        .prop_map(move |k2| Lens::RenameProperty(kk.clone(), k2))
+                    ".*".prop_map(move |k2| Lens::RenameProperty(kk.clone(), k2))
                         .boxed(),
                 );
                 if let Schema::Struct(s2) = s {
@@ -233,8 +235,7 @@ pub fn arb_lens_for_schema(s: &Schema) -> BoxedStrategy<Lens> {
                     }
                     let kk = k.clone();
                     strategy.push(
-                        arb_prop()
-                            .prop_map(move |k2| Lens::PlungeProperty(kk.clone(), k2))
+                        ".*".prop_map(move |k2| Lens::PlungeProperty(kk.clone(), k2))
                             .boxed(),
                     );
                 }
@@ -298,8 +299,8 @@ fn lenses_to_schema(lenses: &Lenses) -> Schema {
 
 prop_compose! {
     pub fn lens_schema_and_crdt()
-        ((lens, schema) in lens_and_schema())
-        (lens in Just(lens), schema in Just(schema.clone()), crdt in arb_crdt_for_schema(schema)) -> (Lens, Schema, Crdt<u8>)
+        (schema in arb_schema())
+        (lens in arb_lens_for_schema(&schema), schema in Just(schema.clone()), crdt in arb_causal(arb_dotstore_for_schema(schema))) -> (Lens, Schema, Causal)
     {
         (lens, schema, crdt)
     }
@@ -308,7 +309,7 @@ prop_compose! {
 prop_compose! {
     pub fn lenses_and_crdt()
         (lenses in arb_lenses())
-        (lenses in Just(lenses.clone()), crdt in arb_crdt_for_schema(lenses_to_schema(&lenses))) -> (Lenses, Crdt<u8>)
+        (lenses in Just(lenses.clone()), crdt in arb_causal(arb_dotstore_for_schema(lenses_to_schema(&lenses)))) -> (Lenses, Causal)
     {
         (lenses, crdt)
     }

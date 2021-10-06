@@ -110,12 +110,12 @@ impl<'a, T> Cursor<'a, T> {
     }
 
     /// Returns a cursor to a value in a table.
-    pub fn key(&mut self, key: &Primitive) -> Result<()> {
+    pub fn key(mut self, key: &Primitive) -> Result<Self> {
         if let ArchivedSchema::Table(kind, schema) = &self.schema {
             if kind.validate(key) {
                 self.path.key(key);
                 self.schema = schema;
-                Ok(())
+                Ok(self)
             } else {
                 Err(anyhow!("invalid key"))
             }
@@ -125,12 +125,12 @@ impl<'a, T> Cursor<'a, T> {
     }
 
     /// Returns a cursor to a field in a struct.
-    pub fn field(&mut self, key: &str) -> Result<()> {
+    pub fn field(mut self, key: &str) -> Result<Self> {
         if let ArchivedSchema::Struct(fields) = &self.schema {
             if let Some(schema) = fields.get(key) {
                 self.path.field(key);
                 self.schema = schema;
-                Ok(())
+                Ok(self)
             } else {
                 Err(anyhow!("field doesn't exist"))
             }

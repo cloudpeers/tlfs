@@ -264,22 +264,25 @@ fn elems(lower: Bound<&u64>, upper: Bound<&u64>) -> Range<u64> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{props::*, Dot, DotSet};
+    use crate::props::*;
+    use crate::{CausalContext, Dot, PeerId};
     use proptest::prelude::*;
     use std::collections::BTreeSet;
 
     /// convert a dotset into a std set for reference ops
-    fn std_set(x: &DotSet<u8>) -> BTreeSet<Dot<u8>> {
+    fn std_set(x: &CausalContext) -> BTreeSet<Dot> {
         x.iter().collect()
     }
 
     /// convert an iterator into a dotset
-    fn dot_set<'a>(x: impl IntoIterator<Item = &'a Dot<u8>>) -> DotSet<u8> {
+    fn dot_set<'a>(x: impl IntoIterator<Item = &'a Dot>) -> CausalContext {
         x.into_iter().cloned().collect()
     }
 
-    fn from_tuples(x: impl IntoIterator<Item = (u8, u64)>) -> DotSet<u8> {
-        x.into_iter().map(|(i, c)| Dot::new(i, c)).collect()
+    fn from_tuples(x: impl IntoIterator<Item = (u8, u64)>) -> CausalContext {
+        x.into_iter()
+            .map(|(i, c)| Dot::new(PeerId::new([i; 32]), c))
+            .collect()
     }
 
     #[test]
