@@ -1,165 +1,108 @@
 use crate::crypto::{Key, KeyNonce, Keypair};
-use std::collections::BTreeMap;
-use tlfs_crdt::{DocId, PeerId};
+use anyhow::Result;
+use std::convert::TryInto;
+use tlfs_crdt::{archive, DocId, PeerId, Ref};
+
+#[repr(u8)]
+enum KeyType {
+    Keypair,
+    Key,
+    Nonce,
+}
 
 /// Information attached to a secret for queries.
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
-pub struct Metadata {
-    label: Option<String>,
-    doc: Option<DocId>,
-    peer: Option<PeerId>,
-}
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct Metadata([u8; 65]);
 
 impl Metadata {
     /// Creates a top level query. This will return the defaults.
     pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Queries a secret based on a label.
-    pub fn label(mut self, label: &str) -> Self {
-        self.label = Some(label.into());
-        self
+        Self([0; 65])
     }
 
     /// Queries a secret based on a doc.
     pub fn doc(mut self, doc: DocId) -> Self {
-        self.doc = Some(doc);
+        self.0[..32].copy_from_slice(doc.as_ref());
         self
     }
 
     /// Queries a secret based on a peer.
     pub fn peer(mut self, peer: PeerId) -> Self {
-        self.peer = Some(peer);
+        self.0[32..64].copy_from_slice(peer.as_ref());
+        self
+    }
+
+    fn ty(mut self, ty: KeyType) -> Self {
+        self.0[64] = ty as u8;
         self
     }
 }
 
-#[derive(Default)]
-struct Secret {
-    keypair: Option<Keypair>,
-    key: Option<Key>,
-    key_nonce: Option<KeyNonce>,
-    peer_id: Option<PeerId>,
-}
-
-impl Secret {
-    fn merge(&mut self, other: Secret) {
-        if other.keypair.is_some() {
-            self.keypair = other.keypair
-        }
-        if other.key.is_some() {
-            self.key = other.key
-        }
-        if other.key_nonce.is_some() {
-            self.key_nonce = other.key_nonce
-        }
-        if other.peer_id.is_some() {
-            self.peer_id = other.peer_id
-        }
+impl AsRef<[u8]> for Metadata {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
     }
 }
 
-impl From<Keypair> for Secret {
-    fn from(key: Keypair) -> Self {
-        Self {
-            keypair: Some(key),
-            key: None,
-            key_nonce: None,
-            peer_id: None,
-        }
-    }
-}
-
-impl From<Key> for Secret {
-    fn from(key: Key) -> Self {
-        Self {
-            keypair: None,
-            key: Some(key),
-            key_nonce: None,
-            peer_id: None,
-        }
-    }
-}
-
-impl From<KeyNonce> for Secret {
-    fn from(key: KeyNonce) -> Self {
-        Self {
-            keypair: None,
-            key: None,
-            key_nonce: Some(key),
-            peer_id: None,
-        }
-    }
-}
-
-impl From<PeerId> for Secret {
-    fn from(peer: PeerId) -> Self {
-        Self {
-            keypair: None,
-            key: None,
-            key_nonce: None,
-            peer_id: Some(peer),
-        }
-    }
-}
-
-pub struct Secrets {
-    secrets: BTreeMap<Metadata, Secret>,
-}
+pub struct Secrets(sled::Tree);
 
 impl Secrets {
     pub fn new(tree: sled::Tree) -> Self {
-        Self(Default::default())
+        Self(tree)
     }
 
-    pub fn keypair(&self, metadata: &Metadata) -> Option<&Keypair> {
-        self.secrets.get(metadata)?.keypair.as_ref()
+    pub fn keypair(&self, metadata: Metadata) -> Result<Option<Keypair>> {
+        Ok(self
+            .0
+            .get(metadata.ty(KeyType::Keypair))?
+            .map(|v| *Ref::<Keypair>::new(v).as_ref()))
     }
 
-    pub fn key(&self, metadata: &Metadata) -> Option<&Key> {
-        let metadata = self.secrets.get(metadata)?;
-        if metadata.key.is_some() {
-            metadata.key.as_ref()
+    pub fn key(&self, metadata: Metadata) -> Result<Option<Key>> {
+        Ok(self
+            .0
+            .get(metadata.ty(KeyType::Key))?
+            .map(|v| *Ref::<Key>::new(v).as_ref()))
+    }
+
+    pub fn nonce(&self, metadata: Metadata) -> Result<u64> {
+        let key = metadata.ty(KeyType::Nonce);
+        let nonce = self.0.transaction::<_, _, std::io::Error>(|tree| {
+            let nonce = tree
+                .get(key.as_ref())?
+                .map(|v| u64::from_le_bytes(v.as_ref().try_into().unwrap()))
+                .unwrap_or_default();
+            let next = nonce + 1;
+            tree.insert(key.as_ref(), next.to_le_bytes().as_ref())?;
+            Ok(nonce)
+        })?;
+        Ok(nonce)
+    }
+
+    pub fn key_nonce(&self, metadata: Metadata) -> Result<Option<KeyNonce>> {
+        if let Some(key) = self.key(metadata)? {
+            let nonce = self.nonce(metadata)?;
+            Ok(Some(KeyNonce { key, nonce }))
         } else {
-            metadata.key_nonce.as_ref().map(|k| k.key())
+            Ok(None)
         }
     }
 
-    pub fn key_nonce(&mut self, metadata: &Metadata) -> Option<&mut KeyNonce> {
-        self.secrets.get_mut(metadata)?.key_nonce.as_mut()
+    pub fn generate_keypair(&self, metadata: Metadata) -> Result<()> {
+        self.0
+            .insert(metadata.ty(KeyType::Keypair), archive(&Keypair::generate()))?;
+        Ok(())
     }
 
-    #[allow(unused)]
-    pub fn peer_id(&self, metadata: &Metadata) -> Option<&PeerId> {
-        self.secrets.get(metadata)?.peer_id.as_ref()
+    pub fn generate_key(&self, metadata: Metadata) -> Result<()> {
+        self.0
+            .insert(metadata.ty(KeyType::Key), archive(&Key::generate()))?;
+        self.0.insert(metadata.ty(KeyType::Key), [0; 8].as_ref())?;
+        Ok(())
     }
 
-    pub fn generate_keypair(&mut self, metadata: Metadata) {
-        self.secrets
-            .entry(metadata)
-            .or_default()
-            .merge(Secret::from(Keypair::generate()));
-    }
-
-    pub fn generate_key(&mut self, metadata: Metadata) {
-        self.secrets
-            .entry(metadata)
-            .or_default()
-            .merge(Secret::from(KeyNonce::generate()));
-    }
-
-    pub fn add_key(&mut self, metadata: Metadata, key: Key) {
-        self.secrets
-            .entry(metadata)
-            .or_default()
-            .merge(Secret::from(key));
-    }
-
-    pub fn add_peer(&mut self, metadata: Metadata, peer: PeerId) {
-        self.secrets
-            .entry(metadata)
-            .or_default()
-            .merge(Secret::from(peer));
+    pub fn add_key(&self, metadata: Metadata, key: Key) -> Result<()> {
+        self.0.insert(metadata.ty(KeyType::Key), archive(&key))?;
+        Ok(())
     }
 }

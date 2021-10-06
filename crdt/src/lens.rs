@@ -1,4 +1,4 @@
-use crate::{DotStore, PrimitiveKind, Prop, Schema};
+use crate::{Crdt, DotStore, PrimitiveKind, Prop, Schema};
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
 use rkyv::ser::serializers::AllocSerializer;
@@ -220,7 +220,7 @@ impl<'a> LensRef<'a> {
         Ok(())
     }
 
-    pub fn transform_crdt(&self, store: &mut DotStore) {
+    pub fn transform_dotstore(&self, store: &mut DotStore) {
         match (self, store) {
             (Self::Make(k), v) => {
                 *v = match k {
@@ -263,16 +263,20 @@ impl<'a> LensRef<'a> {
             }
             (Self::LensIn(rev, key, lens), DotStore::Struct(m)) => {
                 if let Some(v) = m.get_mut(key.as_str()) {
-                    lens.to_ref().maybe_reverse(*rev).transform_crdt(v);
+                    lens.to_ref().maybe_reverse(*rev).transform_dotstore(v);
                 }
             }
             (Self::LensMapValue(rev, lens), DotStore::DotMap(vs)) => {
                 for v in vs.values_mut() {
-                    lens.to_ref().maybe_reverse(*rev).transform_crdt(v);
+                    lens.to_ref().maybe_reverse(*rev).transform_dotstore(v);
                 }
             }
             _ => {}
         }
+    }
+
+    pub fn transform_crdt(&self, store: &Crdt) {
+        todo!()
     }
 }
 
@@ -329,11 +333,17 @@ impl ArchivedLenses {
         }
         c
     }
-}
 
-pub fn transform(from_lenses: &ArchivedLenses, store: &mut DotStore, to_lenses: &ArchivedLenses) {
-    for lens in from_lenses.transform(to_lenses) {
-        lens.transform_crdt(store);
+    pub fn transform_dotstore(&self, store: &mut DotStore, target: &ArchivedLenses) {
+        for lens in self.transform(target) {
+            lens.transform_dotstore(store);
+        }
+    }
+
+    pub fn transform_crdt(&self, crdt: &Crdt, target: &ArchivedLenses) {
+        for lens in self.transform(target) {
+            lens.transform_crdt(crdt);
+        }
     }
 }
 

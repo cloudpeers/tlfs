@@ -148,32 +148,23 @@ impl Encrypted {
     }
 }
 
-#[derive(Clone, Copy, Archive, Serialize, Deserialize)]
+#[derive(Archive, Serialize, Deserialize)]
 #[archive(as = "KeyNonce")]
 #[repr(C)]
 pub struct KeyNonce {
-    key: Key,
-    nonce: u64,
+    pub(crate) key: Key,
+    pub(crate) nonce: u64,
 }
 
 impl KeyNonce {
-    pub fn generate() -> Self {
-        Self {
-            key: Key::generate(),
-            nonce: 0,
-        }
-    }
-
     pub fn key(&self) -> &Key {
         &self.key
     }
 
-    pub fn encrypt<P>(&mut self, payload: &P) -> Encrypted
+    pub fn encrypt<P>(self, payload: &P) -> Encrypted
     where
         P: Serialize<AllocSerializer<256>>,
     {
-        let encrypted = self.key.encrypt(payload, self.nonce);
-        self.nonce += 1;
-        encrypted
+        self.key.encrypt(payload, self.nonce)
     }
 }

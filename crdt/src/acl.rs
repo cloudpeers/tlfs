@@ -1,9 +1,9 @@
-use crate::{Crdt, DocId, Dot, DotStoreType, Path, PathBuf, PeerId, Ref};
+use crate::{Crdt, DocId, Dot, DotStore, DotStoreType, Path, PathBuf, PeerId, Ref};
 use anyhow::Result;
 use bytecheck::CheckBytes;
 use crepe::crepe;
 use rkyv::{Archive, Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -335,41 +335,48 @@ impl Engine {
         false
     }
 
-    /*pub fn filter(&self, label: LabelRef<'_>, peer: PeerId, perm: Permission, crdt: &Crdt) -> Crdt {
-        let data = if self.can(peer, perm, label.as_ref()) {
-            crdt.data.clone()
+    pub fn filter(
+        &self,
+        path: &mut PathBuf,
+        peer: PeerId,
+        perm: Permission,
+        store: &DotStore,
+    ) -> DotStore {
+        if self.can(peer, perm, path.as_path()) {
+            store.clone()
         } else {
-            match &crdt.data {
-                Data::Null => Data::Null,
-                Data::Flag(_) => Data::Null,
-                Data::Reg(_) => Data::Null,
-                Data::Table(t) => {
-                    let mut delta = ORMap::default();
-                    for (k, v) in &***t {
-                        let v2 = self.filter(LabelRef::Key(&label, k), peer, perm, v);
-                        if v2.data != Data::Null {
-                            delta.insert(k.clone(), v2);
+            match store {
+                DotStore::Null => DotStore::Null,
+                DotStore::DotSet(_) => DotStore::Null,
+                DotStore::DotFun(_) => DotStore::Null,
+                DotStore::DotMap(map) => {
+                    let mut delta = BTreeMap::new();
+                    for (key, store) in map {
+                        path.key(key);
+                        let store2 = self.filter(path, peer, perm, store);
+                        path.pop();
+                        if store2 != DotStore::Null {
+                            delta.insert(key.clone(), store2);
                         }
                     }
-                    Data::Table(delta)
+                    DotStore::DotMap(delta)
                 }
-                Data::Struct(fields) => {
+                DotStore::Struct(fields) => {
                     let mut delta = BTreeMap::new();
                     for (k, v) in fields {
-                        let v2 = self.filter(LabelRef::Field(&label, k), peer, perm, v);
-                        if v2.data != Data::Null {
+                        path.field(k);
+                        let v2 = self.filter(path, peer, perm, v);
+                        path.pop();
+                        if v2 != DotStore::Null {
                             delta.insert(k.clone(), v2);
                         }
                     }
-                    Data::Struct(delta)
+                    DotStore::Struct(delta)
                 }
+                DotStore::Policy(policy) => DotStore::Policy(policy.clone()),
             }
-        };
-        Crdt {
-            data,
-            policy: crdt.policy.clone(),
         }
-    }*/
+    }
 }
 
 #[cfg(test)]
