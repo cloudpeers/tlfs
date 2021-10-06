@@ -1,12 +1,12 @@
 //! This module contains an efficient set of dots for use as both a dot store and a causal context
 use bytecheck::CheckBytes;
 use itertools::Itertools;
-use range_collections::RangeSet;
+use range_collections::{AbstractRangeSet, RangeSet, RangeSet2};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::{
     collections::{btree_map, BTreeMap, BTreeSet},
     iter::FromIterator,
-    ops::{BitOrAssign, Bound, Range},
+    ops::{Bound, Range},
 };
 
 /// A replica id 𝕀 is an opaque identifier for a replica
@@ -76,7 +76,7 @@ impl<I: ReplicaId> From<(I, u64)> for Dot<I> {
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(CheckBytes))]
 #[repr(C)]
-pub struct DotSet<I>(BTreeMap<I, RangeSet<u64>>);
+pub struct DotSet<I>(BTreeMap<I, RangeSet2<u64>>);
 
 impl<I: ReplicaId> FromIterator<Dot<I>> for DotSet<I> {
     fn from_iter<T: IntoIterator<Item = Dot<I>>>(iter: T) -> Self {
@@ -86,7 +86,7 @@ impl<I: ReplicaId> FromIterator<Dot<I>> for DotSet<I> {
             .group_by(|x| x.id)
             .into_iter()
             .map(|(id, elems)| {
-                let mut entry: RangeSet<u64> = elems.fold(RangeSet::empty(), |mut set, dot| {
+                let mut entry: RangeSet2<u64> = elems.fold(RangeSet::empty(), |mut set, dot| {
                     let c = dot.counter();
                     set |= RangeSet::from(c..c + 1);
                     set
@@ -126,7 +126,7 @@ impl<I: ReplicaId> DotSet<I> {
 
     pub fn contains(&self, dot: &Dot<I>) -> bool {
         if dot.counter == 0 {
-            return true;
+            return false;
         }
         self.0
             .get(&dot.id)
@@ -242,7 +242,7 @@ impl<I: ReplicaId> DotSet<I> {
         for (k, vr) in other.0.iter() {
             match self.0.entry(*k) {
                 btree_map::Entry::Occupied(e) => {
-                    e.into_mut().bitor_assign(vr.clone());
+                    e.into_mut().union_with(vr);
                 }
                 btree_map::Entry::Vacant(e) => {
                     e.insert(vr.clone());
@@ -254,7 +254,8 @@ impl<I: ReplicaId> DotSet<I> {
     pub fn is_causal(&self) -> bool {
         self.0.iter().all(|(_, r)| {
             let b = r.boundaries();
-            b.len() == 1 && !b.contains(&u64::max_value())
+            assert!(b.len() > 0);
+            b.len() <= 2 && b[0] == 0
         })
     }
 }
