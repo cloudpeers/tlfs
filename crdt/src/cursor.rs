@@ -3,13 +3,13 @@ use crate::{
     Permission, Policy, Primitive, PrimitiveKind,
 };
 use anyhow::{anyhow, Result};
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct W {
     peer_id: PeerId,
-    counter: Rc<RefCell<u64>>,
+    counter: Arc<AtomicU64>,
     ctx: CausalContext,
 }
 
@@ -147,7 +147,7 @@ impl<'a> Cursor<'a, W> {
         ctx: CausalContext,
         engine: &'a Engine,
         peer_id: PeerId,
-        counter: u64,
+        counter: Arc<AtomicU64>,
         schema: &'a ArchivedSchema,
     ) -> Self {
         Self {
@@ -157,16 +157,15 @@ impl<'a> Cursor<'a, W> {
             schema,
             w: W {
                 peer_id,
-                counter: Rc::new(RefCell::new(counter)),
+                counter,
                 ctx,
             },
         }
     }
 
     fn dot(&self) -> Dot {
-        let mut counter = self.w.counter.borrow_mut();
-        *counter += 1;
-        Dot::new(self.w.peer_id, *counter)
+        let counter = self.w.counter.fetch_add(1, Ordering::SeqCst);
+        Dot::new(self.w.peer_id, counter)
     }
 
     /// Enables a flag.

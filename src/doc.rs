@@ -5,7 +5,9 @@ use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
 use rkyv::ser::serializers::AllocSerializer;
 use rkyv::ser::Serializer;
-use rkyv::{Archive, Deserialize, Serialize};
+use rkyv::{Archive, Archived, Deserialize, Serialize};
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
 use tlfs_crdt::{
     empty_hash, Actor, Causal, CausalContext, Cursor, DocId, Dot, Hash, Lenses, PathBuf, PeerId,
     Permission, Policy, Ref, Schema, W,
@@ -31,8 +33,10 @@ pub struct Doc<'a> {
     id: DocId,
     hash: Hash,
     peer_id: PeerId,
-    counter: u64,
+    counter: Arc<AtomicU64>,
     ctx: CausalContext,
+    lenses: Ref<Lenses>,
+    schema: Ref<Schema>,
     sdk: &'a Sdk,
 }
 
@@ -51,12 +55,16 @@ impl<'a> Doc<'a> {
         )?;
         let mut ctx = CausalContext::default();
         sdk.crdt.join(id, &mut ctx, &delta)?;
+        let lenses = sdk.registry.lenses(&hash)?.unwrap();
+        let schema = sdk.registry.schema(&hash)?.unwrap();
         Ok(Self {
             id,
             hash,
             peer_id,
-            counter: 0,
+            counter: Default::default(),
             ctx,
+            lenses,
+            schema,
             sdk,
         })
     }
@@ -72,13 +80,13 @@ impl<'a> Doc<'a> {
     }
 
     /// Returns the lenses.
-    pub fn lenses(&self) -> Result<Ref<Lenses>> {
-        Ok(self.sdk.registry.lenses(&self.hash)?.unwrap())
+    pub fn lenses(&self) -> &Archived<Lenses> {
+        self.lenses.as_ref()
     }
 
     /// Returns the schema.
-    pub fn schema(&self) -> Result<Ref<Schema>> {
-        Ok(self.sdk.registry.schema(&self.hash)?.unwrap())
+    pub fn schema(&self) -> &Archived<Schema> {
+        self.schema.as_ref()
     }
 
     /// Adds a decryption key for a peer.
@@ -95,42 +103,21 @@ impl<'a> Doc<'a> {
     }
 
     /// Performs a read only query on the document.
-    pub fn cursor<T, F>(&self, mut f: F) -> Result<T>
-    where
-        F: FnMut(Cursor<'_, ()>) -> Result<T>,
-    {
-        let schema = self.schema()?;
-        f(Cursor::<'_, ()>::new(
+    pub fn cursor(&self) -> Cursor<'_, W> {
+        Cursor::<'_, W>::new(
             self.id,
             &self.sdk.crdt,
+            self.ctx.clone(),
             &self.sdk.engine,
-            schema.as_ref(),
-        ))
+            self.peer_id,
+            self.counter.clone(),
+            self.schema.as_ref(),
+        )
     }
 
-    /// Performs a transaction on the document returning a signed and
-    /// encrypted change set that can be applied to a document.
-    pub fn transaction<F>(&mut self, mut f: F) -> Result<Vec<u8>>
-    where
-        F: FnMut(Cursor<'_, W>) -> Result<Causal>,
-    {
-        let causal = {
-            let schema = self.schema()?;
-            let cursor = Cursor::<'_, W>::new(
-                self.id,
-                &self.sdk.crdt,
-                self.ctx.clone(),
-                &self.sdk.engine,
-                self.peer_id,
-                self.counter,
-                schema.as_ref(),
-            );
-            f(cursor)?
-        };
-        let counter = causal.ctx.max(&self.peer_id);
-        if counter <= self.counter {
-            return Err(anyhow!("invalid transaction"));
-        }
+    /// Applies a local change to the current document and returns a signed and
+    /// encrypted change to send to peers.
+    pub fn apply(&self, causal: Causal) -> Result<Vec<u8>> {
         let delta = Delta {
             causal,
             hash: self.hash.into(),
@@ -148,7 +135,6 @@ impl<'a> Doc<'a> {
             .key_nonce(metadata)?
             .unwrap()
             .encrypt(&signed);
-        self.counter = counter;
         Ok(encrypted.archive())
     }
 

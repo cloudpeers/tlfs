@@ -83,28 +83,26 @@ mod tests {
 
         let mut doc = sdk.doc()?;
         doc.transform(hash)?;
-        assert!(doc
-            .cursor(|c| Ok(c.can(peer_id, Permission::Write)))
-            .unwrap());
+        assert!(doc.cursor().can(peer_id, Permission::Write));
 
         let title = "something that needs to be done";
 
-        let mut delta = doc.transaction(|cursor| {
-            cursor
-                .field("todos")?
-                .key(&0u64.into())?
-                .field("title")?
-                .assign(title)
-        })?;
-        doc.join(&peer_id, &mut delta)?;
-        let value = doc.cursor(|c| {
-            c.field("todos")?
-                .key(&0u64.into())?
-                .field("title")?
-                .strs()?
-                .next()
-                .unwrap()
-        })?;
+        let delta = doc
+            .cursor()
+            .field("todos")?
+            .key(&0u64.into())?
+            .field("title")?
+            .assign(title)?;
+        doc.apply(delta)?;
+
+        let value = doc
+            .cursor()
+            .field("todos")?
+            .key(&0u64.into())?
+            .field("title")?
+            .strs()?
+            .next()
+            .unwrap()?;
         assert_eq!(value, title);
         Ok(())
     }
