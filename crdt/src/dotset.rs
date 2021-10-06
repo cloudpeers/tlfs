@@ -86,14 +86,11 @@ impl<I: ReplicaId> FromIterator<Dot<I>> for DotSet<I> {
             .group_by(|x| x.id)
             .into_iter()
             .map(|(id, elems)| {
-                let mut entry: RangeSet2<u64> = elems.fold(RangeSet::empty(), |mut set, dot| {
+                let entry: RangeSet2<u64> = elems.fold(RangeSet::empty(), |mut set, dot| {
                     let c = dot.counter();
                     set |= RangeSet::from(c..c + 1);
                     set
                 });
-                if entry.contains(&1) {
-                    entry |= RangeSet::from(..1);
-                }
                 (id, entry)
             })
             .collect();
@@ -119,15 +116,12 @@ impl<I: ReplicaId> DotSet<I> {
         Self(
             x.into_iter()
                 .filter(|(_, max)| *max > 0)
-                .map(|(i, max)| (i, RangeSet::from(1..max)))
+                .map(|(i, max)| (i, RangeSet::from(1..max + 1)))
                 .collect(),
         )
     }
 
     pub fn contains(&self, dot: &Dot<I>) -> bool {
-        if dot.counter == 0 {
-            return false;
-        }
         self.0
             .get(&dot.id)
             .map(|range| range.contains(&dot.counter))
@@ -149,11 +143,7 @@ impl<I: ReplicaId> DotSet<I> {
             return;
         }
         let counter = item.counter();
-        let range = if counter == 1 {
-            RangeSet::from(..2)
-        } else {
-            RangeSet::from(counter..counter + 1)
-        };
+        let range = RangeSet::from(counter..counter + 1);
         match self.0.get_mut(&item.id) {
             Some(existing) => {
                 *existing |= range;
@@ -252,11 +242,15 @@ impl<I: ReplicaId> DotSet<I> {
     }
 
     pub fn is_causal(&self) -> bool {
+        self.assert_invariants();
         self.0.iter().all(|(_, r)| {
             let b = r.boundaries();
-            assert!(b.len() > 0);
-            b.len() <= 2 && b[0] == 0
+            b.len() <= 2 && b[0] == 1
         })
+    }
+
+    fn assert_invariants(&self) {
+        assert!(self.0.iter().all(|(_, r)| !r.is_empty()));
     }
 }
 
