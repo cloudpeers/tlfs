@@ -347,7 +347,7 @@ impl ArchivedLenses {
     }
 }
 
-/*#[cfg(test)]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::props::*;
@@ -366,13 +366,26 @@ mod tests {
         }
 
         #[test]
-        fn transform_preserves_validity((lens, mut schema, mut crdt) in lens_schema_and_crdt()) {
+        fn transform_preserves_validity((lens, mut schema, mut crdt) in lens_schema_and_causal()) {
             let lens = archive(&lens);
             let lens = unsafe { archived_root::<Lens>(&lens) };
             prop_assume!(validate(&schema, &crdt));
             prop_assume!(lens.to_ref().transform_schema(&mut schema).is_ok());
-            lens.to_ref().transform_crdt(&mut crdt);
+            lens.to_ref().transform_dotstore(&mut crdt.store);
             prop_assert!(validate(&schema, &crdt));
         }
+
+        #[test]
+        #[ignore]
+        fn crdt_transform((lens, schema, mut causal) in lens_schema_and_causal()) {
+            let lens = archive(&lens);
+            let lens = unsafe { archived_root::<Lens>(&lens) };
+            prop_assume!(validate(&schema, &causal));
+            let (ctx, crdt) = causal_to_crdt(&causal);
+            lens.to_ref().transform_crdt(&crdt);
+            let causal2 = crdt_to_causal(&crdt, &ctx);
+            lens.to_ref().transform_dotstore(&mut causal.store);
+            assert_eq!(causal, causal2);
+        }
     }
-}*/
+}

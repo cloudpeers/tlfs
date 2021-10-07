@@ -947,37 +947,44 @@ mod tests {
         Ok(())
     }
 
-    fn join(c: &Causal, o: &Causal) -> Causal {
-        let mut c = c.clone();
-        c.join(o);
-        c
-    }
-
     proptest! {
         #[test]
-        fn idempotent(a in arb_causal(arb_dotstore())) {
+        fn causal_unjoin(a in arb_causal(arb_dotstore()), b in arb_ctx()) {
+            let b = a.unjoin(&b);
+            prop_assert_eq!(join(&a, &b), a);
+        }
+
+        #[test]
+        fn causal_join_idempotent(a in arb_causal(arb_dotstore())) {
             prop_assert_eq!(join(&a, &a), a);
         }
 
         #[test]
-        fn commutative(dots in arb_causal(arb_dotstore()), a in arb_ctx(), b in arb_ctx()) {
+        fn causal_join_commutative(dots in arb_causal(arb_dotstore()), a in arb_ctx(), b in arb_ctx()) {
             let a = dots.unjoin(&a);
             let b = dots.unjoin(&b);
             prop_assert_eq!(join(&a, &b), join(&b, &a));
         }
 
         #[test]
-        fn unjoin(a in arb_causal(arb_dotstore()), b in arb_ctx()) {
-            let b = a.unjoin(&b);
-            prop_assert_eq!(join(&a, &b), a);
-        }
-
-        #[test]
-        fn associative(dots in arb_causal(arb_dotstore()), a in arb_ctx(), b in arb_ctx(), c in arb_ctx()) {
+        fn causal_join_associative(dots in arb_causal(arb_dotstore()), a in arb_ctx(), b in arb_ctx(), c in arb_ctx()) {
             let a = dots.unjoin(&a);
             let b = dots.unjoin(&b);
             let c = dots.unjoin(&c);
             prop_assert_eq!(join(&join(&a, &b), &c), join(&a, &join(&b, &c)));
+        }
+
+        #[test]
+        #[ignore]
+        // TODO: crdt can infer defaults from path, causal just sets it to null
+        fn crdt_join(dots in arb_causal(arb_dotstore()), a in arb_ctx(), b in arb_ctx()) {
+            let a = dots.unjoin(&a);
+            let b = dots.unjoin(&b);
+            let (mut ctx, crdt) = causal_to_crdt(&a);
+            let c = join(&a, &b);
+            crdt.join(DocId::new([0; 32]), &mut ctx, &b).unwrap();
+            let c2 = crdt_to_causal(&crdt, &ctx);
+            assert_eq!(c, c2);
         }
     }
 }

@@ -1,13 +1,13 @@
 use crate::path::DotStore;
 use crate::{
-    Causal, CausalContext, DocId, Dot, DotSet, Kind, Lens, Lenses, PeerId, Primitive,
+    Causal, CausalContext, Crdt, DocId, Dot, DotSet, Kind, Lens, Lenses, PeerId, Primitive,
     PrimitiveKind, Prop, Schema,
 };
 use proptest::prelude::*;
 use rkyv::ser::serializers::AllocSerializer;
 use rkyv::ser::Serializer;
 use rkyv::{archived_root, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::ops::Range;
 
 pub fn arb_prop() -> impl Strategy<Value = Prop> {
@@ -306,7 +306,16 @@ fn lenses_to_schema(lenses: &Lenses) -> Schema {
 }
 
 prop_compose! {
-    pub fn lens_schema_and_crdt()
+    pub fn lens_and_schema()
+        (schema in arb_schema())
+        (schema in Just(schema.clone()), lens in arb_lens_for_schema(&schema)) -> (Lens, Schema)
+    {
+        (lens, schema)
+    }
+}
+
+prop_compose! {
+    pub fn lens_schema_and_causal()
         (schema in arb_schema())
         (lens in arb_lens_for_schema(&schema), schema in Just(schema.clone()), crdt in arb_causal(arb_dotstore_for_schema(schema))) -> (Lens, Schema, Causal)
     {
@@ -315,10 +324,28 @@ prop_compose! {
 }
 
 prop_compose! {
-    pub fn lenses_and_crdt()
+    pub fn lenses_and_causal()
         (lenses in arb_lenses())
         (lenses in Just(lenses.clone()), crdt in arb_causal(arb_dotstore_for_schema(lenses_to_schema(&lenses)))) -> (Lenses, Causal)
     {
         (lenses, crdt)
     }
+}
+
+pub fn join(c: &Causal, o: &Causal) -> Causal {
+    let mut c = c.clone();
+    c.join(o);
+    c
+}
+
+pub fn causal_to_crdt(causal: &Causal) -> (CausalContext, Crdt) {
+    let mut ctx = CausalContext::new();
+    let crdt = Crdt::memory("mem").unwrap();
+    crdt.join(DocId::new([0; 32]), &mut ctx, causal).unwrap();
+    (ctx, crdt)
+}
+
+pub fn crdt_to_causal(crdt: &Crdt, ctx: &CausalContext) -> Causal {
+    crdt.unjoin(DocId::new([0; 32]), ctx, &CausalContext::new())
+        .unwrap()
 }
