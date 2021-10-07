@@ -1,7 +1,6 @@
-use crate::path::DotStore;
 use crate::{
-    Causal, CausalContext, Crdt, DocId, Dot, DotSet, Kind, Lens, Lenses, PeerId, Primitive,
-    PrimitiveKind, Prop, Schema,
+    Causal, CausalContext, Crdt, DocId, Dot, DotSet, DotStore, Kind, Lens, Lenses, PeerId,
+    Primitive, PrimitiveKind, Prop, Schema,
 };
 use proptest::prelude::*;
 use rkyv::ser::serializers::AllocSerializer;
