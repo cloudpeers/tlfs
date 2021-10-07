@@ -1,4 +1,4 @@
-use crate::{archive, CausalContext, DocId, Dot, PeerId, Policy, Ref};
+use crate::{archive, CausalContext, DocId, Dot, DotSet, PeerId, Policy, Ref};
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Deserialize, Serialize};
@@ -44,7 +44,7 @@ impl From<&str> for Primitive {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Archive, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
 #[archive_attr(derive(CheckBytes))]
 #[archive_attr(check_bytes(
@@ -53,7 +53,7 @@ impl From<&str> for Primitive {
 #[repr(C)]
 pub enum DotStore {
     Null,
-    DotSet(BTreeSet<Dot>),
+    DotSet(DotSet),
     DotFun(BTreeMap<Dot, Primitive>),
     DotMap(
         #[omit_bounds]
@@ -109,12 +109,23 @@ impl DotStoreType {
 }
 
 impl DotStore {
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::Null => true,
+            Self::DotSet(set) => set.is_empty(),
+            Self::DotFun(fun) => fun.is_empty(),
+            Self::DotMap(map) => map.is_empty(),
+            Self::Struct(fields) => fields.is_empty(),
+            Self::Policy(policy) => policy.is_empty(),
+        }
+    }
+
     pub fn dots(&self, ctx: &mut CausalContext) {
         match self {
             Self::Null => {}
             Self::DotSet(set) => {
-                for dot in set {
-                    ctx.insert(*dot);
+                for dot in set.iter() {
+                    ctx.insert(dot);
                 }
             }
             Self::DotFun(fun) => {
@@ -139,6 +150,124 @@ impl DotStore {
             }
         }
     }
+
+    pub fn join(&mut self, ctx: &CausalContext, other: &Self, other_ctx: &CausalContext) {
+        match (self, other) {
+            (me @ Self::Null, other) => *me = other.clone(),
+            (_, Self::Null) => {}
+            (Self::DotSet(set), Self::DotSet(other)) => {
+                // from the paper
+                // (s, c) ∐ (s', c') = ((s ∩ s') ∪ (s \ c') (s' \ c), c ∪ c')
+                // (s \ c')
+                let a = set.difference(other_ctx);
+                // (s' \ c)
+                let b = other.difference(ctx);
+                // ((s ∩ s')
+                *set = set.intersection(other);
+                // (s ∩ s') ∪ (s \ c') (s' \ c)
+                set.union(&a);
+                set.union(&b);
+            }
+            (Self::DotFun(fun), Self::DotFun(other)) => {
+                // from the paper
+                // (m, c) ∐ (m', c') = ({ k -> m(k) ∐ m'(k), k ∈ dom m ∩ dom m' } ∪
+                //                      {(d, v) ∊ m | d ∉ c'} ∪ {(d, v) ∊ m' | d ∉ c}, c ∪ c')
+                fun.retain(|dot, _v| {
+                    if let Some(_v2) = other.get(dot) {
+                        // join all elements that are in both funs
+                        // { k -> m(k) ∐ m'(k), k ∈ dom m ∩ dom m' }
+                        // this can only occur if a dot was reused
+                        // v.join(v2);
+                        true
+                    } else {
+                        // keep all elements unmodified that are not in the other causal context
+                        // { (d, v) ∊ m | d ∉ c' }
+                        !other_ctx.contains(dot)
+                    }
+                });
+                // copy all elements from the other fun, that are neither in our fun nor in our
+                // causal context
+                // { (d, v) ∊ m' | d ∉ c }
+                for (d, v) in other {
+                    if !fun.contains_key(d) && !ctx.contains(d) {
+                        fun.insert(*d, v.clone());
+                    }
+                }
+            }
+            (Self::DotMap(map), Self::DotMap(other)) => {
+                // from the paper
+                // (m, c) ∐ (m', c') = ({ k -> v(k), k ∈ dom m ∪ dom m' ∧ v(k) ≠ ⊥ }, c ∪ c')
+                //                     where v(k) = fst ((m(k), c) ∐ (m'(k), c'))
+                let mut all = map.keys().cloned().collect::<Vec<_>>();
+                all.extend(other.keys().cloned());
+                for key in all {
+                    let v1 = map.entry(key.clone()).or_insert(DotStore::Null);
+                    let v2 = other.get(&key).unwrap_or(&DotStore::Null);
+                    v1.join(ctx, v2, other_ctx);
+                    if v1.is_empty() {
+                        map.remove(&key);
+                    }
+                }
+            }
+            (Self::Struct(fields), Self::Struct(other)) => {
+                for (field, value2) in other {
+                    if let Some(value) = fields.get_mut(field) {
+                        value.join(ctx, value2, other_ctx);
+                    } else {
+                        fields.insert(field.clone(), value2.clone());
+                    }
+                }
+            }
+            (Self::Policy(policy), Self::Policy(other)) => {
+                policy.extend(other.iter().map(|(k, v)| (*k, v.clone())));
+            }
+            (x, y) => panic!("invalid data\n l: {:?}\n r: {:?}", x, y),
+        }
+    }
+
+    pub fn unjoin(&self, diff: &CausalContext) -> Self {
+        match self {
+            Self::Null => Self::Null,
+            Self::DotSet(set) => Self::DotSet(set.intersection(diff)),
+            Self::DotFun(fun) => {
+                let mut delta = BTreeMap::new();
+                for (dot, v) in fun {
+                    if diff.contains(dot) {
+                        delta.insert(*dot, v.clone());
+                    }
+                }
+                Self::DotFun(delta)
+            }
+            Self::DotMap(map) => {
+                let mut delta = BTreeMap::new();
+                for (k, v) in map {
+                    let v = v.unjoin(diff);
+                    if !v.is_empty() {
+                        delta.insert(k.clone(), v);
+                    }
+                }
+                Self::DotMap(delta)
+            }
+            Self::Struct(fields) => {
+                let mut delta = BTreeMap::new();
+                for (k, v) in fields {
+                    let v = v.unjoin(diff);
+                    if !v.is_empty() {
+                        delta.insert(k.clone(), v);
+                    }
+                }
+                Self::Struct(delta)
+            }
+            Self::Policy(policy) => {
+                let delta = policy
+                    .iter()
+                    .filter(|(dot, _)| diff.contains(dot))
+                    .map(|(k, v)| (*k, v.clone()))
+                    .collect();
+                Self::Policy(delta)
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
@@ -151,7 +280,14 @@ pub struct Causal {
 
 impl Causal {
     pub fn join(&mut self, other: &Causal) {
-        todo!()
+        self.store.join(&self.ctx, &other.store, &other.ctx);
+        self.ctx.union(&other.ctx);
+    }
+
+    pub fn unjoin(&self, ctx: &CausalContext) -> Self {
+        let ctx = self.ctx.difference(ctx);
+        let store = self.store.unjoin(&ctx);
+        Self { store, ctx }
     }
 }
 
@@ -418,7 +554,7 @@ impl Crdt {
         &self,
         path: &mut PathBuf,
         ctx: &CausalContext,
-        other: &BTreeSet<Dot>,
+        other: &DotSet,
         other_ctx: &CausalContext,
     ) -> Result<()> {
         for res in self.0.scan_prefix(&path).keys() {
@@ -432,9 +568,9 @@ impl Crdt {
                 self.0.remove(key)?;
             }
         }
-        for dot in other {
-            if !ctx.contains(dot) {
-                path.dotset(dot);
+        for dot in other.iter() {
+            if !ctx.contains(&dot) {
+                path.dotset(&dot);
                 self.0.insert(&path, &[])?;
                 path.pop();
             }
@@ -594,7 +730,7 @@ impl Crdt {
             }
             let store = match path.ty() {
                 Some(DotStoreType::Set) => {
-                    let mut dotset = BTreeSet::new();
+                    let mut dotset = DotSet::new();
                     dotset.insert(dot);
                     DotStore::DotSet(dotset)
                 }
@@ -619,7 +755,7 @@ impl Crdt {
     }
 
     pub fn enable(&self, path: Path<'_>, ctx: &CausalContext, dot: Dot) -> Result<Causal> {
-        let mut store = BTreeSet::new();
+        let mut store = DotSet::new();
         store.insert(dot);
         let mut causal = Causal {
             store: DotStore::DotSet(store),
@@ -704,8 +840,8 @@ impl Crdt {
 #[cfg(test)]
 mod tests {
     use super::*;
-    //use crate::props::*;
-    //use proptest::prelude::*;
+    use crate::props::*;
+    use proptest::prelude::*;
 
     #[test]
     fn test_ewflag() -> Result<()> {
@@ -811,29 +947,37 @@ mod tests {
         Ok(())
     }
 
-    /*proptest! {
+    fn join(c: &Causal, o: &Causal) -> Causal {
+        let mut c = c.clone();
+        c.join(o);
+        c
+    }
+
+    proptest! {
         #[test]
-        fn idempotent(a in arb_causal()) {
+        fn idempotent(a in arb_causal(arb_dotstore())) {
             prop_assert_eq!(join(&a, &a), a);
         }
 
         #[test]
-        fn commutative(a in arb_causal(), b in arb_causal()) {
+        fn commutative(dots in arb_causal(arb_dotstore()), a in arb_ctx(), b in arb_ctx()) {
+            let a = dots.unjoin(&a);
+            let b = dots.unjoin(&b);
             prop_assert_eq!(join(&a, &b), join(&b, &a));
         }
 
         #[test]
-        fn unjoin(a in arb_causal(), b in arb_ctx()) {
+        fn unjoin(a in arb_causal(arb_dotstore()), b in arb_ctx()) {
             let b = a.unjoin(&b);
             prop_assert_eq!(join(&a, &b), a);
         }
 
         #[test]
-        fn associative(dots in arb_causal(), a in arb_ctx(), b in arb_ctx(), c in arb_ctx()) {
+        fn associative(dots in arb_causal(arb_dotstore()), a in arb_ctx(), b in arb_ctx(), c in arb_ctx()) {
             let a = dots.unjoin(&a);
             let b = dots.unjoin(&b);
             let c = dots.unjoin(&c);
             prop_assert_eq!(join(&join(&a, &b), &c), join(&a, &join(&b, &c)));
         }
-    }*/
+    }
 }

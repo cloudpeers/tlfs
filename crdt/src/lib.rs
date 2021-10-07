@@ -20,4 +20,5 @@ pub use crate::schema::{ArchivedSchema, PrimitiveKind, Prop, Schema};
 pub use crate::util::{archive, Ref};
 
 pub type Dot = crate::dotset::Dot<PeerId>;
+pub type DotSet = crate::dotset::DotSet<PeerId>;
 pub type CausalContext = crate::dotset::DotSet<PeerId>;

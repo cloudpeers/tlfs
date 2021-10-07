@@ -1,6 +1,7 @@
 use crate::path::DotStore;
 use crate::{
-    Causal, CausalContext, DocId, Dot, Kind, Lens, Lenses, PeerId, Primitive, PrimitiveKind, Schema,
+    Causal, CausalContext, DocId, Dot, DotSet, Kind, Lens, Lenses, PeerId, Primitive,
+    PrimitiveKind, Prop, Schema,
 };
 use proptest::prelude::*;
 use rkyv::ser::serializers::AllocSerializer;
@@ -8,6 +9,10 @@ use rkyv::ser::Serializer;
 use rkyv::{archived_root, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
+
+pub fn arb_prop() -> impl Strategy<Value = Prop> {
+    "[a-z]"
+}
 
 pub fn arb_peer_id() -> impl Strategy<Value = PeerId> {
     (0u8..5).prop_map(|i| PeerId::new([i; 32]))
@@ -53,12 +58,12 @@ pub fn arb_primitive_for_kind(kind: PrimitiveKind) -> BoxedStrategy<Primitive> {
         PrimitiveKind::Bool => any::<bool>().prop_map(Primitive::Bool).boxed(),
         PrimitiveKind::U64 => any::<u64>().prop_map(Primitive::U64).boxed(),
         PrimitiveKind::I64 => any::<i64>().prop_map(Primitive::I64).boxed(),
-        PrimitiveKind::Str => ".*".prop_map(Primitive::Str).boxed(),
+        PrimitiveKind::Str => arb_prop().prop_map(Primitive::Str).boxed(),
     }
 }
 
-fn arb_dotset() -> impl Strategy<Value = BTreeSet<Dot>> {
-    prop::collection::btree_set(arb_dot(), 0..10)
+fn arb_dotset() -> impl Strategy<Value = DotSet> {
+    prop::collection::btree_set(arb_dot(), 0..10).prop_map(DotSet::from_set)
 }
 
 fn arb_dotfun(kind: PrimitiveKind) -> impl Strategy<Value = BTreeMap<Dot, Primitive>> {
@@ -70,12 +75,13 @@ fn arb_dotmap(
     inner: impl Strategy<Value = DotStore>,
 ) -> impl Strategy<Value = BTreeMap<Primitive, DotStore>> {
     prop::collection::btree_map(arb_primitive_for_kind(kind), inner, 0..10)
+        .prop_map(|map| map.into_iter().filter(|(_, v)| !v.is_empty()).collect())
 }
 
 fn arb_struct(
     inner: impl Strategy<Value = DotStore>,
 ) -> impl Strategy<Value = BTreeMap<String, DotStore>> {
-    prop::collection::btree_map(".*", inner, 0..10)
+    prop::collection::btree_map(arb_prop(), inner, 0..10)
 }
 
 pub fn arb_dotstore() -> impl Strategy<Value = DotStore> {
@@ -134,7 +140,7 @@ pub fn arb_schema() -> impl Strategy<Value = Schema> {
         prop_oneof![
             (arb_primitive_kind(), inner.clone())
                 .prop_map(|(kind, schema)| Schema::Table(kind, Box::new(schema))),
-            prop::collection::btree_map(".*", inner, 0..10).prop_map(Schema::Struct),
+            prop::collection::btree_map(arb_prop(), inner, 0..10).prop_map(Schema::Struct),
         ]
     })
 }
@@ -219,14 +225,15 @@ pub fn arb_lens_for_schema(s: &Schema) -> BoxedStrategy<Lens> {
             if fields.is_empty() {
                 strategy.push(Just(Lens::Destroy(Kind::Struct)).boxed());
             }
-            strategy.push(".*".prop_map(Lens::AddProperty).boxed());
+            strategy.push(arb_prop().prop_map(Lens::AddProperty).boxed());
             for (k, s) in fields {
                 if let Schema::Null = s {
                     strategy.push(Just(Lens::RemoveProperty(k.clone())).boxed());
                 }
                 let kk = k.clone();
                 strategy.push(
-                    ".*".prop_map(move |k2| Lens::RenameProperty(kk.clone(), k2))
+                    arb_prop()
+                        .prop_map(move |k2| Lens::RenameProperty(kk.clone(), k2))
                         .boxed(),
                 );
                 if let Schema::Struct(s2) = s {
@@ -235,7 +242,8 @@ pub fn arb_lens_for_schema(s: &Schema) -> BoxedStrategy<Lens> {
                     }
                     let kk = k.clone();
                     strategy.push(
-                        ".*".prop_map(move |k2| Lens::PlungeProperty(kk.clone(), k2))
+                        arb_prop()
+                            .prop_map(move |k2| Lens::PlungeProperty(kk.clone(), k2))
                             .boxed(),
                     );
                 }

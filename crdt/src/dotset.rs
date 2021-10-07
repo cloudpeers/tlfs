@@ -19,7 +19,7 @@ impl<T: Copy + std::fmt::Debug + Ord + rkyv::Archive<Archived = Self> + 'static>
 
 /// Dot is a version marker for a single replica.
 #[derive(
-    Clone, Copy, Eq, PartialEq, Hash, Ord, PartialOrd, Archive, CheckBytes, Deserialize, Serialize,
+    Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd, Archive, CheckBytes, Deserialize, Serialize,
 )]
 #[archive(as = "Dot<I>")]
 #[repr(C)]
@@ -100,12 +100,16 @@ impl<I: ReplicaId> FromIterator<Dot<I>> for DotSet<I> {
 
 impl<I: ReplicaId> Default for DotSet<I> {
     fn default() -> Self {
-        Self(Default::default())
+        Self::new()
     }
 }
 
 impl<I: ReplicaId> DotSet<I> {
-    pub fn new(elems: BTreeSet<Dot<I>>) -> Self {
+    pub fn new() -> Self {
+        Self(Default::default())
+    }
+
+    pub fn from_set(elems: BTreeSet<Dot<I>>) -> Self {
         elems.into_iter().collect()
     }
 
