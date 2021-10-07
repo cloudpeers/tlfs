@@ -1,7 +1,7 @@
-use crate::{archive, DocId, Dot, DotSet, Hash, LensRef, PeerId, Policy, Ref};
+use crate::{archive, ArchivedLenses, DocId, Dot, DotSet, Hash, PeerId, Policy, Ref};
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
-use rkyv::{Archive, Deserialize, Serialize};
+use rkyv::{Archive, Archived, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Archive, Deserialize, Serialize)]
@@ -339,8 +339,8 @@ impl Causal {
         }
     }
 
-    pub fn transform(&mut self, lens: LensRef) {
-        lens.transform_dotstore(&mut self.store);
+    pub fn transform(&mut self, from: &ArchivedLenses, to: &ArchivedLenses) {
+        from.transform_dotstore(&mut self.store, to);
     }
 }
 
@@ -761,16 +761,27 @@ impl Crdt {
         Ok(())
     }
 
-    pub fn join(&self, ctx: &mut CausalContext, causal: &Causal) -> Result<()> {
+    pub fn join(&self, ctx: &mut CausalContext, peer_id: &PeerId, causal: &Causal) -> Result<()> {
+        // TODO: check write permission
         let mut path = PathBuf::new(ctx.doc);
         self.join_store(&mut path, &mut ctx.dots, &causal.store, &causal.ctx.dots)?;
         ctx.dots.union(&causal.ctx.dots);
         Ok(())
     }
 
-    pub fn unjoin(&self, ctx: &CausalContext, other: &CausalContext) -> Result<Causal> {
+    pub fn unjoin(
+        &self,
+        ctx: &Archived<CausalContext>,
+        peer_id: &PeerId,
+        other: &Archived<CausalContext>,
+    ) -> Result<Causal> {
+        // TODO: check read permission
         assert_eq!(ctx.doc, other.doc);
-        let diff = ctx.dots.difference(&other.dots);
+        // TODO: no deserialize
+        let dots: DotSet = ctx.dots.deserialize(&mut rkyv::Infallible)?;
+        // TODO: no deserialize
+        let other: DotSet = other.dots.deserialize(&mut rkyv::Infallible)?;
+        let diff = dots.difference(&other);
         let mut store = DotStore::Null;
         for r in self.0.scan_prefix(PathBuf::new(ctx.doc)) {
             let (k, v) = r?;
@@ -809,21 +820,31 @@ impl Crdt {
         })
     }
 
-    pub fn enable(&self, path: Path<'_>, ctx: &CausalContext, dot: Dot) -> Result<Causal> {
+    pub fn enable(
+        &self,
+        path: Path<'_>,
+        ctx: &Archived<CausalContext>,
+        dot: Dot,
+    ) -> Result<Causal> {
         let mut store = DotSet::new();
         store.insert(dot);
         let mut causal = Causal {
             store: DotStore::DotSet(store),
-            ctx: ctx.clone(),
+            ctx: ctx.deserialize(&mut rkyv::Infallible)?,
         };
         causal.ctx.dots.insert(dot);
         path.wrap(causal)
     }
 
-    pub fn disable(&self, path: Path<'_>, ctx: &CausalContext, dot: Dot) -> Result<Causal> {
+    pub fn disable(
+        &self,
+        path: Path<'_>,
+        ctx: &Archived<CausalContext>,
+        dot: Dot,
+    ) -> Result<Causal> {
         let mut causal = Causal {
             store: DotStore::DotSet(Default::default()),
-            ctx: ctx.clone(),
+            ctx: ctx.deserialize(&mut rkyv::Infallible)?,
         };
         causal.ctx.dots.insert(dot);
         path.wrap(causal)
@@ -836,7 +857,7 @@ impl Crdt {
     pub fn assign(
         &self,
         path: Path<'_>,
-        ctx: &CausalContext,
+        ctx: &Archived<CausalContext>,
         dot: Dot,
         v: Primitive,
     ) -> Result<Causal> {
@@ -844,7 +865,7 @@ impl Crdt {
         store.insert(dot, v);
         let mut causal = Causal {
             store: DotStore::DotFun(store),
-            ctx: ctx.clone(),
+            ctx: ctx.deserialize(&mut rkyv::Infallible)?,
         };
         causal.ctx.dots.insert(dot);
         path.wrap(causal)
@@ -857,7 +878,12 @@ impl Crdt {
             .map(|res| res.map(Ref::new))
     }
 
-    pub fn remove(&self, path: Path<'_>, ctx: &CausalContext, dot: Dot) -> Result<Causal> {
+    pub fn remove(
+        &self,
+        path: Path<'_>,
+        ctx: &Archived<CausalContext>,
+        dot: Dot,
+    ) -> Result<Causal> {
         let mut ctx = CausalContext {
             doc: ctx.doc,
             schema: ctx.schema,
@@ -884,7 +910,7 @@ impl Crdt {
     pub fn say(
         &self,
         path: Path<'_>,
-        ctx: &CausalContext,
+        ctx: &Archived<CausalContext>,
         dot: Dot,
         policy: Policy,
     ) -> Result<Causal> {
@@ -903,6 +929,10 @@ impl Crdt {
             ctx,
         };
         path.wrap(causal)
+    }
+
+    pub fn transform(&self, from: &ArchivedLenses, to: &ArchivedLenses) {
+        from.transform_crdt(self, to)
     }
 }
 

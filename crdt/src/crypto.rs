@@ -1,3 +1,4 @@
+use crate::PeerId;
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
 use chacha20poly1305::aead::{AeadInPlace, NewAead};
@@ -8,7 +9,6 @@ use rkyv::ser::Serializer;
 use rkyv::validation::validators::{check_archived_root, DefaultValidator};
 use rkyv::{archived_root_mut, Archive, Archived, Deserialize, Serialize};
 use std::pin::Pin;
-use tlfs_crdt::PeerId;
 
 #[derive(Clone, Copy, Archive, Serialize, Deserialize)]
 #[archive(as = "Keypair")]

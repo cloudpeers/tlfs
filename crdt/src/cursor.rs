@@ -1,49 +1,44 @@
 use crate::{
-    Actor, ArchivedSchema, Can, Causal, CausalContext, Crdt, Dot, Engine, PathBuf, PeerId,
-    Permission, Policy, Primitive, PrimitiveKind,
+    Acl, Actor, ArchivedSchema, Can, Causal, CausalContext, Crdt, Docs, Dot, PathBuf, PeerId,
+    Permission, Policy, Primitive, PrimitiveKind, Schema,
 };
 use anyhow::{anyhow, Result};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use rkyv::Archived;
 
 #[derive(Clone)]
-pub struct W {
-    peer_id: PeerId,
-    counter: Arc<AtomicU64>,
-}
-
-//#[derive(Clone)]
-pub struct Cursor<'a, T> {
+pub struct Cursor<'a> {
     path: PathBuf,
-    ctx: &'a CausalContext,
+    ctx: &'a Archived<CausalContext>,
     crdt: &'a Crdt,
-    engine: &'a Engine,
-    schema: &'a ArchivedSchema,
-    w: T,
+    docs: &'a Docs,
+    acl: &'a Acl,
+    schema: &'a Archived<Schema>,
+    peer_id: PeerId,
 }
 
-impl<'a> Cursor<'a, ()> {
+impl<'a> Cursor<'a> {
     pub fn new(
-        ctx: &'a CausalContext,
+        ctx: &'a Archived<CausalContext>,
         crdt: &'a Crdt,
-        engine: &'a Engine,
-        schema: &'a ArchivedSchema,
+        docs: &'a Docs,
+        acl: &'a Acl,
+        schema: &'a Archived<Schema>,
+        peer_id: PeerId,
     ) -> Self {
         Self {
-            path: PathBuf::new(*ctx.doc()),
+            path: PathBuf::new(ctx.doc),
             ctx,
             crdt,
-            engine,
+            docs,
+            acl,
             schema,
-            w: (),
+            peer_id,
         }
     }
-}
 
-impl<'a, T> Cursor<'a, T> {
     /// Checks permissions.
     pub fn can(&self, peer: PeerId, perm: Permission) -> bool {
-        self.engine.can(peer, perm, self.path.as_path())
+        self.acl.can(peer, perm, self.path.as_path())
     }
 
     /// Returns if a flag is enabled.
@@ -144,37 +139,18 @@ impl<'a, T> Cursor<'a, T> {
             Err(anyhow!("not a struct"))
         }
     }
-}
 
-impl<'a> Cursor<'a, W> {
-    pub fn new(
-        ctx: &'a CausalContext,
-        crdt: &'a Crdt,
-        engine: &'a Engine,
-        peer_id: PeerId,
-        counter: Arc<AtomicU64>,
-        schema: &'a ArchivedSchema,
-    ) -> Self {
-        Self {
-            path: PathBuf::new(*ctx.doc()),
-            ctx,
-            crdt,
-            engine,
-            schema,
-            w: W { peer_id, counter },
-        }
-    }
-
-    fn dot(&self) -> Dot {
-        let counter = self.w.counter.fetch_add(1, Ordering::SeqCst);
-        Dot::new(self.w.peer_id, counter)
+    fn dot(&self) -> Result<Dot> {
+        let counter = self.docs.counter(&self.ctx.doc)?;
+        Ok(Dot::new(self.peer_id, counter))
     }
 
     /// Enables a flag.
     pub fn enable(&self) -> Result<Causal> {
         if let ArchivedSchema::Flag = &self.schema {
-            if self.can(self.w.peer_id, Permission::Write) {
-                self.crdt.enable(self.path.as_path(), &self.ctx, self.dot())
+            if self.can(self.peer_id, Permission::Write) {
+                self.crdt
+                    .enable(self.path.as_path(), &self.ctx, self.dot()?)
             } else {
                 Err(anyhow!("unauthorized"))
             }
@@ -186,9 +162,9 @@ impl<'a> Cursor<'a, W> {
     /// Disables a flag.
     pub fn disable(&self) -> Result<Causal> {
         if let ArchivedSchema::Flag = &self.schema {
-            if self.can(self.w.peer_id, Permission::Write) {
+            if self.can(self.peer_id, Permission::Write) {
                 self.crdt
-                    .disable(self.path.as_path(), &self.ctx, self.dot())
+                    .disable(self.path.as_path(), &self.ctx, self.dot()?)
             } else {
                 Err(anyhow!("unauthorized"))
             }
@@ -202,9 +178,9 @@ impl<'a> Cursor<'a, W> {
         let value = value.into();
         if let ArchivedSchema::Reg(kind) = &self.schema {
             if kind.validate(&value) {
-                if self.can(self.w.peer_id, Permission::Write) {
+                if self.can(self.peer_id, Permission::Write) {
                     self.crdt
-                        .assign(self.path.as_path(), &self.ctx, self.dot(), value)
+                        .assign(self.path.as_path(), &self.ctx, self.dot()?, value)
                 } else {
                     Err(anyhow!("unauthorized"))
                 }
@@ -221,8 +197,9 @@ impl<'a> Cursor<'a, W> {
         let key = key.into();
         if let ArchivedSchema::Table(kind, _) = &self.schema {
             if kind.validate(&key) {
-                if self.can(self.w.peer_id, Permission::Write) {
-                    self.crdt.remove(self.path.as_path(), &self.ctx, self.dot())
+                if self.can(self.peer_id, Permission::Write) {
+                    self.crdt
+                        .remove(self.path.as_path(), &self.ctx, self.dot()?)
                 } else {
                     Err(anyhow!("unauthorized"))
                 }
@@ -236,32 +213,32 @@ impl<'a> Cursor<'a, W> {
 
     /// Gives permission to a peer.
     pub fn say_can(&self, actor: Option<PeerId>, perm: Permission) -> Result<Causal> {
-        if !self.can(self.w.peer_id, Permission::Control) {
+        if !self.can(self.peer_id, Permission::Control) {
             return Err(anyhow!("unauthoried"));
         }
-        if !perm.controllable() && !self.can(self.w.peer_id, Permission::Own) {
+        if !perm.controllable() && !self.can(self.peer_id, Permission::Own) {
             return Err(anyhow!("unauthorized"));
         }
         self.crdt.say(
             self.path.as_path(),
             &self.ctx,
-            self.dot(),
+            self.dot()?,
             Policy::Can(actor.into(), perm),
         )
     }
 
     /// Gives conditional permission to a peer.
     pub fn say_can_if(&self, actor: Actor, perm: Permission, cond: Can) -> Result<Causal> {
-        if !self.can(self.w.peer_id, Permission::Control) {
+        if !self.can(self.peer_id, Permission::Control) {
             return Err(anyhow!("unauthorized"));
         }
-        if !perm.controllable() && !self.can(self.w.peer_id, Permission::Own) {
+        if !perm.controllable() && !self.can(self.peer_id, Permission::Own) {
             return Err(anyhow!("unauthorized"));
         }
         self.crdt.say(
             self.path.as_path(),
             &self.ctx,
-            self.dot(),
+            self.dot()?,
             Policy::CanIf(actor, perm, cond),
         )
     }
@@ -272,7 +249,7 @@ impl<'a> Cursor<'a, W> {
         self.crdt.say(
             self.path.as_path(),
             &self.ctx,
-            self.dot(),
+            self.dot()?,
             Policy::Revokes(claim),
         )
     }

@@ -27,6 +27,13 @@ impl<T: Archive> Ref<T> {
         }
     }
 
+    pub fn archive(t: &T) -> Self
+    where
+        T: Serialize<AllocSerializer<256>>,
+    {
+        Self::new(archive(t).into())
+    }
+
     pub fn to_owned(&self) -> Result<T>
     where
         Archived<T>: Deserialize<T, rkyv::Infallible>,

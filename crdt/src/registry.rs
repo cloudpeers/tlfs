@@ -9,6 +9,7 @@ pub fn empty_hash() -> Hash {
     blake3::hash(&EMPTY_LENSES)
 }
 
+#[derive(Clone)]
 pub struct Registry(sled::Tree);
 
 impl Registry {

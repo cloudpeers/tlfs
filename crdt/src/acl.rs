@@ -379,6 +379,19 @@ impl Engine {
     }
 }
 
+#[derive(Clone)]
+pub struct Acl(sled::Tree);
+
+impl Acl {
+    pub fn new(tree: sled::Tree) -> Self {
+        Self(tree)
+    }
+
+    pub fn can(&self, peer: PeerId, perm: Permission, path: Path) -> bool {
+        todo!()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
