@@ -1,4 +1,4 @@
-use crate::{archive, CausalContext, DocId, Dot, DotSet, PeerId, Policy, Ref};
+use crate::{archive, DocId, Dot, DotSet, Hash, LensRef, PeerId, Policy, Ref};
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Deserialize, Serialize};
@@ -120,7 +120,7 @@ impl DotStore {
         }
     }
 
-    pub fn dots(&self, ctx: &mut CausalContext) {
+    pub fn dots(&self, ctx: &mut DotSet) {
         match self {
             Self::Null => {}
             Self::DotSet(set) => {
@@ -151,7 +151,7 @@ impl DotStore {
         }
     }
 
-    pub fn join(&mut self, ctx: &CausalContext, other: &Self, other_ctx: &CausalContext) {
+    pub fn join(&mut self, ctx: &DotSet, other: &Self, other_ctx: &DotSet) {
         match (self, other) {
             (me @ Self::Null, other) => *me = other.clone(),
             (_, Self::Null) => {}
@@ -225,7 +225,7 @@ impl DotStore {
         }
     }
 
-    pub fn unjoin(&self, diff: &CausalContext) -> Self {
+    pub fn unjoin(&self, diff: &DotSet) -> Self {
         match self {
             Self::Null => Self::Null,
             Self::DotSet(set) => Self::DotSet(set.intersection(diff)),
@@ -273,21 +273,74 @@ impl DotStore {
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(CheckBytes))]
 #[repr(C)]
+pub struct CausalContext {
+    pub(crate) doc: DocId,
+    pub(crate) schema: [u8; 32],
+    pub(crate) dots: DotSet,
+}
+
+impl CausalContext {
+    pub fn new(doc: DocId, schema: Hash) -> Self {
+        Self {
+            doc,
+            schema: schema.into(),
+            dots: Default::default(),
+        }
+    }
+
+    pub fn doc(&self) -> &DocId {
+        &self.doc
+    }
+
+    pub fn schema(&self) -> Hash {
+        self.schema.into()
+    }
+
+    pub fn dots(&self) -> &DotSet {
+        &self.dots
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[archive_attr(derive(CheckBytes))]
+#[repr(C)]
 pub struct Causal {
-    pub store: DotStore,
-    pub ctx: CausalContext,
+    pub(crate) ctx: CausalContext,
+    pub(crate) store: DotStore,
 }
 
 impl Causal {
+    pub fn ctx(&self) -> &CausalContext {
+        &self.ctx
+    }
+
+    pub fn store(&self) -> &DotStore {
+        &self.store
+    }
+
     pub fn join(&mut self, other: &Causal) {
-        self.store.join(&self.ctx, &other.store, &other.ctx);
-        self.ctx.union(&other.ctx);
+        assert_eq!(self.ctx().doc(), other.ctx().doc());
+        assert_eq!(self.ctx().schema(), other.ctx().schema());
+        self.store
+            .join(&self.ctx.dots, &other.store, &other.ctx.dots);
+        self.ctx.dots.union(&other.ctx.dots);
     }
 
     pub fn unjoin(&self, ctx: &CausalContext) -> Self {
-        let ctx = self.ctx.difference(ctx);
-        let store = self.store.unjoin(&ctx);
-        Self { store, ctx }
+        let dots = self.ctx.dots.difference(&ctx.dots);
+        let store = self.store.unjoin(&dots);
+        Self {
+            ctx: CausalContext {
+                doc: self.ctx.doc,
+                schema: self.ctx.schema,
+                dots,
+            },
+            store,
+        }
+    }
+
+    pub fn transform(&mut self, lens: LensRef) {
+        lens.transform_dotstore(&mut self.store);
     }
 }
 
@@ -553,9 +606,9 @@ impl Crdt {
     fn join_dotset(
         &self,
         path: &mut PathBuf,
-        ctx: &CausalContext,
+        ctx: &DotSet,
         other: &DotSet,
-        other_ctx: &CausalContext,
+        other_ctx: &DotSet,
     ) -> Result<()> {
         for res in self.0.scan_prefix(&path).keys() {
             let key = res?;
@@ -581,9 +634,9 @@ impl Crdt {
     fn join_dotfun(
         &self,
         path: &mut PathBuf,
-        ctx: &CausalContext,
+        ctx: &DotSet,
         other: &BTreeMap<Dot, Primitive>,
-        other_ctx: &CausalContext,
+        other_ctx: &DotSet,
     ) -> Result<()> {
         for res in self.0.scan_prefix(&path).keys() {
             let key = res?;
@@ -613,9 +666,9 @@ impl Crdt {
     fn join_dotmap(
         &self,
         path: &mut PathBuf,
-        ctx: &CausalContext,
+        ctx: &DotSet,
         other: &BTreeMap<Primitive, DotStore>,
-        other_ctx: &CausalContext,
+        other_ctx: &DotSet,
     ) -> Result<()> {
         for res in self.0.scan_prefix(&path).keys() {
             let leaf = res?;
@@ -645,9 +698,9 @@ impl Crdt {
     fn join_struct(
         &self,
         path: &mut PathBuf,
-        ctx: &CausalContext,
+        ctx: &DotSet,
         other: &BTreeMap<String, DotStore>,
-        other_ctx: &CausalContext,
+        other_ctx: &DotSet,
     ) -> Result<()> {
         for (k, v) in other {
             path.field(k);
@@ -667,9 +720,9 @@ impl Crdt {
     fn join_policy(
         &self,
         path: &mut PathBuf,
-        _: &CausalContext,
+        _: &DotSet,
         other: &BTreeMap<Dot, BTreeSet<Policy>>,
-        _: &CausalContext,
+        _: &DotSet,
     ) -> Result<()> {
         for (dot, ps) in other {
             path.policy(dot);
@@ -693,9 +746,9 @@ impl Crdt {
     fn join_store(
         &self,
         path: &mut PathBuf,
-        ctx: &CausalContext,
+        ctx: &DotSet,
         other: &DotStore,
-        other_ctx: &CausalContext,
+        other_ctx: &DotSet,
     ) -> Result<()> {
         match other {
             DotStore::Null => {}
@@ -708,27 +761,25 @@ impl Crdt {
         Ok(())
     }
 
-    pub fn join(&self, doc: DocId, ctx: &mut CausalContext, causal: &Causal) -> Result<()> {
-        let mut path = PathBuf::new(doc);
-        self.join_store(&mut path, ctx, &causal.store, &causal.ctx)?;
-        ctx.union(&causal.ctx);
+    pub fn join(&self, ctx: &mut CausalContext, causal: &Causal) -> Result<()> {
+        let mut path = PathBuf::new(ctx.doc);
+        self.join_store(&mut path, &mut ctx.dots, &causal.store, &causal.ctx.dots)?;
+        ctx.dots.union(&causal.ctx.dots);
         Ok(())
     }
 
-    pub fn unjoin(&self, doc: DocId, ctx: &CausalContext, other: &CausalContext) -> Result<Causal> {
-        let diff = ctx.difference(other);
-        let mut causal = Causal {
-            store: DotStore::Null,
-            ctx: diff,
-        };
-        for r in self.0.scan_prefix(PathBuf::new(doc)) {
+    pub fn unjoin(&self, ctx: &CausalContext, other: &CausalContext) -> Result<Causal> {
+        assert_eq!(ctx.doc, other.doc);
+        let diff = ctx.dots.difference(&other.dots);
+        let mut store = DotStore::Null;
+        for r in self.0.scan_prefix(PathBuf::new(ctx.doc)) {
             let (k, v) = r?;
             let path = Path::new(&k[..]);
             let dot = path.dot();
-            if !causal.ctx.contains(&dot) {
+            if !diff.contains(&dot) {
                 continue;
             }
-            let store = match path.ty() {
+            let delta = match path.ty() {
                 Some(DotStoreType::Set) => {
                     let mut dotset = DotSet::new();
                     dotset.insert(dot);
@@ -746,12 +797,16 @@ impl Crdt {
                 }
                 _ => continue,
             };
-            causal.join(&Causal {
-                store,
-                ctx: Default::default(),
-            });
+            store.join(&DotSet::new(), &delta, &DotSet::new());
         }
-        Ok(causal)
+        Ok(Causal {
+            ctx: CausalContext {
+                doc: ctx.doc,
+                schema: ctx.schema,
+                dots: diff,
+            },
+            store: DotStore::Null,
+        })
     }
 
     pub fn enable(&self, path: Path<'_>, ctx: &CausalContext, dot: Dot) -> Result<Causal> {
@@ -761,7 +816,7 @@ impl Crdt {
             store: DotStore::DotSet(store),
             ctx: ctx.clone(),
         };
-        causal.ctx.insert(dot);
+        causal.ctx.dots.insert(dot);
         path.wrap(causal)
     }
 
@@ -770,7 +825,7 @@ impl Crdt {
             store: DotStore::DotSet(Default::default()),
             ctx: ctx.clone(),
         };
-        causal.ctx.insert(dot);
+        causal.ctx.dots.insert(dot);
         path.wrap(causal)
     }
 
@@ -791,7 +846,7 @@ impl Crdt {
             store: DotStore::DotFun(store),
             ctx: ctx.clone(),
         };
-        causal.ctx.insert(dot);
+        causal.ctx.dots.insert(dot);
         path.wrap(causal)
     }
 
@@ -802,9 +857,13 @@ impl Crdt {
             .map(|res| res.map(Ref::new))
     }
 
-    pub fn remove(&self, path: Path<'_>, dot: Dot) -> Result<Causal> {
-        let mut ctx = CausalContext::default();
-        ctx.insert(dot);
+    pub fn remove(&self, path: Path<'_>, ctx: &CausalContext, dot: Dot) -> Result<Causal> {
+        let mut ctx = CausalContext {
+            doc: ctx.doc,
+            schema: ctx.schema,
+            dots: Default::default(),
+        };
+        ctx.dots.insert(dot);
         for res in self.0.scan_prefix(path).keys() {
             let key = res?;
             let key = Path::new(&key[..]);
@@ -813,7 +872,7 @@ impl Crdt {
                 continue;
             }
             let dot = key.dot();
-            ctx.insert(dot);
+            ctx.dots.insert(dot);
         }
         let causal = Causal {
             store: DotStore::DotMap(Default::default()),
@@ -822,9 +881,19 @@ impl Crdt {
         path.wrap(causal)
     }
 
-    pub fn say(&self, path: Path<'_>, dot: Dot, policy: Policy) -> Result<Causal> {
-        let mut ctx = CausalContext::default();
-        ctx.insert(dot);
+    pub fn say(
+        &self,
+        path: Path<'_>,
+        ctx: &CausalContext,
+        dot: Dot,
+        policy: Policy,
+    ) -> Result<Causal> {
+        let mut ctx = CausalContext {
+            doc: ctx.doc,
+            schema: ctx.schema,
+            dots: Default::default(),
+        };
+        ctx.dots.insert(dot);
         let mut set = BTreeSet::new();
         set.insert(policy);
         let mut store = BTreeMap::new();
@@ -848,16 +917,20 @@ mod tests {
         let crdt = Crdt::memory("test")?;
         let doc = DocId::new([0; 32]);
         let mut dot = Dot::new(PeerId::new([0; 32]), 1);
-        let mut ctx = CausalContext::default();
+        let mut ctx = CausalContext {
+            doc,
+            schema: [0; 32],
+            dots: Default::default(),
+        };
         let mut path = PathBuf::new(doc);
         path.field("a");
         path.field("b");
         let op = crdt.enable(path.as_path(), &ctx, dot.inc())?;
         assert!(!crdt.is_enabled(path.as_path()));
-        crdt.join(doc, &mut ctx, &op)?;
+        crdt.join(&mut ctx, &op)?;
         assert!(crdt.is_enabled(path.as_path()));
         let op = crdt.disable(path.as_path(), &ctx, dot.inc())?;
-        crdt.join(doc, &mut ctx, &op)?;
+        crdt.join(&mut ctx, &op)?;
         assert!(!crdt.is_enabled(path.as_path()));
         Ok(())
     }
@@ -868,14 +941,18 @@ mod tests {
         let doc = DocId::new([0; 32]);
         let mut dot1 = Dot::new(PeerId::new([0; 32]), 1);
         let mut dot2 = Dot::new(PeerId::new([1; 32]), 1);
-        let mut ctx = CausalContext::default();
+        let mut ctx = CausalContext {
+            doc,
+            schema: [0; 32],
+            dots: Default::default(),
+        };
         let mut path = PathBuf::new(doc);
         path.field("a");
         path.field("b");
         let op1 = crdt.assign(path.as_path(), &ctx, dot1.inc(), Primitive::U64(42))?;
         let op2 = crdt.assign(path.as_path(), &ctx, dot2.inc(), Primitive::U64(43))?;
-        crdt.join(doc, &mut ctx, &op1)?;
-        crdt.join(doc, &mut ctx, &op2)?;
+        crdt.join(&mut ctx, &op1)?;
+        crdt.join(&mut ctx, &op2)?;
 
         let mut values = BTreeSet::new();
         for value in crdt.values(path.as_path()) {
@@ -890,7 +967,7 @@ mod tests {
         assert!(values.contains(&43));
 
         let op = crdt.assign(path.as_path(), &ctx, dot1.inc(), Primitive::U64(99))?;
-        crdt.join(doc, &mut ctx, &op)?;
+        crdt.join(&mut ctx, &op)?;
 
         let mut values = BTreeSet::new();
         for value in crdt.values(path.as_path()) {
@@ -911,12 +988,16 @@ mod tests {
         let crdt = Crdt::memory("test")?;
         let doc = DocId::new([0; 32]);
         let mut dot1 = Dot::new(PeerId::new([0; 32]), 1);
-        let mut ctx = CausalContext::default();
+        let mut ctx = CausalContext {
+            doc,
+            schema: [0; 32],
+            dots: Default::default(),
+        };
         let mut path = PathBuf::new(doc);
         path.key(&"a".into());
         path.key(&"b".into());
         let op = crdt.assign(path.as_path(), &ctx, dot1.inc(), Primitive::U64(42))?;
-        crdt.join(doc, &mut ctx, &op)?;
+        crdt.join(&mut ctx, &op)?;
 
         let mut values = BTreeSet::new();
         for value in crdt.values(path.as_path()) {
@@ -931,8 +1012,8 @@ mod tests {
 
         let mut path2 = PathBuf::new(doc);
         path2.key(&"a".into());
-        let op = crdt.remove(path2.as_path(), dot1.inc())?;
-        crdt.join(doc, &mut ctx, &op)?;
+        let op = crdt.remove(path2.as_path(), &ctx, dot1.inc())?;
+        crdt.join(&mut ctx, &op)?;
 
         let mut values = BTreeSet::new();
         for value in crdt.values(path.as_path()) {
@@ -949,7 +1030,7 @@ mod tests {
 
     proptest! {
         #[test]
-        fn causal_unjoin(a in arb_causal(arb_dotstore()), b in arb_ctx()) {
+        fn causal_unjoin(a in arb_causal(arb_dotstore()), b in arb_causal_ctx()) {
             let b = a.unjoin(&b);
             prop_assert_eq!(join(&a, &b), a);
         }
@@ -960,14 +1041,14 @@ mod tests {
         }
 
         #[test]
-        fn causal_join_commutative(dots in arb_causal(arb_dotstore()), a in arb_ctx(), b in arb_ctx()) {
+        fn causal_join_commutative(dots in arb_causal(arb_dotstore()), a in arb_causal_ctx(), b in arb_causal_ctx()) {
             let a = dots.unjoin(&a);
             let b = dots.unjoin(&b);
             prop_assert_eq!(join(&a, &b), join(&b, &a));
         }
 
         #[test]
-        fn causal_join_associative(dots in arb_causal(arb_dotstore()), a in arb_ctx(), b in arb_ctx(), c in arb_ctx()) {
+        fn causal_join_associative(dots in arb_causal(arb_dotstore()), a in arb_causal_ctx(), b in arb_causal_ctx(), c in arb_causal_ctx()) {
             let a = dots.unjoin(&a);
             let b = dots.unjoin(&b);
             let c = dots.unjoin(&c);
@@ -977,13 +1058,22 @@ mod tests {
         #[test]
         #[ignore]
         // TODO: crdt can infer defaults from path, causal just sets it to null
-        fn crdt_join(dots in arb_causal(arb_dotstore()), a in arb_ctx(), b in arb_ctx()) {
+        fn crdt_join(dots in arb_causal(arb_dotstore()), a in arb_causal_ctx(), b in arb_causal_ctx()) {
             let a = dots.unjoin(&a);
             let b = dots.unjoin(&b);
             let (mut ctx, crdt) = causal_to_crdt(&a);
             let c = join(&a, &b);
-            crdt.join(DocId::new([0; 32]), &mut ctx, &b).unwrap();
+            crdt.join(&mut ctx, &b).unwrap();
             let c2 = crdt_to_causal(&crdt, &ctx);
+            assert_eq!(c, c2);
+        }
+
+        #[test]
+        #[ignore]
+        fn crdt_unjoin(causal in arb_causal(arb_dotstore()), ctx in arb_causal_ctx()) {
+            let (crdt_ctx, crdt) = causal_to_crdt(&causal);
+            let c = causal.unjoin(&ctx);
+            let c2 = crdt.unjoin(&crdt_ctx, &ctx).unwrap();
             assert_eq!(c, c2);
         }
     }

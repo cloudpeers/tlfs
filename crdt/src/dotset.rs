@@ -269,24 +269,38 @@ fn elems(lower: Bound<&u64>, upper: Bound<&u64>) -> Range<u64> {
 #[cfg(test)]
 mod tests {
     use crate::props::*;
-    use crate::{CausalContext, Dot, PeerId};
+    use crate::{Dot, DotSet, PeerId};
     use proptest::prelude::*;
     use std::collections::BTreeSet;
 
     /// convert a dotset into a std set for reference ops
-    fn std_set(x: &CausalContext) -> BTreeSet<Dot> {
+    fn std_set(x: &DotSet) -> BTreeSet<Dot> {
         x.iter().collect()
     }
 
     /// convert an iterator into a dotset
-    fn dot_set<'a>(x: impl IntoIterator<Item = &'a Dot>) -> CausalContext {
+    fn dot_set<'a>(x: impl IntoIterator<Item = &'a Dot>) -> DotSet {
         x.into_iter().cloned().collect()
     }
 
-    fn from_tuples(x: impl IntoIterator<Item = (u8, u64)>) -> CausalContext {
+    fn from_tuples(x: impl IntoIterator<Item = (u8, u64)>) -> DotSet {
         x.into_iter()
             .map(|(i, c)| Dot::new(PeerId::new([i; 32]), c))
             .collect()
+    }
+
+    fn union(a: &DotSet, b: &DotSet) -> DotSet {
+        let mut a = a.clone();
+        a.union(b);
+        a
+    }
+
+    fn intersect(a: &DotSet, b: &DotSet) -> DotSet {
+        a.intersection(b)
+    }
+
+    fn difference(a: &DotSet, b: &DotSet) -> DotSet {
+        a.difference(b)
     }
 
     #[test]

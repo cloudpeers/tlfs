@@ -29,9 +29,17 @@ pub fn arb_dot() -> impl Strategy<Value = Dot> {
     arb_dot_in(1u64..25)
 }
 
-pub fn arb_ctx() -> impl Strategy<Value = CausalContext> {
+pub fn arb_ctx() -> impl Strategy<Value = DotSet> {
     prop::collection::btree_set(arb_dot_in(1u64..5), 0..50)
         .prop_map(|dots| dots.into_iter().collect())
+}
+
+pub fn arb_causal_ctx() -> impl Strategy<Value = CausalContext> {
+    arb_ctx().prop_map(|dots| CausalContext {
+        doc: DocId::new([0; 32]),
+        schema: [0; 32],
+        dots,
+    })
 }
 
 pub fn arb_primitive() -> impl Strategy<Value = Primitive> {
@@ -101,7 +109,7 @@ pub fn arb_dotstore() -> impl Strategy<Value = DotStore> {
 
 pub fn arb_causal(store: impl Strategy<Value = DotStore>) -> impl Strategy<Value = Causal> {
     store.prop_map(|store| {
-        let mut dots = CausalContext::default();
+        let mut dots = DotSet::new();
         store.dots(&mut dots);
         let mut present = BTreeMap::new();
         for dot in dots.iter() {
@@ -111,23 +119,16 @@ pub fn arb_causal(store: impl Strategy<Value = DotStore>) -> impl Strategy<Value
                 present.insert(id, counter);
             }
         }
-        let ctx = CausalContext::from_map(present);
-        Causal { store, ctx }
+        let dots = DotSet::from_map(present);
+        Causal {
+            ctx: CausalContext {
+                doc: DocId::new([0; 32]),
+                schema: [0; 32],
+                dots,
+            },
+            store,
+        }
     })
-}
-
-pub fn union(a: &CausalContext, b: &CausalContext) -> CausalContext {
-    let mut a = a.clone();
-    a.union(b);
-    a
-}
-
-pub fn intersect(a: &CausalContext, b: &CausalContext) -> CausalContext {
-    a.intersection(b)
-}
-
-pub fn difference(a: &CausalContext, b: &CausalContext) -> CausalContext {
-    a.difference(b)
 }
 
 pub fn arb_schema() -> impl Strategy<Value = Schema> {
@@ -173,7 +174,7 @@ where
 pub fn validate(schema: &Schema, value: &Causal) -> bool {
     let schema = archive(schema);
     let schema = unsafe { archived_root::<Schema>(&schema) };
-    schema.validate(&value.store)
+    schema.validate(value.store())
 }
 
 prop_compose! {
@@ -338,13 +339,13 @@ pub fn join(c: &Causal, o: &Causal) -> Causal {
 }
 
 pub fn causal_to_crdt(causal: &Causal) -> (CausalContext, Crdt) {
-    let mut ctx = CausalContext::new();
+    let mut ctx = CausalContext::new(DocId::new([0; 32]), [0; 32].into());
     let crdt = Crdt::memory("mem").unwrap();
-    crdt.join(DocId::new([0; 32]), &mut ctx, causal).unwrap();
+    crdt.join(&mut ctx, causal).unwrap();
     (ctx, crdt)
 }
 
 pub fn crdt_to_causal(crdt: &Crdt, ctx: &CausalContext) -> Causal {
-    crdt.unjoin(DocId::new([0; 32]), ctx, &CausalContext::new())
-        .unwrap()
+    let other = CausalContext::new(*ctx.doc(), ctx.schema());
+    crdt.unjoin(ctx, &other).unwrap()
 }

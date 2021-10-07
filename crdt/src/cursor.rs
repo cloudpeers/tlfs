@@ -1,5 +1,5 @@
 use crate::{
-    Actor, ArchivedSchema, Can, Causal, CausalContext, Crdt, DocId, Dot, Engine, PathBuf, PeerId,
+    Actor, ArchivedSchema, Can, Causal, CausalContext, Crdt, Dot, Engine, PathBuf, PeerId,
     Permission, Policy, Primitive, PrimitiveKind,
 };
 use anyhow::{anyhow, Result};
@@ -10,12 +10,12 @@ use std::sync::Arc;
 pub struct W {
     peer_id: PeerId,
     counter: Arc<AtomicU64>,
-    ctx: CausalContext,
 }
 
 //#[derive(Clone)]
 pub struct Cursor<'a, T> {
     path: PathBuf,
+    ctx: &'a CausalContext,
     crdt: &'a Crdt,
     engine: &'a Engine,
     schema: &'a ArchivedSchema,
@@ -23,9 +23,15 @@ pub struct Cursor<'a, T> {
 }
 
 impl<'a> Cursor<'a, ()> {
-    pub fn new(doc: DocId, crdt: &'a Crdt, engine: &'a Engine, schema: &'a ArchivedSchema) -> Self {
+    pub fn new(
+        ctx: &'a CausalContext,
+        crdt: &'a Crdt,
+        engine: &'a Engine,
+        schema: &'a ArchivedSchema,
+    ) -> Self {
         Self {
-            path: PathBuf::new(doc),
+            path: PathBuf::new(*ctx.doc()),
+            ctx,
             crdt,
             engine,
             schema,
@@ -142,24 +148,20 @@ impl<'a, T> Cursor<'a, T> {
 
 impl<'a> Cursor<'a, W> {
     pub fn new(
-        doc: DocId,
+        ctx: &'a CausalContext,
         crdt: &'a Crdt,
-        ctx: CausalContext,
         engine: &'a Engine,
         peer_id: PeerId,
         counter: Arc<AtomicU64>,
         schema: &'a ArchivedSchema,
     ) -> Self {
         Self {
-            path: PathBuf::new(doc),
+            path: PathBuf::new(*ctx.doc()),
+            ctx,
             crdt,
             engine,
             schema,
-            w: W {
-                peer_id,
-                counter,
-                ctx,
-            },
+            w: W { peer_id, counter },
         }
     }
 
@@ -172,8 +174,7 @@ impl<'a> Cursor<'a, W> {
     pub fn enable(&self) -> Result<Causal> {
         if let ArchivedSchema::Flag = &self.schema {
             if self.can(self.w.peer_id, Permission::Write) {
-                self.crdt
-                    .enable(self.path.as_path(), &self.w.ctx, self.dot())
+                self.crdt.enable(self.path.as_path(), &self.ctx, self.dot())
             } else {
                 Err(anyhow!("unauthorized"))
             }
@@ -187,7 +188,7 @@ impl<'a> Cursor<'a, W> {
         if let ArchivedSchema::Flag = &self.schema {
             if self.can(self.w.peer_id, Permission::Write) {
                 self.crdt
-                    .disable(self.path.as_path(), &self.w.ctx, self.dot())
+                    .disable(self.path.as_path(), &self.ctx, self.dot())
             } else {
                 Err(anyhow!("unauthorized"))
             }
@@ -203,7 +204,7 @@ impl<'a> Cursor<'a, W> {
             if kind.validate(&value) {
                 if self.can(self.w.peer_id, Permission::Write) {
                     self.crdt
-                        .assign(self.path.as_path(), &self.w.ctx, self.dot(), value)
+                        .assign(self.path.as_path(), &self.ctx, self.dot(), value)
                 } else {
                     Err(anyhow!("unauthorized"))
                 }
@@ -212,6 +213,24 @@ impl<'a> Cursor<'a, W> {
             }
         } else {
             Err(anyhow!("not a reg"))
+        }
+    }
+
+    /// Removes a value from a map.
+    pub fn remove(&self, key: impl Into<Primitive>) -> Result<Causal> {
+        let key = key.into();
+        if let ArchivedSchema::Table(kind, _) = &self.schema {
+            if kind.validate(&key) {
+                if self.can(self.w.peer_id, Permission::Write) {
+                    self.crdt.remove(self.path.as_path(), &self.ctx, self.dot())
+                } else {
+                    Err(anyhow!("unauthorized"))
+                }
+            } else {
+                Err(anyhow!("invalid key"))
+            }
+        } else {
+            Err(anyhow!("not a table"))
         }
     }
 
@@ -225,6 +244,7 @@ impl<'a> Cursor<'a, W> {
         }
         self.crdt.say(
             self.path.as_path(),
+            &self.ctx,
             self.dot(),
             Policy::Can(actor.into(), perm),
         )
@@ -240,6 +260,7 @@ impl<'a> Cursor<'a, W> {
         }
         self.crdt.say(
             self.path.as_path(),
+            &self.ctx,
             self.dot(),
             Policy::CanIf(actor, perm, cond),
         )
@@ -248,7 +269,11 @@ impl<'a> Cursor<'a, W> {
     /// Revokes a policy.
     pub fn revoke(&self, claim: Dot) -> Result<Causal> {
         // TODO: check permission to revoke
-        self.crdt
-            .say(self.path.as_path(), self.dot(), Policy::Revokes(claim))
+        self.crdt.say(
+            self.path.as_path(),
+            &self.ctx,
+            self.dot(),
+            Policy::Revokes(claim),
+        )
     }
 }

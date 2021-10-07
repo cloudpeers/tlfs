@@ -366,13 +366,13 @@ mod tests {
         }
 
         #[test]
-        fn transform_preserves_validity((lens, mut schema, mut crdt) in lens_schema_and_causal()) {
+        fn transform_preserves_validity((lens, mut schema, mut causal) in lens_schema_and_causal()) {
             let lens = archive(&lens);
             let lens = unsafe { archived_root::<Lens>(&lens) };
-            prop_assume!(validate(&schema, &crdt));
+            prop_assume!(validate(&schema, &causal));
             prop_assume!(lens.to_ref().transform_schema(&mut schema).is_ok());
-            lens.to_ref().transform_dotstore(&mut crdt.store);
-            prop_assert!(validate(&schema, &crdt));
+            causal.transform(lens.to_ref());
+            prop_assert!(validate(&schema, &causal));
         }
 
         #[test]
@@ -384,7 +384,7 @@ mod tests {
             let (ctx, crdt) = causal_to_crdt(&causal);
             lens.to_ref().transform_crdt(&crdt);
             let causal2 = crdt_to_causal(&crdt, &ctx);
-            lens.to_ref().transform_dotstore(&mut causal.store);
+            causal.transform(lens.to_ref());
             assert_eq!(causal, causal2);
         }
     }
