@@ -1,4 +1,4 @@
-use crate::{ArchivedLenses, DocId, Dot, DotSet, Hash, PeerId, Policy, Ref};
+use crate::{AbstractDotSet, ArchivedLenses, DocId, Dot, DotSet, Hash, PeerId, Policy, Ref};
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Archived, Deserialize, Serialize};
@@ -152,7 +152,12 @@ impl DotStore {
         }
     }
 
-    pub fn join(&mut self, ctx: &DotSet, other: &Self, other_ctx: &DotSet) {
+    pub fn join(
+        &mut self,
+        ctx: &impl AbstractDotSet<PeerId>,
+        other: &Self,
+        other_ctx: &impl AbstractDotSet<PeerId>,
+    ) {
         match (self, other) {
             (me @ Self::Null, other) => *me = other.clone(),
             (_, Self::Null) => {}
@@ -337,16 +342,14 @@ impl Causal {
         assert_eq!(self.ctx().doc(), &other.ctx.doc);
         assert_eq!(&self.ctx().schema, &other.ctx.schema);
         // TODO
-        let other: Causal = other.deserialize(&mut rkyv::Infallible).unwrap();
+        let other_store: DotStore = other.store.deserialize(&mut rkyv::Infallible).unwrap();
         self.store
-            .join(&self.ctx.dots, &other.store, &other.ctx.dots);
+            .join(&self.ctx.dots, &other_store, &other.ctx.dots);
         self.ctx.dots.union(&other.ctx.dots);
     }
 
     pub fn unjoin(&self, ctx: &Archived<CausalContext>) -> Self {
-        // TODO
-        let other = ctx.dots.deserialize(&mut rkyv::Infallible).unwrap();
-        let dots = self.ctx.dots.difference(&other);
+        let dots = self.ctx.dots.difference(&ctx.dots);
         let store = self.store.unjoin(&dots);
         Self {
             ctx: CausalContext {
@@ -797,11 +800,7 @@ impl Crdt {
     ) -> Result<Causal> {
         // TODO: check read permission
         assert_eq!(ctx.doc, other.doc);
-        // TODO: no deserialize
-        let dots: DotSet = ctx.dots.deserialize(&mut rkyv::Infallible)?;
-        // TODO: no deserialize
-        let other: DotSet = other.dots.deserialize(&mut rkyv::Infallible)?;
-        let diff = dots.difference(&other);
+        let diff = ctx.dots.difference(&other.dots);
         let mut store = DotStore::Null;
         for r in self.0.scan_prefix(PathBuf::new(ctx.doc)) {
             let (k, v) = r?;

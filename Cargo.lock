@@ -2447,9 +2447,9 @@ dependencies = [
 
 [[package]]
 name = "range-collections"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ad2614c207dc95d4ab43f42663bbc45ea2b90139f2c2fba2dc621a4a64038fa"
+checksum = "63ee870f39fc8f68f791721db4e194460d16ef879f01b89e20e5ccd27c4eceb7"
 dependencies = [
  "bytecheck",
  "rkyv",

@@ -29,3 +29,4 @@ pub use crate::util::Ref;
 
 pub type Dot = crate::dotset::Dot<PeerId>;
 pub type DotSet = crate::dotset::DotSet<PeerId>;
+use crate::dotset::AbstractDotSet;
