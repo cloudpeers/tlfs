@@ -6,7 +6,6 @@ use rkyv::{Archive, Deserialize, Serialize};
 use std::{
     collections::{btree_map, BTreeMap, BTreeSet},
     iter::FromIterator,
-    marker::PhantomData,
     ops::{Bound, Range},
 };
 
@@ -293,10 +292,6 @@ impl<I: ReplicaId> DotSet<I> {
                 }
             }
         }
-    }
-
-    fn assert_invariants(&self) {
-        assert!(self.0.iter().all(|(_, r)| !r.is_empty()));
     }
 }
 
