@@ -1,9 +1,10 @@
 use crate::{
-    empty_hash, Acl, Actor, Causal, CausalContext, Crdt, Cursor, DocId, Dot, Engine, Hash, Keypair,
-    Lenses, PathBuf, PeerId, Permission, Policy, Ref, Registry, Schema,
+    archive, empty_hash, Acl, Actor, Causal, CausalContext, Crdt, Cursor, DocId, Dot, Engine, Hash,
+    Keypair, Lenses, PathBuf, PeerId, Permission, Policy, Ref, Registry, Schema,
 };
 use anyhow::{anyhow, Result};
 use rkyv::Archived;
+use std::convert::TryInto;
 use std::task::Context;
 
 pub struct Backend {
@@ -51,7 +52,7 @@ impl Backend {
             Policy::Can(Actor::Peer(owner), Permission::Own),
         )?;
         self.crdt.join(&mut ctx, &id.into(), &delta)?;
-        self.docs.create(id, owner, ctx)?;
+        self.docs.create(id, owner, &ctx)?;
         Ok(id)
     }
 
@@ -78,20 +79,48 @@ impl Docs {
         Self(tree)
     }
 
-    pub fn create(&self, id: DocId, owner: PeerId, ctx: CausalContext) -> Result<()> {
-        todo!()
+    pub fn create(&self, id: DocId, owner: PeerId, ctx: &CausalContext) -> Result<()> {
+        let mut key = [0; 33];
+        key[..32].copy_from_slice(id.as_ref());
+        key[32] = 0;
+        self.0.insert(key, archive(ctx))?;
+        key[32] = 1;
+        self.0.insert(key, owner.as_ref())?;
+        Ok(())
     }
 
-    pub fn ctx(&self, id: &DocId) -> Result<Ref<CausalContext>> {
-        todo!()
+    pub fn ctx(&self, id: &DocId) -> Result<Option<Ref<CausalContext>>> {
+        let mut key = [0; 33];
+        key[..32].copy_from_slice(id.as_ref());
+        key[32] = 0;
+        Ok(self.0.get(key)?.map(Ref::new))
     }
 
-    pub fn peer_id(&self, id: &DocId) -> Result<PeerId> {
-        todo!()
+    pub fn peer_id(&self, id: &DocId) -> Result<Option<PeerId>> {
+        let mut key = [0; 33];
+        key[..32].copy_from_slice(id.as_ref());
+        key[32] = 1;
+        Ok(self
+            .0
+            .get(key)?
+            .map(|v| PeerId::new(v.as_ref().try_into().unwrap())))
     }
 
     pub fn counter(&self, id: &DocId) -> Result<u64> {
-        todo!()
+        let mut key = [0; 33];
+        key[..32].copy_from_slice(id.as_ref());
+        key[32] = 2;
+        let v = self
+            .0
+            .fetch_and_update(key, |v| {
+                let v = v
+                    .map(|b| u64::from_le_bytes(b.try_into().unwrap()))
+                    .unwrap_or_default()
+                    + 1;
+                Some(v.to_le_bytes().as_ref())
+            })?
+            .unwrap();
+        Ok(u64::from_le_bytes(v.as_ref().try_into().unwrap()))
     }
 }
 
@@ -109,8 +138,8 @@ pub struct Doc {
 
 impl Doc {
     fn new(id: DocId, crdt: Crdt, docs: Docs, registry: Registry, acl: Acl) -> Result<Self> {
-        let ctx = docs.ctx(&id).unwrap();
-        let peer_id = docs.peer_id(&id).unwrap();
+        let ctx = docs.ctx(&id)?.unwrap();
+        let peer_id = docs.peer_id(&id)?.unwrap();
         let lenses = registry.lenses(&ctx.as_ref().schema.into())?.unwrap();
         let schema = registry.schema(&ctx.as_ref().schema.into())?.unwrap();
         Ok(Self {
