@@ -98,27 +98,60 @@ impl Docs {
         Ok(())
     }
 
-    pub fn ctx(&self, id: &DocId) -> Result<Option<Ref<CausalContext>>> {
+    pub fn schema_id(&self, id: &DocId) -> Result<Option<Hash>> {
         let mut key = [0; 33];
         key[..32].copy_from_slice(id.as_ref());
         key[32] = 0;
-        Ok(self.0.get(key)?.map(Ref::new))
+        Ok(self.0.get(key)?.map(|b| {
+            let b: [u8; 32] = b.as_ref().try_into().unwrap();
+            b.into()
+        }))
+    }
+
+    pub fn set_schema_id(&self, id: &DocId, hash: Hash) -> Result<()> {
+        let mut key = [0; 33];
+        key[..32].copy_from_slice(id.as_ref());
+        key[32] = 0;
+        let hash: [u8; 32] = hash.into();
+        self.0.insert(key, &hash)?;
+        Ok(())
     }
 
     pub fn peer_id(&self, id: &DocId) -> Result<Option<PeerId>> {
         let mut key = [0; 33];
         key[..32].copy_from_slice(id.as_ref());
         key[32] = 1;
-        Ok(self
+        let peer = self
             .0
             .get(key)?
-            .map(|v| PeerId::new(v.as_ref().try_into().unwrap())))
+            .map(|v| PeerId::new(v.as_ref().try_into().unwrap()));
+        Ok(peer)
     }
 
-    pub fn counter(&self, id: &DocId) -> Result<u64> {
+    pub fn set_peer_id(&self, id: &DocId, peer: PeerId) -> Result<()> {
         let mut key = [0; 33];
         key[..32].copy_from_slice(id.as_ref());
+        key[32] = 1;
+        self.0.insert(key, peer.as_ref())?;
+        Ok(())
+    }
+
+    pub fn counter(&self, id: &DocId, peer_id: &PeerId) -> Result<u64> {
+        let mut key = [0; 65];
+        key[..32].copy_from_slice(id.as_ref());
         key[32] = 2;
+        key[33..].copy_from_slice(peer_id.as_ref());
+        let v = self.0.get(key)?
+            .map(|b| u64::from_le_bytes(b.as_ref().try_into().unwrap()))
+            .unwrap_or_default();
+        Ok(v)
+    }
+
+    pub fn increment(&self, id: &DocId, peer_id: &PeerId) -> Result<u64> {
+        let mut key = [0; 65];
+        key[..32].copy_from_slice(id.as_ref());
+        key[32] = 2;
+        key[33..].copy_from_slice(peer_id.as_ref());
         let v = self
             .0
             .fetch_and_update(key, |v| {
@@ -135,36 +168,42 @@ impl Docs {
 
 #[derive(Clone)]
 pub struct Doc {
+    id: DocId,
+    schema_id: Hash,
+    peer_id: PeerId,
+    lenses: Ref<Lenses>,
+    schema: Ref<Schema>,
     crdt: Crdt,
     docs: Docs,
     registry: Registry,
     acl: Acl,
-    ctx: Ref<CausalContext>,
-    lenses: Ref<Lenses>,
-    schema: Ref<Schema>,
-    peer_id: PeerId,
 }
 
 impl Doc {
     fn new(id: DocId, crdt: Crdt, docs: Docs, registry: Registry, acl: Acl) -> Result<Self> {
-        let ctx = docs.ctx(&id)?.unwrap();
         let peer_id = docs.peer_id(&id)?.unwrap();
-        let lenses = registry.lenses(&ctx.as_ref().schema.into())?.unwrap();
-        let schema = registry.schema(&ctx.as_ref().schema.into())?.unwrap();
+        let schema_id = docs.schema_id(&id)?.unwrap();
+        let lenses = registry.lenses(&schema_id)?.unwrap();
+        let schema = registry.schema(&schema_id)?.unwrap();
         Ok(Self {
+            id,
+            schema_id,
+            peer_id,
+            lenses,
+            schema,
             crdt,
             docs,
             registry,
             acl,
-            ctx,
-            lenses,
-            schema,
-            peer_id,
         })
     }
 
-    pub fn ctx(&self) -> &Archived<CausalContext> {
-        self.ctx.as_ref()
+    pub fn id(&self) -> &DocId {
+        &self.id
+    }
+
+    pub fn schema_id(&self) -> &Hash {
+        &self.schema_id
     }
 
     pub fn lenses(&self) -> &Archived<Lenses> {
@@ -182,22 +221,22 @@ impl Doc {
     /// Returns a cursor for the document.
     pub fn cursor(&self) -> Cursor<'_> {
         Cursor::new(
-            self.ctx(),
+            self.id,
+            self.schema_id,
+            self.peer_id,
+            self.schema(),
             &self.crdt,
             &self.docs,
             &self.acl,
-            self.schema(),
-            self.peer_id,
         )
     }
 
     pub fn join(&self, _peer_id: &PeerId, mut causal: Causal) -> Result<()> {
-        let schema_id = causal.ctx().schema();
         let schema = self
             .registry
-            .schema(&schema_id)?
-            .ok_or_else(|| anyhow!("missing lenses with hash {}", schema_id))?;
-        let lenses = self.registry.lenses(&schema_id)?.unwrap();
+            .schema(&self.schema_id)?
+            .ok_or_else(|| anyhow!("missing lenses with hash {}", &self.schema_id))?;
+        let lenses = self.registry.lenses(&self.schema_id)?.unwrap();
 
         if !schema.as_ref().validate(causal.store()) {
             return Err(anyhow!("crdt failed schema validation"));
@@ -209,7 +248,8 @@ impl Doc {
     }
 
     pub fn unjoin(&self, peer_id: &PeerId, ctx: &Archived<CausalContext>) -> Result<Causal> {
-        self.crdt.unjoin(self.ctx(), peer_id, ctx)
+        //self.crdt.unjoin(self.ctx(), peer_id, ctx)
+        todo!()
     }
 
     pub fn transform(&mut self, schema_id: &Hash) -> Result<()> {

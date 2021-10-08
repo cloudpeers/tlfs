@@ -1,38 +1,41 @@
 use crate::{
-    Acl, Actor, ArchivedSchema, Can, Causal, CausalContext, Crdt, Docs, Dot, PathBuf, PeerId,
-    Permission, Policy, Primitive, PrimitiveKind, Schema,
+    Acl, Actor, ArchivedSchema, Can, Causal, Crdt, Docs, Dot, PathBuf, PeerId,
+    Permission, Policy, Primitive, PrimitiveKind, Schema, Hash, DocId,
 };
 use anyhow::{anyhow, Result};
 use rkyv::Archived;
 
 #[derive(Clone)]
 pub struct Cursor<'a> {
+    id: DocId,
+    schema_id: Hash,
+    peer_id: PeerId,
+    schema: &'a Archived<Schema>,
     path: PathBuf,
-    ctx: &'a Archived<CausalContext>,
     crdt: &'a Crdt,
     docs: &'a Docs,
     acl: &'a Acl,
-    schema: &'a Archived<Schema>,
-    peer_id: PeerId,
 }
 
 impl<'a> Cursor<'a> {
     pub fn new(
-        ctx: &'a Archived<CausalContext>,
+        id: DocId,
+        schema_id: Hash,
+        peer_id: PeerId,
+        schema: &'a Archived<Schema>,
         crdt: &'a Crdt,
         docs: &'a Docs,
         acl: &'a Acl,
-        schema: &'a Archived<Schema>,
-        peer_id: PeerId,
     ) -> Self {
         Self {
-            path: PathBuf::new(ctx.doc),
-            ctx,
+            id,
+            schema_id,
+            peer_id,
+            schema,
+            path: PathBuf::new(id),
             crdt,
             docs,
             acl,
-            schema,
-            peer_id,
         }
     }
 
@@ -141,7 +144,7 @@ impl<'a> Cursor<'a> {
     }
 
     fn dot(&self) -> Result<Dot> {
-        let counter = self.docs.counter(&self.ctx.doc)?;
+        let counter = self.docs.increment(&self.id, &self.peer_id)?;
         Ok(Dot::new(self.peer_id, counter))
     }
 

@@ -567,11 +567,19 @@ impl<'a> AsRef<[u8]> for Path<'a> {
 }
 
 #[derive(Clone)]
-pub struct Crdt(sled::Tree);
+pub struct Crdt {
+    state: sled::Tree,
+    acl: Acl,
+    docs: Docs,
+}
 
 impl Crdt {
-    pub fn new(tree: sled::Tree) -> Self {
-        Self(tree)
+    pub fn new(state: sled::Tree) -> Self {
+        Self {
+            state,
+            acl,
+            docs,
+        }
     }
 
     pub fn memory(name: &str) -> Result<Self> {
