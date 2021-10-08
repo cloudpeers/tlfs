@@ -57,3 +57,9 @@ impl<T> From<Ref<T>> for sled::IVec {
         r.bytes
     }
 }
+
+impl<T> From<Ref<T>> for Vec<u8> {
+    fn from(r: Ref<T>) -> Self {
+        r.bytes.to_vec()
+    }
+}

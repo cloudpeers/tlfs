@@ -149,8 +149,7 @@ impl<'a> Cursor<'a> {
     pub fn enable(&self) -> Result<Causal> {
         if let ArchivedSchema::Flag = &self.schema {
             if self.can(self.peer_id, Permission::Write)? {
-                self.crdt
-                    .enable(self.path.as_path(), &self.ctx, self.dot()?)
+                self.crdt.enable(self.path.as_path(), self.ctx, self.dot()?)
             } else {
                 Err(anyhow!("unauthorized"))
             }
@@ -164,7 +163,7 @@ impl<'a> Cursor<'a> {
         if let ArchivedSchema::Flag = &self.schema {
             if self.can(self.peer_id, Permission::Write)? {
                 self.crdt
-                    .disable(self.path.as_path(), &self.ctx, self.dot()?)
+                    .disable(self.path.as_path(), self.ctx, self.dot()?)
             } else {
                 Err(anyhow!("unauthorized"))
             }
@@ -180,7 +179,7 @@ impl<'a> Cursor<'a> {
             if kind.validate(&value) {
                 if self.can(self.peer_id, Permission::Write)? {
                     self.crdt
-                        .assign(self.path.as_path(), &self.ctx, self.dot()?, value)
+                        .assign(self.path.as_path(), self.ctx, self.dot()?, value)
                 } else {
                     Err(anyhow!("unauthorized"))
                 }
@@ -198,8 +197,7 @@ impl<'a> Cursor<'a> {
         if let ArchivedSchema::Table(kind, _) = &self.schema {
             if kind.validate(&key) {
                 if self.can(self.peer_id, Permission::Write)? {
-                    self.crdt
-                        .remove(self.path.as_path(), &self.ctx, self.dot()?)
+                    self.crdt.remove(self.path.as_path(), self.ctx, self.dot()?)
                 } else {
                     Err(anyhow!("unauthorized"))
                 }
@@ -221,7 +219,7 @@ impl<'a> Cursor<'a> {
         }
         self.crdt.say(
             self.path.as_path(),
-            &self.ctx,
+            self.ctx,
             self.dot()?,
             Policy::Can(actor.into(), perm),
         )
@@ -237,7 +235,7 @@ impl<'a> Cursor<'a> {
         }
         self.crdt.say(
             self.path.as_path(),
-            &self.ctx,
+            self.ctx,
             self.dot()?,
             Policy::CanIf(actor, perm, cond),
         )
@@ -248,7 +246,7 @@ impl<'a> Cursor<'a> {
         // TODO: check permission to revoke
         self.crdt.say(
             self.path.as_path(),
-            &self.ctx,
+            self.ctx,
             self.dot()?,
             Policy::Revokes(claim),
         )

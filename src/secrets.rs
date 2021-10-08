@@ -1,7 +1,6 @@
-use crate::crypto::{Key, KeyNonce, Keypair};
 use anyhow::Result;
 use std::convert::TryInto;
-use tlfs_crdt::{archive, DocId, PeerId, Ref};
+use tlfs_crdt::{DocId, Key, KeyNonce, Keypair, PeerId, Ref};
 
 #[repr(u8)]
 enum KeyType {
@@ -35,6 +34,12 @@ impl Metadata {
     fn ty(mut self, ty: KeyType) -> Self {
         self.0[64] = ty as u8;
         self
+    }
+}
+
+impl Default for Metadata {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -82,27 +87,32 @@ impl Secrets {
     pub fn key_nonce(&self, metadata: Metadata) -> Result<Option<KeyNonce>> {
         if let Some(key) = self.key(metadata)? {
             let nonce = self.nonce(metadata)?;
-            Ok(Some(KeyNonce { key, nonce }))
+            Ok(Some(KeyNonce::new(key, nonce)))
         } else {
             Ok(None)
         }
     }
 
     pub fn generate_keypair(&self, metadata: Metadata) -> Result<()> {
-        self.0
-            .insert(metadata.ty(KeyType::Keypair), archive(&Keypair::generate()))?;
+        self.0.insert(
+            metadata.ty(KeyType::Keypair),
+            Ref::archive(&Keypair::generate()).as_bytes(),
+        )?;
         Ok(())
     }
 
     pub fn generate_key(&self, metadata: Metadata) -> Result<()> {
-        self.0
-            .insert(metadata.ty(KeyType::Key), archive(&Key::generate()))?;
+        self.0.insert(
+            metadata.ty(KeyType::Key),
+            Ref::archive(&Key::generate()).as_bytes(),
+        )?;
         self.0.insert(metadata.ty(KeyType::Key), [0; 8].as_ref())?;
         Ok(())
     }
 
     pub fn add_key(&self, metadata: Metadata, key: Key) -> Result<()> {
-        self.0.insert(metadata.ty(KeyType::Key), archive(&key))?;
+        self.0
+            .insert(metadata.ty(KeyType::Key), Ref::archive(&key).as_bytes())?;
         Ok(())
     }
 }

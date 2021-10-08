@@ -71,7 +71,7 @@ impl ArchivedSchema {
                 }*/
                 for (prop, crdt) in fields {
                     if let Some(schema) = schema.get(prop.as_str()) {
-                        if !schema.validate(&crdt) {
+                        if !schema.validate(crdt) {
                             return false;
                         }
                     } else {
