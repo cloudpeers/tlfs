@@ -22,7 +22,7 @@ impl Backend {
         let crdt = Crdt::new(db.open_tree("crdt")?);
         let docs = Docs::new(db.open_tree("docs")?);
         let acl = Acl::new(db.open_tree("acl")?);
-        let engine = Engine::new(crdt.clone())?;
+        let engine = Engine::new(crdt.clone(), acl.clone())?;
         Ok(Self {
             registry,
             crdt,
@@ -66,8 +66,8 @@ impl Backend {
         )
     }
 
-    pub fn poll(&mut self, cx: &mut Context) {
-        self.engine.poll(cx);
+    pub fn poll(&mut self, cx: &mut Context) -> Result<()> {
+        self.engine.poll(cx)
     }
 }
 

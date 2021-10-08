@@ -37,7 +37,7 @@ impl<'a> Cursor<'a> {
     }
 
     /// Checks permissions.
-    pub fn can(&self, peer: PeerId, perm: Permission) -> bool {
+    pub fn can(&self, peer: PeerId, perm: Permission) -> Result<bool> {
         self.acl.can(peer, perm, self.path.as_path())
     }
 
@@ -148,7 +148,7 @@ impl<'a> Cursor<'a> {
     /// Enables a flag.
     pub fn enable(&self) -> Result<Causal> {
         if let ArchivedSchema::Flag = &self.schema {
-            if self.can(self.peer_id, Permission::Write) {
+            if self.can(self.peer_id, Permission::Write)? {
                 self.crdt
                     .enable(self.path.as_path(), &self.ctx, self.dot()?)
             } else {
@@ -162,7 +162,7 @@ impl<'a> Cursor<'a> {
     /// Disables a flag.
     pub fn disable(&self) -> Result<Causal> {
         if let ArchivedSchema::Flag = &self.schema {
-            if self.can(self.peer_id, Permission::Write) {
+            if self.can(self.peer_id, Permission::Write)? {
                 self.crdt
                     .disable(self.path.as_path(), &self.ctx, self.dot()?)
             } else {
@@ -178,7 +178,7 @@ impl<'a> Cursor<'a> {
         let value = value.into();
         if let ArchivedSchema::Reg(kind) = &self.schema {
             if kind.validate(&value) {
-                if self.can(self.peer_id, Permission::Write) {
+                if self.can(self.peer_id, Permission::Write)? {
                     self.crdt
                         .assign(self.path.as_path(), &self.ctx, self.dot()?, value)
                 } else {
@@ -197,7 +197,7 @@ impl<'a> Cursor<'a> {
         let key = key.into();
         if let ArchivedSchema::Table(kind, _) = &self.schema {
             if kind.validate(&key) {
-                if self.can(self.peer_id, Permission::Write) {
+                if self.can(self.peer_id, Permission::Write)? {
                     self.crdt
                         .remove(self.path.as_path(), &self.ctx, self.dot()?)
                 } else {
@@ -213,10 +213,10 @@ impl<'a> Cursor<'a> {
 
     /// Gives permission to a peer.
     pub fn say_can(&self, actor: Option<PeerId>, perm: Permission) -> Result<Causal> {
-        if !self.can(self.peer_id, Permission::Control) {
+        if !self.can(self.peer_id, Permission::Control)? {
             return Err(anyhow!("unauthoried"));
         }
-        if !perm.controllable() && !self.can(self.peer_id, Permission::Own) {
+        if !perm.controllable() && !self.can(self.peer_id, Permission::Own)? {
             return Err(anyhow!("unauthorized"));
         }
         self.crdt.say(
@@ -229,10 +229,10 @@ impl<'a> Cursor<'a> {
 
     /// Gives conditional permission to a peer.
     pub fn say_can_if(&self, actor: Actor, perm: Permission, cond: Can) -> Result<Causal> {
-        if !self.can(self.peer_id, Permission::Control) {
+        if !self.can(self.peer_id, Permission::Control)? {
             return Err(anyhow!("unauthorized"));
         }
-        if !perm.controllable() && !self.can(self.peer_id, Permission::Own) {
+        if !perm.controllable() && !self.can(self.peer_id, Permission::Own)? {
             return Err(anyhow!("unauthorized"));
         }
         self.crdt.say(

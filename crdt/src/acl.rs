@@ -1,9 +1,9 @@
-use crate::{Crdt, DocId, Dot, DotStore, DotStoreType, Path, PathBuf, PeerId, Ref};
+use crate::{Crdt, DocId, Dot, DotStoreType, Path, PathBuf, PeerId, Ref};
 use anyhow::Result;
 use bytecheck::CheckBytes;
 use crepe::crepe;
 use rkyv::{Archive, Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -265,14 +265,16 @@ crepe! {
 pub struct Engine {
     policy: BTreeSet<Says>,
     subscriber: sled::Subscriber,
+    acl: Acl,
 }
 
 impl Engine {
-    pub fn new(crdt: Crdt) -> Result<Self> {
+    pub fn new(crdt: Crdt, acl: Acl) -> Result<Self> {
         let subscriber = crdt.watch_path(Path::new(&[]));
         let mut me = Self {
             policy: Default::default(),
             subscriber,
+            acl,
         };
         for r in crdt.iter() {
             let (k, v) = r?;
@@ -281,7 +283,7 @@ impl Engine {
         Ok(me)
     }
 
-    pub fn poll(&mut self, cx: &mut Context) {
+    pub fn poll(&mut self, cx: &mut Context) -> Result<()> {
         while let Poll::Ready(Some(ev)) = Pin::new(&mut self.subscriber).poll(cx) {
             for (_, k, v) in ev.iter() {
                 if let Some(v) = v {
@@ -290,6 +292,7 @@ impl Engine {
                 }
             }
         }
+        self.update_rules()
     }
 
     fn add_kv(&mut self, key: &sled::IVec, value: sled::IVec) {
@@ -312,30 +315,20 @@ impl Engine {
         }
     }
 
-    pub fn rules(&self) -> impl Iterator<Item = CanRef<'_>> {
+    fn update_rules(&self) -> Result<()> {
         let mut runtime = Crepe::new();
         runtime.extend(self.policy.iter().map(Input));
         let (authorized, revoked) = runtime.run();
-        authorized.into_iter().filter_map(move |auth| {
-            if !revoked.contains(&Revoked(auth.0)) {
-                Some(auth.1)
-            } else {
-                None
-            }
-        })
-    }
-
-    pub fn can(&self, peer: PeerId, perm: Permission, path: Path) -> bool {
-        let can = CanRef::new(Actor::Peer(peer), perm, path);
-        for rule in self.rules() {
-            if rule.implies(can) {
-                return true;
-            }
+        for Authorized(id, CanRef { actor, perm, path }) in authorized.into_iter() {
+            self.acl.add_rule(id, actor, perm, path)?;
         }
-        false
+        for Revoked(id) in revoked {
+            self.acl.revoke_rule(id)?;
+        }
+        Ok(())
     }
 
-    pub fn filter(
+    /*pub fn filter(
         &self,
         path: &mut PathBuf,
         peer: PeerId,
@@ -376,7 +369,7 @@ impl Engine {
                 DotStore::Policy(policy) => DotStore::Policy(policy.clone()),
             }
         }
-    }
+    }*/
 }
 
 #[derive(Clone)]
@@ -387,8 +380,42 @@ impl Acl {
         Self(tree)
     }
 
-    pub fn can(&self, peer: PeerId, perm: Permission, path: Path) -> bool {
+    fn add_rule(&self, id: Dot, actor: Actor, perm: Permission, path: Path) -> Result<()> {
+        let peer = match actor {
+            Actor::Peer(peer) => peer,
+            _ => PeerId::new([0; 32]),
+        };
+        let mut key = peer.as_ref().to_vec();
+        key.extend(path.as_ref());
+        self.0.insert(key, &[perm as u8])?;
+        Ok(())
+    }
+
+    fn revoke_rule(&self, id: Dot) -> Result<()> {
         todo!()
+    }
+
+    fn implies(&self, prefix: &[u8], perm: Permission, path: Path) -> Result<bool> {
+        for r in self.0.scan_prefix(prefix) {
+            let (k,v ) = r?;
+            if Path::new(&k[32..]).is_ancestor(path) && v[0] <= perm as u8 {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    pub fn can(&self, peer: PeerId, perm: Permission, path: Path) -> Result<bool> {
+        let mut prefix = peer.as_ref().to_vec();
+        prefix.extend(path.root().unwrap().as_ref());
+        if self.implies(&prefix, perm, path)? {
+            return Ok(true);
+        }
+        prefix[..32].copy_from_slice(&[0; 32]);
+        if self.implies(&prefix, perm, path)? {
+            return Ok(true);
+        }
+        Ok(false)
     }
 }
 

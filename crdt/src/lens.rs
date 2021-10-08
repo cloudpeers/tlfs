@@ -371,7 +371,7 @@ mod tests {
             let lens = unsafe { archived_root::<Lens>(&lens) };
             prop_assume!(validate(&schema, &causal));
             prop_assume!(lens.to_ref().transform_schema(&mut schema).is_ok());
-            causal.transform(lens.to_ref());
+            lens.to_ref().transform_dotstore(&mut causal.store);
             prop_assert!(validate(&schema, &causal));
         }
 
@@ -384,7 +384,7 @@ mod tests {
             let (ctx, crdt) = causal_to_crdt(&causal);
             lens.to_ref().transform_crdt(&crdt);
             let causal2 = crdt_to_causal(&crdt, &ctx);
-            causal.transform(lens.to_ref());
+            lens.to_ref().transform_dotstore(&mut causal.store);
             assert_eq!(causal, causal2);
         }
     }
