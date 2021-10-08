@@ -963,11 +963,11 @@ impl Crdt {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    /*use super::*;
     use crate::props::*;
     use proptest::prelude::*;
 
-    /*#[test]
+    #[test]
     fn test_ewflag() -> Result<()> {
         let crdt = Crdt::memory("test")?;
         let doc = DocId::new([0; 32]);
