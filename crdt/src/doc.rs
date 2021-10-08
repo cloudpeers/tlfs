@@ -117,7 +117,7 @@ impl Docs {
                     .map(|b| u64::from_le_bytes(b.try_into().unwrap()))
                     .unwrap_or_default()
                     + 1;
-                Some(v.to_le_bytes().as_ref())
+                Some(v.to_le_bytes().to_vec())
             })?
             .unwrap();
         Ok(u64::from_le_bytes(v.as_ref().try_into().unwrap()))
@@ -178,7 +178,7 @@ impl Doc {
         )
     }
 
-    pub fn join(&self, peer_id: &PeerId, causal: &Causal) -> Result<()> {
+    pub fn join(&self, peer_id: &PeerId, mut causal: Causal) -> Result<()> {
         let schema_id = causal.ctx().schema();
         let schema = self
             .registry
@@ -190,7 +190,8 @@ impl Doc {
             return Err(anyhow!("crdt failed schema validation"));
         }
         causal.transform(self.lenses(), lenses.as_ref());
-        self.crdt.join(self.ctx(), peer_id, &causal)?;
+        todo!();
+        //self.crdt.join(self.ctx(), peer_id, &causal)?;
         Ok(())
     }
 
@@ -205,7 +206,8 @@ impl Doc {
             .ok_or_else(|| anyhow!("missing lenses with hash {}", schema_id))?;
         let schema = self.registry.schema(schema_id)?.unwrap();
         self.crdt.transform(self.lenses(), lenses.as_ref());
-        self.ctx().schema = (*schema_id).into();
+        todo!();
+        //self.ctx().schema = (*schema_id).into();
         self.schema = schema;
         Ok(())
     }
