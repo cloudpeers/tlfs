@@ -73,7 +73,7 @@ type EntryIter<'a, I, R> = Box<dyn Iterator<Item = (&'a I, &'a R)> + 'a>;
 
 pub trait AbstractDotSet<I: ReplicaId> {
     fn entry(&self, id: &I) -> Option<&Self::RangeSet>;
-    fn entries<'a>(&'a self) -> EntryIter<'a, I, Self::RangeSet>;
+    fn entries(&self) -> EntryIter<'_, I, Self::RangeSet>;
     fn to_dotset(&self) -> DotSet<I>;
     type RangeSet: AbstractRangeSet<u64>;
 
@@ -174,7 +174,7 @@ pub trait AbstractDotSet<I: ReplicaId> {
 
 impl<I: ReplicaId> AbstractDotSet<I> for DotSet<I> {
     fn entry(&self, id: &I) -> Option<&RangeSet2<u64>> {
-        self.0.get(&id)
+        self.0.get(id)
     }
 
     type RangeSet = RangeSet2<u64>;
@@ -190,7 +190,7 @@ impl<I: ReplicaId> AbstractDotSet<I> for DotSet<I> {
 
 impl<I: ReplicaId> AbstractDotSet<I> for ArchivedDotSet<I> {
     fn entry(&self, id: &I) -> Option<&ArchivedRangeSet<u64>> {
-        self.0.get(&id)
+        self.0.get(id)
     }
 
     type RangeSet = ArchivedRangeSet<u64>;
