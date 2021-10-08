@@ -1,6 +1,6 @@
 use crate::{
-    Causal, CausalContext, Crdt, DocId, Dot, DotSet, DotStore, Kind, Lens, Lenses, PeerId,
-    Primitive, PrimitiveKind, Prop, Ref, Schema,
+    AbstractDotSet, Causal, CausalContext, Crdt, DocId, Dot, DotSet, DotStore, Kind, Lens, Lenses,
+    PeerId, Primitive, PrimitiveKind, Prop, Ref, Schema,
 };
 use proptest::prelude::*;
 use std::collections::BTreeMap;

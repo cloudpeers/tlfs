@@ -1,4 +1,4 @@
-use crate::{ArchivedLenses, DocId, Dot, DotSet, Hash, PeerId, Policy, Ref};
+use crate::{AbstractDotSet, ArchivedLenses, DocId, Dot, DotSet, Hash, PeerId, Policy, Ref};
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Archived, Deserialize, Serialize};
@@ -152,7 +152,12 @@ impl DotStore {
         }
     }
 
-    pub fn join(&mut self, ctx: &DotSet, other: &Self, other_ctx: &DotSet) {
+    pub fn join(
+        &mut self,
+        ctx: &impl AbstractDotSet<PeerId>,
+        other: &Self,
+        other_ctx: &impl AbstractDotSet<PeerId>,
+    ) {
         match (self, other) {
             (me @ Self::Null, other) => *me = other.clone(),
             (_, Self::Null) => {}
@@ -331,7 +336,7 @@ impl Causal {
 
     pub fn unjoin(&self, ctx: &Archived<CausalContext>) -> Self {
         // TODO
-        let other = ctx.dots.deserialize(&mut rkyv::Infallible).unwrap();
+        let other: DotSet = ctx.dots.deserialize(&mut rkyv::Infallible).unwrap();
         let dots = self.ctx.dots.difference(&other);
         let store = self.store.unjoin(&dots);
         Self {
