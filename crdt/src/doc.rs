@@ -175,6 +175,10 @@ impl Doc {
         self.schema.as_ref()
     }
 
+    pub fn peer_id(&self) -> &PeerId {
+        &self.peer_id
+    }
+
     /// Returns a cursor for the document.
     pub fn cursor(&self) -> Cursor<'_> {
         Cursor::new(
@@ -205,7 +209,7 @@ impl Doc {
     }
 
     pub fn unjoin(&self, peer_id: &PeerId, ctx: &Archived<CausalContext>) -> Result<Causal> {
-        self.crdt.unjoin(self.ctx(), peer_id, &ctx)
+        self.crdt.unjoin(self.ctx(), peer_id, ctx)
     }
 
     pub fn transform(&mut self, schema_id: &Hash) -> Result<()> {

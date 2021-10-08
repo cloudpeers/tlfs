@@ -307,6 +307,20 @@ impl CausalContext {
     }
 }
 
+impl ArchivedCausalContext {
+    pub fn doc(&self) -> &DocId {
+        &self.doc
+    }
+
+    pub fn schema(&self) -> Hash {
+        self.schema.into()
+    }
+
+    pub fn dots(&self) -> &Archived<DotSet> {
+        &self.dots
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(CheckBytes))]
 #[repr(C)]
@@ -775,7 +789,7 @@ impl Crdt {
         assert_eq!(ctx.doc(), causal.ctx().doc());
         // TODO: check write permission
         let mut path = PathBuf::new(ctx.doc);
-        self.join_store(&mut path, &mut ctx.dots, &causal.store, &causal.ctx.dots)?;
+        self.join_store(&mut path, &ctx.dots, &causal.store, &causal.ctx.dots)?;
         ctx.dots.union(&causal.ctx.dots);
         Ok(())
     }
@@ -954,11 +968,11 @@ impl Crdt {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    /*use super::*;
     use crate::props::*;
     use proptest::prelude::*;
 
-    /*#[test]
+    #[test]
     fn test_ewflag() -> Result<()> {
         let crdt = Crdt::memory("test")?;
         let doc = DocId::new([0; 32]);

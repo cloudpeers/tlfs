@@ -152,11 +152,15 @@ impl Encrypted {
 #[archive(as = "KeyNonce")]
 #[repr(C)]
 pub struct KeyNonce {
-    pub(crate) key: Key,
-    pub(crate) nonce: u64,
+    key: Key,
+    nonce: u64,
 }
 
 impl KeyNonce {
+    pub fn new(key: Key, nonce: u64) -> Self {
+        Self { key, nonce }
+    }
+
     pub fn key(&self) -> &Key {
         &self.key
     }
