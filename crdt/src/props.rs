@@ -1,11 +1,8 @@
 use crate::{
     Causal, CausalContext, Crdt, DocId, Dot, DotSet, DotStore, Kind, Lens, Lenses, PeerId,
-    Primitive, PrimitiveKind, Prop, Schema,
+    Primitive, PrimitiveKind, Prop, Ref, Schema,
 };
 use proptest::prelude::*;
-use rkyv::ser::serializers::AllocSerializer;
-use rkyv::ser::Serializer;
-use rkyv::{archived_root, Serialize};
 use std::collections::BTreeMap;
 use std::ops::Range;
 
@@ -162,19 +159,9 @@ pub fn arb_dotstore_for_schema(s: Schema) -> BoxedStrategy<DotStore> {
     }
 }
 
-pub fn archive<T>(t: &T) -> Vec<u8>
-where
-    T: Serialize<AllocSerializer<256>>,
-{
-    let mut ser = AllocSerializer::<256>::default();
-    ser.serialize_value(t).unwrap();
-    ser.into_serializer().into_inner().to_vec()
-}
-
 pub fn validate(schema: &Schema, value: &Causal) -> bool {
-    let schema = archive(schema);
-    let schema = unsafe { archived_root::<Schema>(&schema) };
-    schema.validate(value.store())
+    let schema = Ref::archive(schema);
+    schema.as_ref().validate(value.store())
 }
 
 prop_compose! {
@@ -268,9 +255,12 @@ fn arb_lenses_inner(
     arb_lens_for_schema(&schema).prop_flat_map(move |lens| {
         let mut lenses = lenses.clone();
         let mut schema = schema.clone();
-        let bytes = archive(&lens);
-        let archived = unsafe { archived_root::<Lens>(&bytes) }.to_ref();
-        archived.transform_schema(&mut schema).unwrap();
+        let alens = Ref::archive(&lens);
+        alens
+            .as_ref()
+            .to_ref()
+            .transform_schema(&mut schema)
+            .unwrap();
         lenses.push(lens);
         (Just(lenses), Just(schema))
     })
@@ -296,10 +286,9 @@ prop_compose! {
 }
 
 fn lenses_to_schema(lenses: &Lenses) -> Schema {
-    let bytes = archive(lenses);
-    let lenses = unsafe { archived_root::<Lenses>(&bytes) };
+    let lenses = Ref::archive(lenses);
     let mut schema = Schema::Null;
-    for lens in lenses.lenses() {
+    for lens in lenses.as_ref().lenses() {
         lens.to_ref().transform_schema(&mut schema).unwrap();
     }
     schema
@@ -334,18 +323,21 @@ prop_compose! {
 
 pub fn join(c: &Causal, o: &Causal) -> Causal {
     let mut c = c.clone();
-    c.join(o);
+    c.join(Ref::archive(o).as_ref());
     c
 }
 
 pub fn causal_to_crdt(causal: &Causal) -> (CausalContext, Crdt) {
     let mut ctx = CausalContext::new(DocId::new([0; 32]), [0; 32].into());
     let crdt = Crdt::memory("mem").unwrap();
-    crdt.join(&mut ctx, causal).unwrap();
+    crdt.join(&mut ctx, &PeerId::new([0; 32]), causal).unwrap();
     (ctx, crdt)
 }
 
 pub fn crdt_to_causal(crdt: &Crdt, ctx: &CausalContext) -> Causal {
     let other = CausalContext::new(*ctx.doc(), ctx.schema());
-    crdt.unjoin(ctx, &other).unwrap()
+    let peer_id = (*ctx.doc()).into();
+    let ctx = Ref::archive(ctx);
+    let other = Ref::archive(&other);
+    crdt.unjoin(ctx.as_ref(), &peer_id, other.as_ref()).unwrap()
 }

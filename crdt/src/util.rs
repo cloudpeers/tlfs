@@ -4,7 +4,7 @@ use rkyv::ser::Serializer;
 use rkyv::{archived_root, Archive, Archived, Deserialize, Serialize};
 use std::marker::PhantomData;
 
-pub fn archive<T>(t: &T) -> Vec<u8>
+fn archive<T>(t: &T) -> Vec<u8>
 where
     T: Serialize<AllocSerializer<256>>,
 {
@@ -40,10 +40,20 @@ impl<T: Archive> Ref<T> {
     {
         Ok(self.as_ref().deserialize(&mut rkyv::Infallible)?)
     }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
 }
 
 impl<T: Archive> AsRef<Archived<T>> for Ref<T> {
     fn as_ref(&self) -> &Archived<T> {
         unsafe { archived_root::<T>(&self.bytes[..]) }
+    }
+}
+
+impl<T> From<Ref<T>> for sled::IVec {
+    fn from(r: Ref<T>) -> Self {
+        r.bytes
     }
 }

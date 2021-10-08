@@ -275,7 +275,7 @@ impl<'a> LensRef<'a> {
         }
     }
 
-    pub fn transform_crdt(&self, store: &Crdt) {
+    pub fn transform_crdt(&self, _store: &Crdt) {
         todo!()
     }
 }
@@ -289,12 +289,6 @@ pub struct Lenses(Vec<Lens>);
 impl Lenses {
     pub fn new(lenses: Vec<Lens>) -> Self {
         Self(lenses)
-    }
-
-    pub fn archive(&self) -> Vec<u8> {
-        let mut ser = AllocSerializer::<256>::default();
-        ser.serialize_value(self).unwrap();
-        ser.into_serializer().into_inner().to_vec()
     }
 }
 
@@ -349,42 +343,38 @@ impl ArchivedLenses {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::props::*;
+    use crate::Ref;
     use proptest::prelude::*;
-    use rkyv::archived_root;
 
     proptest! {
         #[test]
         fn reversible((lens, schema) in lens_and_schema()) {
-            let lens = archive(&lens);
-            let lens = unsafe { archived_root::<Lens>(&lens) };
+            let lens = Ref::archive(&lens);
             let mut schema2 = schema.clone();
-            prop_assume!(lens.to_ref().transform_schema(&mut schema2).is_ok());
-            lens.to_ref().reverse().transform_schema(&mut schema2).unwrap();
+            prop_assume!(lens.as_ref().to_ref().transform_schema(&mut schema2).is_ok());
+            lens.as_ref().to_ref().reverse().transform_schema(&mut schema2).unwrap();
             prop_assert_eq!(schema, schema2);
         }
 
         #[test]
         fn transform_preserves_validity((lens, mut schema, mut causal) in lens_schema_and_causal()) {
-            let lens = archive(&lens);
-            let lens = unsafe { archived_root::<Lens>(&lens) };
+            let lens = Ref::archive(&lens);
             prop_assume!(validate(&schema, &causal));
-            prop_assume!(lens.to_ref().transform_schema(&mut schema).is_ok());
-            lens.to_ref().transform_dotstore(&mut causal.store);
+            prop_assume!(lens.as_ref().to_ref().transform_schema(&mut schema).is_ok());
+            lens.as_ref().to_ref().transform_dotstore(&mut causal.store);
             prop_assert!(validate(&schema, &causal));
         }
 
         #[test]
         #[ignore]
         fn crdt_transform((lens, schema, mut causal) in lens_schema_and_causal()) {
-            let lens = archive(&lens);
-            let lens = unsafe { archived_root::<Lens>(&lens) };
+            let lens = Ref::archive(&lens);
             prop_assume!(validate(&schema, &causal));
             let (ctx, crdt) = causal_to_crdt(&causal);
-            lens.to_ref().transform_crdt(&crdt);
+            lens.as_ref().to_ref().transform_crdt(&crdt);
             let causal2 = crdt_to_causal(&crdt, &ctx);
-            lens.to_ref().transform_dotstore(&mut causal.store);
+            lens.as_ref().to_ref().transform_dotstore(&mut causal.store);
             assert_eq!(causal, causal2);
         }
     }

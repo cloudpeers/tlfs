@@ -1,11 +1,13 @@
 use crate::{
-    archive, empty_hash, Acl, Actor, Causal, CausalContext, Crdt, Cursor, DocId, Dot, Engine, Hash,
-    Keypair, Lenses, PathBuf, PeerId, Permission, Policy, Ref, Registry, Schema,
+    empty_hash, Acl, Actor, Causal, CausalContext, Crdt, Cursor, DocId, Dot, Engine, Hash, Keypair,
+    Lenses, PathBuf, PeerId, Permission, Policy, Ref, Registry, Schema,
 };
 use anyhow::{anyhow, Result};
 use rkyv::Archived;
 use std::convert::TryInto;
-use std::task::Context;
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 pub struct Backend {
     registry: Registry,
@@ -40,7 +42,7 @@ impl Backend {
         &self.registry
     }
 
-    pub fn create_doc(&self, owner: PeerId) -> Result<DocId> {
+    pub fn create_doc(&self, owner: PeerId) -> Result<Doc> {
         let la = Keypair::generate();
         let id = DocId::new(la.peer_id().into());
         let hash = empty_hash();
@@ -53,7 +55,7 @@ impl Backend {
         )?;
         self.crdt.join(&mut ctx, &id.into(), &delta)?;
         self.docs.create(id, owner, &ctx)?;
-        Ok(id)
+        self.doc(id)
     }
 
     pub fn doc(&self, id: DocId) -> Result<Doc> {
@@ -65,9 +67,16 @@ impl Backend {
             self.acl.clone(),
         )
     }
+}
 
-    pub fn poll(&mut self, cx: &mut Context) -> Result<()> {
-        self.engine.poll(cx)
+impl Future for Backend {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        if let Poll::Ready(Err(err)) = Pin::new(&mut self.engine).poll(cx) {
+            tracing::error!("{}", err);
+        }
+        Poll::Pending
     }
 }
 
@@ -83,7 +92,7 @@ impl Docs {
         let mut key = [0; 33];
         key[..32].copy_from_slice(id.as_ref());
         key[32] = 0;
-        self.0.insert(key, archive(ctx))?;
+        self.0.insert(key, Ref::archive(ctx).as_bytes())?;
         key[32] = 1;
         self.0.insert(key, owner.as_ref())?;
         Ok(())
@@ -178,7 +187,7 @@ impl Doc {
         )
     }
 
-    pub fn join(&self, peer_id: &PeerId, mut causal: Causal) -> Result<()> {
+    pub fn join(&self, _peer_id: &PeerId, mut causal: Causal) -> Result<()> {
         let schema_id = causal.ctx().schema();
         let schema = self
             .registry
@@ -192,7 +201,7 @@ impl Doc {
         causal.transform(self.lenses(), lenses.as_ref());
         todo!();
         //self.crdt.join(self.ctx(), peer_id, &causal)?;
-        Ok(())
+        //Ok(())
     }
 
     pub fn unjoin(&self, peer_id: &PeerId, ctx: &Archived<CausalContext>) -> Result<Causal> {
@@ -204,26 +213,26 @@ impl Doc {
             .registry
             .lenses(schema_id)?
             .ok_or_else(|| anyhow!("missing lenses with hash {}", schema_id))?;
-        let schema = self.registry.schema(schema_id)?.unwrap();
+        let _schema = self.registry.schema(schema_id)?.unwrap();
         self.crdt.transform(self.lenses(), lenses.as_ref());
         todo!();
         //self.ctx().schema = (*schema_id).into();
-        self.schema = schema;
-        Ok(())
+        //self.schema = schema;
+        //Ok(())
     }
 }
 
-/*#[cfg(test)]
+#[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{Kind, Lens, Lenses, Permission, PrimitiveKind, Ref, EMPTY_LENSES};
 
     #[test]
+    #[ignore]
     fn test_api() -> Result<()> {
-        let sdk = Sdk::new(sled::Config::new().temporary(true))?;
-        sdk.secrets().generate_keypair(Metadata::new())?;
-        sdk.registry().register(tlfs_crdt::EMPTY_LENSES.to_vec())?;
-
-        let peer_id = sdk.secrets().keypair(Metadata::new())?.unwrap().peer_id();
+        let sdk = Backend::memory()?;
+        sdk.registry().register(EMPTY_LENSES.to_vec())?;
+        let peer_id = PeerId::new([42; 32]);
 
         let lenses = Lenses::new(vec![
             Lens::Make(Kind::Struct),
@@ -245,11 +254,13 @@ mod tests {
                 .lens_map_value()
                 .lens_in("todos"),
         ]);
-        let hash = sdk.registry().register(lenses.archive())?;
+        let hash = sdk
+            .registry()
+            .register(Ref::archive(&lenses).as_bytes().to_vec())?;
 
-        let mut doc = sdk.doc()?;
-        doc.transform(hash)?;
-        assert!(doc.cursor().can(peer_id, Permission::Write));
+        let mut doc = sdk.create_doc(peer_id)?;
+        doc.transform(&hash)?;
+        assert!(doc.cursor().can(peer_id, Permission::Write)?);
 
         let title = "something that needs to be done";
 
@@ -259,7 +270,7 @@ mod tests {
             .key(&0u64.into())?
             .field("title")?
             .assign(title)?;
-        doc.apply(delta)?;
+        doc.join(&peer_id, delta)?;
 
         let value = doc
             .cursor()
@@ -272,4 +283,4 @@ mod tests {
         assert_eq!(value, title);
         Ok(())
     }
-}*/
+}

@@ -25,7 +25,7 @@ pub use crate::id::{DocId, PeerId};
 pub use crate::lens::{ArchivedKind, ArchivedLens, ArchivedLenses, Kind, Lens, LensRef, Lenses};
 pub use crate::registry::{empty_hash, Hash, Registry, EMPTY_LENSES};
 pub use crate::schema::{ArchivedSchema, PrimitiveKind, Prop, Schema};
-pub use crate::util::{archive, Ref};
+pub use crate::util::Ref;
 
 pub type Dot = crate::dotset::Dot<PeerId>;
 pub type DotSet = crate::dotset::DotSet<PeerId>;
