@@ -143,6 +143,10 @@ impl Docs {
         Ok(v)
     }
 
+    pub fn contains(&self, id: &DocId, dot: &Dot) -> Result<bool> {
+        Ok(self.counter(id, &dot.id)? >= dot.counter)
+    }
+
     pub fn present(&self, id: &DocId) -> impl Iterator<Item = Result<(PeerId, u64)>> + '_ {
         let mut prefix = [0; 33];
         prefix[..32].copy_from_slice(id.as_ref());

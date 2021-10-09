@@ -645,11 +645,14 @@ impl Crdt {
     fn join_dotset(
         &self,
         path: &mut PathBuf,
-        peer_id: &PeerId,
+        peer: &PeerId,
         other: &DotSet,
         other_ctx: &DotSet,
     ) -> Result<()> {
-        /*for res in self.state.scan_prefix(&path).keys() {
+        if !self.can(peer, Permission::Write, path.as_path())? {
+            return Ok(());
+        }
+        for res in self.state.scan_prefix(&path).keys() {
             let key = res?;
             let key = Path::new(&key[..]);
             if key.ty() != Some(DotStoreType::Set) {
@@ -661,23 +664,26 @@ impl Crdt {
             }
         }
         for dot in other.iter() {
-            if !ctx.contains(&dot) {
+            if !self.docs.contains(&path.as_path().root().unwrap(), &dot)? {
                 path.dotset(&dot);
                 self.state.insert(&path, &[])?;
                 path.pop();
             }
-        }*/
+        }
         Ok(())
     }
 
     fn join_dotfun(
         &self,
         path: &mut PathBuf,
-        peer_id: &PeerId,
+        peer: &PeerId,
         other: &BTreeMap<Dot, Primitive>,
         other_ctx: &DotSet,
     ) -> Result<()> {
-        /*for res in self.state.scan_prefix(&path).keys() {
+        if !self.can(peer, Permission::Write, path.as_path())? {
+            return Ok(());
+        }
+        for res in self.state.scan_prefix(&path).keys() {
             let key = res?;
             let key = Path::new(&key[..]);
             if key.ty() != Some(DotStoreType::Fun) {
@@ -689,7 +695,7 @@ impl Crdt {
             }
         }
         for (dot, v) in other {
-            if ctx.contains(dot) {
+            if self.docs.contains(&path.as_path().root().unwrap(), dot)? {
                 continue;
             }
             path.dotfun(dot);
@@ -698,7 +704,7 @@ impl Crdt {
             }
             self.state.insert(&path, Ref::archive(v).as_bytes())?;
             path.pop();
-        }*/
+        }
         Ok(())
     }
 
@@ -760,11 +766,14 @@ impl Crdt {
     fn join_policy(
         &self,
         path: &mut PathBuf,
-        _: &PeerId,
+        peer: &PeerId,
         other: &BTreeMap<Dot, BTreeSet<Policy>>,
         _: &DotSet,
     ) -> Result<()> {
-        /*for (dot, ps) in other {
+        if !self.can(peer, Permission::Control, path.as_path())? {
+            return Ok(());
+        }
+        for (dot, ps) in other {
             path.policy(dot);
             self.state.transaction::<_, _, std::io::Error>(|tree| {
                 let mut policies = if let Some(bytes) = tree.get(path.as_ref())? {
@@ -779,7 +788,7 @@ impl Crdt {
                 Ok(())
             })?;
             path.pop();
-        }*/
+        }
         Ok(())
     }
 
@@ -805,6 +814,7 @@ impl Crdt {
     pub fn join(&self, peer_id: &PeerId, causal: &Causal) -> Result<()> {
         let mut path = PathBuf::new(causal.ctx.doc);
         self.join_store(&mut path, peer_id, &causal.store, &causal.ctx.dots)?;
+        // TODO: ctx.dots.union(causal.ctx.dots)
         Ok(())
     }
 
@@ -961,7 +971,7 @@ impl Crdt {
                     self.can(peer, Permission::Own, path)?
                 }
             }
-            Policy::Revokes(_) => todo!(),
+            Policy::Revokes(_) => self.can(peer, Permission::Control, path)?,
         } {
             return Err(anyhow!("unauthorized"));
         }
