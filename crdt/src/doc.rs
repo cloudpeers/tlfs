@@ -237,10 +237,10 @@ impl Doc {
         let schema_id = docs.schema_id(&id)?;
         let lenses = registry
             .lenses(&schema_id)?
-            .unwrap_or(Ref::new(EMPTY_LENSES.as_ref().into()));
+            .unwrap_or_else(|| Ref::new(EMPTY_LENSES.as_ref().into()));
         let schema = registry
             .schema(&schema_id)?
-            .unwrap_or(Ref::new(EMPTY_SCHEMA.as_ref().into()));
+            .unwrap_or_else(|| Ref::new(EMPTY_SCHEMA.as_ref().into()));
         let counter = docs.counter(&id, &peer_id)?;
         let writer = Writer::new(peer_id, counter);
         Ok(Self {

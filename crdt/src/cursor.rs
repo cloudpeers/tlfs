@@ -145,7 +145,7 @@ impl<'a> Cursor<'a> {
     /// Enables a flag.
     pub fn enable(&self) -> Result<Causal> {
         if let ArchivedSchema::Flag = &self.schema {
-            self.crdt.enable(self.path.as_path(), &self.writer)
+            self.crdt.enable(self.path.as_path(), self.writer)
         } else {
             Err(anyhow!("not a flag"))
         }
@@ -154,7 +154,7 @@ impl<'a> Cursor<'a> {
     /// Disables a flag.
     pub fn disable(&self) -> Result<Causal> {
         if let ArchivedSchema::Flag = &self.schema {
-            self.crdt.disable(self.path.as_path(), &self.writer)
+            self.crdt.disable(self.path.as_path(), self.writer)
         } else {
             Err(anyhow!("not a flag"))
         }
@@ -165,7 +165,7 @@ impl<'a> Cursor<'a> {
         let value = value.into();
         if let ArchivedSchema::Reg(kind) = &self.schema {
             if kind.validate(&value) {
-                self.crdt.assign(self.path.as_path(), &self.writer, value)
+                self.crdt.assign(self.path.as_path(), self.writer, value)
             } else {
                 Err(anyhow!("invalid value"))
             }
@@ -179,7 +179,7 @@ impl<'a> Cursor<'a> {
         let key = key.into();
         if let ArchivedSchema::Table(kind, _) = &self.schema {
             if kind.validate(&key) {
-                self.crdt.remove(self.path.as_path(), &self.writer)
+                self.crdt.remove(self.path.as_path(), self.writer)
             } else {
                 Err(anyhow!("invalid key"))
             }
@@ -192,7 +192,7 @@ impl<'a> Cursor<'a> {
     pub fn say_can(&self, actor: Option<PeerId>, perm: Permission) -> Result<Causal> {
         self.crdt.say(
             self.path.as_path(),
-            &self.writer,
+            self.writer,
             Policy::Can(actor.into(), perm),
         )
     }
@@ -206,7 +206,7 @@ impl<'a> Cursor<'a> {
     pub fn say_can_if(&self, actor: Actor, perm: Permission, cond: Can) -> Result<Causal> {
         self.crdt.say(
             self.path.as_path(),
-            &self.writer,
+            self.writer,
             Policy::CanIf(actor, perm, cond),
         )
     }
@@ -214,6 +214,6 @@ impl<'a> Cursor<'a> {
     /// Revokes a policy.
     pub fn revoke(&self, claim: Dot) -> Result<Causal> {
         self.crdt
-            .say(self.path.as_path(), &self.writer, Policy::Revokes(claim))
+            .say(self.path.as_path(), self.writer, Policy::Revokes(claim))
     }
 }
