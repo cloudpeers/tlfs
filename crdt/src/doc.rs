@@ -1,12 +1,15 @@
 use crate::{
-    empty_hash, Acl, Actor, Causal, CausalContext, Crdt, Cursor, DocId, Dot, Engine, Hash, Keypair,
-    Lenses, PathBuf, PeerId, Permission, Policy, Ref, Registry, Schema,
+    Acl, Actor, Causal, CausalContext, Crdt, Cursor, DocId, Dot, Engine, Hash, Keypair, Lens,
+    Lenses, PathBuf, PeerId, Permission, Policy, Ref, Registry, Schema, EMPTY_HASH, EMPTY_LENSES,
+    EMPTY_SCHEMA,
 };
 use anyhow::{anyhow, Result};
 use rkyv::Archived;
 use std::convert::TryInto;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 pub struct Backend {
@@ -32,12 +35,29 @@ impl Backend {
         })
     }
 
+    #[cfg(test)]
     pub fn memory() -> Result<Self> {
+        use tracing_subscriber::fmt::format::FmtSpan;
+        use tracing_subscriber::EnvFilter;
+        tracing_log::LogTracer::init().ok();
+        let env = std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or_else(|_| "info".to_owned());
+        let subscriber = tracing_subscriber::FmtSubscriber::builder()
+            .with_span_events(FmtSpan::ACTIVE | FmtSpan::CLOSE)
+            .with_env_filter(EnvFilter::new(env))
+            .with_writer(std::io::stderr)
+            .finish();
+        tracing::subscriber::set_global_default(subscriber).ok();
+        log_panics::init();
         Self::new(sled::Config::new().temporary(true))
     }
 
     pub fn registry(&self) -> &Registry {
         &self.registry
+    }
+
+    pub fn register(&self, lenses: Vec<Lens>) -> Result<Hash> {
+        self.registry
+            .register(Ref::archive(&Lenses::new(lenses)).into())
     }
 
     pub fn create_doc(&self, owner: PeerId) -> Result<Doc> {
@@ -46,7 +66,7 @@ impl Backend {
         self.docs.create(id, owner)?;
         let delta = self.crdt.say(
             PathBuf::new(id).as_path(),
-            &id.into(),
+            &Writer::new(id.into(), 0),
             Policy::Can(Actor::Peer(owner), Permission::Own),
         )?;
         self.crdt.join(&id.into(), &delta)?;
@@ -64,13 +84,10 @@ impl Backend {
 }
 
 impl Future for Backend {
-    type Output = ();
+    type Output = Result<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        if let Poll::Ready(Err(err)) = Pin::new(&mut self.engine).poll(cx) {
-            tracing::error!("{}", err);
-        }
-        Poll::Pending
+        Pin::new(&mut self.engine).poll(cx)
     }
 }
 
@@ -86,20 +103,24 @@ impl Docs {
         let mut key = [0; 33];
         key[..32].copy_from_slice(id.as_ref());
         key[32] = 0;
-        self.0.insert(key, empty_hash().as_bytes())?;
+        self.0.insert(key, EMPTY_HASH.as_ref())?;
         key[32] = 1;
         self.0.insert(key, owner.as_ref())?;
         Ok(())
     }
 
-    pub fn schema_id(&self, id: &DocId) -> Result<Option<Hash>> {
+    pub fn schema_id(&self, id: &DocId) -> Result<Hash> {
         let mut key = [0; 33];
         key[..32].copy_from_slice(id.as_ref());
         key[32] = 0;
-        Ok(self.0.get(key)?.map(|b| {
-            let b: [u8; 32] = b.as_ref().try_into().unwrap();
-            b.into()
-        }))
+        Ok(self
+            .0
+            .get(key)?
+            .map(|b| {
+                let b: [u8; 32] = b.as_ref().try_into().unwrap();
+                b.into()
+            })
+            .unwrap_or_else(|| EMPTY_HASH.into()))
     }
 
     pub fn set_schema_id(&self, id: &DocId, hash: Hash) -> Result<()> {
@@ -154,33 +175,48 @@ impl Docs {
         self.0.scan_prefix(prefix).map(|r| {
             let (k, v) = r?;
             Ok((
-                PeerId::new(k.as_ref().try_into().unwrap()),
+                PeerId::new(k[33..].as_ref().try_into().unwrap()),
                 u64::from_le_bytes(v.as_ref().try_into().unwrap()),
             ))
         })
     }
 
-    pub fn increment(&self, id: &DocId, peer_id: &PeerId) -> Result<u64> {
+    pub fn extend_present(&self, id: &DocId, peer_id: &PeerId, counter: u64) -> Result<()> {
         let mut key = [0; 65];
         key[..32].copy_from_slice(id.as_ref());
         key[32] = 2;
         key[33..].copy_from_slice(peer_id.as_ref());
-        let v = self
-            .0
-            .fetch_and_update(key, |v| {
-                let v = v
-                    .map(|b| u64::from_le_bytes(b.try_into().unwrap()))
-                    .unwrap_or_default()
-                    + 1;
-                Some(v.to_le_bytes().to_vec())
-            })?
-            .unwrap();
-        Ok(u64::from_le_bytes(v.as_ref().try_into().unwrap()))
+        self.0.update_and_fetch(key, |v| {
+            let current = v
+                .map(|b| u64::from_le_bytes(b.try_into().unwrap()))
+                .unwrap_or_default();
+            Some(std::cmp::max(counter, current).to_le_bytes().to_vec())
+        })?;
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub struct Writer {
+    peer_id: PeerId,
+    counter: Arc<AtomicU64>,
+}
+
+impl Writer {
+    pub fn new(peer_id: PeerId, counter: u64) -> Self {
+        Self {
+            peer_id,
+            counter: Arc::new(AtomicU64::new(counter + 1)),
+        }
     }
 
-    pub fn dot(&self, id: &DocId, peer_id: &PeerId) -> Result<Dot> {
-        let counter = self.increment(id, peer_id)?;
-        Ok(Dot::new(*peer_id, counter))
+    pub fn peer_id(&self) -> &PeerId {
+        &self.peer_id
+    }
+
+    pub fn dot(&self) -> Dot {
+        let counter = self.counter.fetch_add(1, Ordering::SeqCst);
+        Dot::new(self.peer_id, counter)
     }
 }
 
@@ -188,7 +224,7 @@ impl Docs {
 pub struct Doc {
     id: DocId,
     schema_id: Hash,
-    peer_id: PeerId,
+    writer: Writer,
     lenses: Ref<Lenses>,
     schema: Ref<Schema>,
     crdt: Crdt,
@@ -198,13 +234,19 @@ pub struct Doc {
 impl Doc {
     fn new(id: DocId, crdt: Crdt, docs: Docs, registry: Registry) -> Result<Self> {
         let peer_id = docs.peer_id(&id)?.unwrap();
-        let schema_id = docs.schema_id(&id)?.unwrap();
-        let lenses = registry.lenses(&schema_id)?.unwrap();
-        let schema = registry.schema(&schema_id)?.unwrap();
+        let schema_id = docs.schema_id(&id)?;
+        let lenses = registry
+            .lenses(&schema_id)?
+            .unwrap_or(Ref::new(EMPTY_LENSES.as_ref().into()));
+        let schema = registry
+            .schema(&schema_id)?
+            .unwrap_or(Ref::new(EMPTY_SCHEMA.as_ref().into()));
+        let counter = docs.counter(&id, &peer_id)?;
+        let writer = Writer::new(peer_id, counter);
         Ok(Self {
             id,
             schema_id,
-            peer_id,
+            writer,
             lenses,
             schema,
             crdt,
@@ -229,7 +271,7 @@ impl Doc {
     }
 
     pub fn peer_id(&self) -> &PeerId {
-        &self.peer_id
+        self.writer.peer_id()
     }
 
     /// Returns a cursor for the document.
@@ -237,19 +279,28 @@ impl Doc {
         Cursor::new(
             self.id,
             self.schema_id,
-            self.peer_id,
+            &self.writer,
             self.schema(),
             &self.crdt,
         )
     }
 
     pub fn join(&self, peer_id: &PeerId, mut causal: Causal) -> Result<()> {
-        let schema = self
-            .registry
-            .schema(&self.schema_id)?
-            .ok_or_else(|| anyhow!("missing lenses with hash {}", &self.schema_id))?;
-        let lenses = self.registry.lenses(&self.schema_id)?.unwrap();
-
+        let schema = self.registry.schema(&causal.ctx.schema.into())?;
+        let lenses = self.registry.lenses(&causal.ctx.schema.into())?;
+        let (schema, lenses) = match (schema, lenses) {
+            (Some(schema), Some(lenses)) => (schema, lenses),
+            _ => {
+                if causal.ctx.schema == EMPTY_HASH {
+                    (
+                        Ref::new(EMPTY_SCHEMA.to_vec().into()),
+                        Ref::new(EMPTY_LENSES.to_vec().into()),
+                    )
+                } else {
+                    return Err(anyhow!("missing lenses with hash {}", &self.schema_id));
+                }
+            }
+        };
         if !schema.as_ref().validate(causal.store()) {
             return Err(anyhow!("crdt failed schema validation"));
         }
@@ -270,7 +321,9 @@ impl Doc {
         let schema = self.registry.schema(&schema_id)?.unwrap();
         self.crdt
             .transform(&self.id, schema_id, self.lenses(), lenses.as_ref())?;
+        self.lenses = lenses;
         self.schema = schema;
+        self.schema_id = schema_id;
         Ok(())
     }
 }
@@ -278,16 +331,18 @@ impl Doc {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Kind, Lens, Lenses, Permission, PrimitiveKind, Ref, EMPTY_LENSES};
+    use crate::{Kind, Lens, Permission, PrimitiveKind};
 
-    #[test]
-    #[ignore]
-    fn test_api() -> Result<()> {
-        let sdk = Backend::memory()?;
-        sdk.registry().register(EMPTY_LENSES.to_vec())?;
-        let peer_id = PeerId::new([42; 32]);
+    #[async_std::test]
+    async fn test_api() -> Result<()> {
+        let mut sdk = Backend::memory()?;
 
-        let lenses = Lenses::new(vec![
+        let peer = PeerId::new([0; 32]);
+        let mut doc = sdk.create_doc(peer)?;
+        Pin::new(&mut sdk).await?;
+        assert!(doc.cursor().can(&peer, Permission::Write)?);
+
+        let lenses = vec![
             Lens::Make(Kind::Struct),
             Lens::AddProperty("todos".into()),
             Lens::Make(Kind::Table(PrimitiveKind::U64)).lens_in("todos"),
@@ -306,24 +361,18 @@ mod tests {
                 .lens_in("complete")
                 .lens_map_value()
                 .lens_in("todos"),
-        ]);
-        let hash = sdk
-            .registry()
-            .register(Ref::archive(&lenses).as_bytes().to_vec())?;
-
-        let mut doc = sdk.create_doc(peer_id)?;
+        ];
+        let hash = sdk.register(lenses)?;
         doc.transform(hash)?;
-        assert!(doc.cursor().can(&peer_id, Permission::Write)?);
 
         let title = "something that needs to be done";
-
         let delta = doc
             .cursor()
             .field("todos")?
             .key(&0u64.into())?
             .field("title")?
             .assign(title)?;
-        doc.join(&peer_id, delta)?;
+        doc.join(&peer, delta)?;
 
         let value = doc
             .cursor()

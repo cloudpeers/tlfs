@@ -248,6 +248,10 @@ impl<I: ReplicaId> DotSet<I> {
         Self(Default::default())
     }
 
+    pub fn peers(&self) -> impl Iterator<Item = &I> + '_ {
+        self.0.keys()
+    }
+
     pub fn from_set(elems: BTreeSet<Dot<I>>) -> Self {
         elems.into_iter().collect()
     }

@@ -1,6 +1,6 @@
 use crate::{
-    util, AbstractDotSet, Acl, ArchivedLenses, DocId, Docs, Dot, DotSet, Engine, Hash, PeerId,
-    Permission, Policy, Ref,
+    AbstractDotSet, Acl, ArchivedLenses, DocId, Docs, Dot, DotSet, Engine, Hash, PeerId,
+    Permission, Policy, Ref, Writer,
 };
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
@@ -398,10 +398,6 @@ impl PathBuf {
         self.extend(DotStoreType::Map, Ref::archive(key).as_bytes());
     }
 
-    pub fn archived_key(&mut self, key: &Archived<Primitive>) {
-        self.extend(DotStoreType::Map, util::as_bytes::<Primitive>(key));
-    }
-
     pub fn field(&mut self, field: &str) {
         self.extend(DotStoreType::Struct, field.as_bytes());
     }
@@ -597,8 +593,21 @@ impl Crdt {
         self.state.iter()
     }
 
-    pub fn contains(&self, path: Path) -> bool {
-        self.state.scan_prefix(path).next().is_some()
+    pub fn dotset(&self, path: Path) -> impl Iterator<Item = Result<Dot>> {
+        self.state
+            .scan_prefix(path)
+            .keys()
+            .filter_map(|res| match res {
+                Ok(key) => {
+                    let key = Path::new(&key[..]);
+                    if key.ty() == Some(DotStoreType::Set) {
+                        Some(Ok(key.dot()))
+                    } else {
+                        None
+                    }
+                }
+                Err(err) => Some(Err(err.into())),
+            })
     }
 
     pub fn watch_path(&self, path: Path<'_>) -> sled::Subscriber {
@@ -649,23 +658,24 @@ impl Crdt {
         other: &DotSet,
         other_ctx: &DotSet,
     ) -> Result<()> {
+        tracing::info!("join_dotset {:?} {:?}", other, other_ctx);
         if !self.can(peer, Permission::Write, path.as_path())? {
+            tracing::info!("join_dotset denied");
             return Ok(());
         }
-        for res in self.state.scan_prefix(&path).keys() {
-            let key = res?;
-            let key = Path::new(&key[..]);
-            if key.ty() != Some(DotStoreType::Set) {
-                continue;
-            }
-            let dot = key.dot();
+        for res in self.dotset(path.as_path()) {
+            let dot = res?;
             if !other.contains(&dot) && other_ctx.contains(&dot) {
-                self.state.remove(key)?;
+                path.dotset(&dot);
+                self.state.remove(&path)?;
+                path.pop();
             }
         }
         for dot in other.iter() {
+            tracing::info!("join dot {}", dot);
             if !self.docs.contains(&path.as_path().root().unwrap(), &dot)? {
                 path.dotset(&dot);
+                tracing::info!("inserting");
                 self.state.insert(&path, &[])?;
                 path.pop();
             }
@@ -681,6 +691,7 @@ impl Crdt {
         other_ctx: &DotSet,
     ) -> Result<()> {
         if !self.can(peer, Permission::Write, path.as_path())? {
+            tracing::info!("join_dotfun denied");
             return Ok(());
         }
         for res in self.state.scan_prefix(&path).keys() {
@@ -717,10 +728,11 @@ impl Crdt {
     ) -> Result<()> {
         for res in self.state.scan_prefix(&path).keys() {
             let leaf = res?;
-            let key = Path::new(&leaf[path.as_ref().len()..])
-                .first()
-                .key()
-                .to_owned()?;
+            let key = Path::new(&leaf[path.as_ref().len()..]);
+            if key.first().ty() != Some(DotStoreType::Map) {
+                continue;
+            }
+            let key = key.first().key().to_owned()?;
             path.key(&key);
             let default = Path::new(&leaf[path.as_ref().len()..])
                 .first()
@@ -771,6 +783,7 @@ impl Crdt {
         _: &DotSet,
     ) -> Result<()> {
         if !self.can(peer, Permission::Control, path.as_path())? {
+            tracing::info!("join_policy denied");
             return Ok(());
         }
         for (dot, ps) in other {
@@ -814,7 +827,10 @@ impl Crdt {
     pub fn join(&self, peer_id: &PeerId, causal: &Causal) -> Result<()> {
         let mut path = PathBuf::new(causal.ctx.doc);
         self.join_store(&mut path, peer_id, &causal.store, &causal.ctx.dots)?;
-        // TODO: ctx.dots.union(causal.ctx.dots)
+        for peer_id in causal.ctx.dots.peers() {
+            self.docs
+                .extend_present(&causal.ctx.doc, peer_id, causal.ctx.dots.max(peer_id))?;
+        }
         Ok(())
     }
 
@@ -865,7 +881,7 @@ impl Crdt {
 
     fn empty_ctx(&self, path: Path) -> Result<CausalContext> {
         let doc = path.root().unwrap();
-        let schema = self.docs.schema_id(&doc)?.unwrap();
+        let schema = self.docs.schema_id(&doc)?;
         Ok(CausalContext {
             doc,
             schema: schema.into(),
@@ -879,16 +895,12 @@ impl Crdt {
         Ok(ctx)
     }
 
-    fn dot(&self, path: Path, peer: &PeerId) -> Result<Dot> {
-        self.docs.dot(&path.root().unwrap(), peer)
-    }
-
-    pub fn enable(&self, path: Path, peer: &PeerId) -> Result<Causal> {
-        if !self.can(peer, Permission::Write, path)? {
+    pub fn enable(&self, path: Path, writer: &Writer) -> Result<Causal> {
+        if !self.can(writer.peer_id(), Permission::Write, path)? {
             return Err(anyhow!("unauthorized"));
         }
         let mut ctx = self.empty_ctx(path)?;
-        let dot = self.dot(path, peer)?;
+        let dot = writer.dot();
         ctx.dots.insert(dot);
         let causal = Causal {
             store: DotStore::DotSet(ctx.dots.clone()),
@@ -897,12 +909,12 @@ impl Crdt {
         path.wrap(causal)
     }
 
-    pub fn disable(&self, path: Path, peer: &PeerId) -> Result<Causal> {
-        if !self.can(peer, Permission::Write, path)? {
+    pub fn disable(&self, path: Path, writer: &Writer) -> Result<Causal> {
+        if !self.can(writer.peer_id(), Permission::Write, path)? {
             return Err(anyhow!("unauthorized"));
         }
         let mut ctx = self.ctx(path)?;
-        let dot = self.dot(path, peer)?;
+        let dot = writer.dot();
         ctx.dots.insert(dot);
         let causal = Causal {
             store: DotStore::DotSet(Default::default()),
@@ -915,12 +927,12 @@ impl Crdt {
         self.state.scan_prefix(path).next().is_some()
     }
 
-    pub fn assign(&self, path: Path, peer: &PeerId, v: Primitive) -> Result<Causal> {
-        if !self.can(peer, Permission::Write, path)? {
+    pub fn assign(&self, path: Path, writer: &Writer, v: Primitive) -> Result<Causal> {
+        if !self.can(writer.peer_id(), Permission::Write, path)? {
             return Err(anyhow!("unauthorized"));
         }
         let mut ctx = self.ctx(path)?;
-        let dot = self.dot(path, peer)?;
+        let dot = writer.dot();
         ctx.dots.insert(dot);
         let mut store = BTreeMap::new();
         store.insert(dot, v);
@@ -938,12 +950,12 @@ impl Crdt {
             .map(|res| res.map(Ref::new))
     }
 
-    pub fn remove(&self, path: Path, peer: &PeerId) -> Result<Causal> {
-        if !self.can(peer, Permission::Write, path)? {
+    pub fn remove(&self, path: Path, writer: &Writer) -> Result<Causal> {
+        if !self.can(writer.peer_id(), Permission::Write, path)? {
             return Err(anyhow!("unauthorized"));
         }
         let mut ctx = self.empty_ctx(path)?;
-        let dot = self.dot(path, peer)?;
+        let dot = writer.dot();
         ctx.dots.insert(dot);
         for res in self.state.scan_prefix(path).keys() {
             let key = res?;
@@ -962,21 +974,21 @@ impl Crdt {
         path.wrap(causal)
     }
 
-    pub fn say(&self, path: Path<'_>, peer: &PeerId, policy: Policy) -> Result<Causal> {
-        if match &policy {
+    pub fn say(&self, path: Path, writer: &Writer, policy: Policy) -> Result<Causal> {
+        if !match &policy {
             Policy::Can(_, perm) | Policy::CanIf(_, perm, _) => {
                 if perm.controllable() {
-                    self.can(peer, Permission::Control, path)?
+                    self.can(writer.peer_id(), Permission::Control, path)?
                 } else {
-                    self.can(peer, Permission::Own, path)?
+                    self.can(writer.peer_id(), Permission::Own, path)?
                 }
             }
-            Policy::Revokes(_) => self.can(peer, Permission::Control, path)?,
+            Policy::Revokes(_) => self.can(writer.peer_id(), Permission::Control, path)?,
         } {
             return Err(anyhow!("unauthorized"));
         }
         let mut ctx = self.empty_ctx(path)?;
-        let dot = self.dot(path, peer)?;
+        let dot = writer.dot();
         ctx.dots.insert(dot);
         let mut set = BTreeSet::new();
         set.insert(policy);
@@ -1006,104 +1018,96 @@ impl Crdt {
 mod tests {
     use super::*;
     use crate::props::*;
+    use crate::{Backend, Kind, Lens, PrimitiveKind};
     use proptest::prelude::*;
+    use std::pin::Pin;
 
-    #[test]
-    fn test_ewflag() -> Result<()> {
-        let crdt = Crdt::memory()?.0;
-        let doc = DocId::new([0; 32]);
-        let peer = PeerId::new([1; 32]);
-        let mut path = PathBuf::new(doc);
-        path.field("a");
-        path.field("b");
-        let op = crdt.enable(path.as_path(), &peer)?;
-        assert!(!crdt.is_enabled(path.as_path()));
-        crdt.join(&peer, &op)?;
-        assert!(crdt.is_enabled(path.as_path()));
-        let op = crdt.disable(path.as_path(), &peer)?;
-        crdt.join(&peer, &op)?;
-        assert!(!crdt.is_enabled(path.as_path()));
+    #[async_std::test]
+    async fn test_ewflag() -> Result<()> {
+        let sdk = Backend::memory()?;
+        let peer = PeerId::new([0; 32]);
+        let mut doc = sdk.create_doc(peer)?;
+        let hash = sdk.register(vec![Lens::Make(Kind::Flag)])?;
+        doc.transform(hash)?;
+        sdk.await?;
+        let op = doc.cursor().enable()?;
+        assert!(!doc.cursor().enabled()?);
+        tracing::info!("{:?}", op);
+        doc.join(&peer, op)?;
+        assert!(doc.cursor().enabled()?);
+        let op = doc.cursor().disable()?;
+        doc.join(&peer, op)?;
+        assert!(!doc.cursor().enabled()?);
         Ok(())
     }
 
-    #[test]
-    fn test_mvreg() -> Result<()> {
-        let crdt = Crdt::memory()?.0;
-        let doc = DocId::new([0; 32]);
+    #[async_std::test]
+    async fn test_mvreg() -> Result<()> {
+        let mut sdk = Backend::memory()?;
         let peer1 = PeerId::new([1; 32]);
+        let mut doc = sdk.create_doc(peer1)?;
+        let hash = sdk.register(vec![Lens::Make(Kind::Reg(PrimitiveKind::U64))])?;
+        doc.transform(hash)?;
+        Pin::new(&mut sdk).await?;
+
         let peer2 = PeerId::new([2; 32]);
-        let mut path = PathBuf::new(doc);
-        path.field("a");
-        path.field("b");
-        let op1 = crdt.assign(path.as_path(), &peer1, Primitive::U64(42))?;
-        let op2 = crdt.assign(path.as_path(), &peer2, Primitive::U64(43))?;
-        crdt.join(&peer1, &op1)?;
-        crdt.join(&peer2, &op2)?;
+        let op = doc.cursor().say_can(Some(peer2), Permission::Write)?;
+        doc.join(&peer1, op)?;
+        Pin::new(&mut sdk).await?;
 
-        let mut values = BTreeSet::new();
-        for value in crdt.values(path.as_path()) {
-            if let Primitive::U64(value) = value?.to_owned()? {
-                values.insert(value);
-            } else {
-                unreachable!();
-            }
-        }
-        assert_eq!(values.len(), 2);
+        let op1 = doc.cursor().assign(Primitive::U64(42))?;
+        doc.join(&peer1, op1)?;
+
+        //TODO
+        //let op2 = crdt.assign(path.as_path(), &peer2, Primitive::U64(43))?;
+        //crdt.join(&peer2, &op2)?;
+
+        let values = doc.cursor().u64s()?.collect::<Result<BTreeSet<u64>>>()?;
+        //assert_eq!(values.len(), 2);
         assert!(values.contains(&42));
-        assert!(values.contains(&43));
+        //assert!(values.contains(&43));
 
-        let op = crdt.assign(path.as_path(), &peer1, Primitive::U64(99))?;
-        crdt.join(&peer1, &op)?;
+        let op = doc.cursor().assign(Primitive::U64(99))?;
+        doc.join(&peer1, op)?;
 
-        let mut values = BTreeSet::new();
-        for value in crdt.values(path.as_path()) {
-            if let Primitive::U64(value) = value?.to_owned()? {
-                values.insert(value);
-            } else {
-                unreachable!();
-            }
-        }
+        let values = doc.cursor().u64s()?.collect::<Result<BTreeSet<u64>>>()?;
         assert_eq!(values.len(), 1);
         assert!(values.contains(&99));
 
         Ok(())
     }
 
-    #[test]
-    fn test_ormap() -> Result<()> {
-        let crdt = Crdt::memory()?.0;
-        let doc = DocId::new([0; 32]);
+    #[async_std::test]
+    async fn test_ormap() -> Result<()> {
+        let mut sdk = Backend::memory()?;
         let peer = PeerId::new([1; 32]);
-        let mut path = PathBuf::new(doc);
-        path.key(&"a".into());
-        path.key(&"b".into());
-        let op = crdt.assign(path.as_path(), &peer, Primitive::U64(42))?;
-        crdt.join(&peer, &op)?;
+        let mut doc = sdk.create_doc(peer)?;
 
-        let mut values = BTreeSet::new();
-        for value in crdt.values(path.as_path()) {
-            if let Primitive::U64(value) = value?.to_owned()? {
-                values.insert(value);
-            } else {
-                unreachable!();
-            }
-        }
+        let hash = sdk.register(vec![
+            Lens::Make(Kind::Table(PrimitiveKind::Str)),
+            Lens::LensMapValue(Box::new(Lens::Make(Kind::Table(PrimitiveKind::Str)))),
+            Lens::LensMapValue(Box::new(Lens::LensMapValue(Box::new(Lens::Make(
+                Kind::Reg(PrimitiveKind::U64),
+            ))))),
+        ])?;
+        doc.transform(hash)?;
+        Pin::new(&mut sdk).await?;
+
+        let a = Primitive::Str("a".into());
+        let b = Primitive::Str("b".into());
+        let cur = doc.cursor().key(&a)?.key(&b)?;
+        let op = cur.assign(Primitive::U64(42))?;
+        doc.join(&peer, op)?;
+
+        let values = cur.u64s()?.collect::<Result<BTreeSet<u64>>>()?;
         assert_eq!(values.len(), 1);
         assert!(values.contains(&42));
 
-        let mut path2 = PathBuf::new(doc);
-        path2.key(&"a".into());
-        let op = crdt.remove(path2.as_path(), &peer)?;
-        crdt.join(&peer, &op)?;
+        let cur = doc.cursor().key(&a)?;
+        let op = cur.remove(b.clone())?;
+        doc.join(&peer, op)?;
 
-        let mut values = BTreeSet::new();
-        for value in crdt.values(path.as_path()) {
-            if let Primitive::U64(value) = value?.to_owned()? {
-                values.insert(value);
-            } else {
-                unreachable!();
-            }
-        }
+        let values = cur.key(&b)?.u64s()?.collect::<Result<BTreeSet<u64>>>()?;
         assert!(values.is_empty());
 
         Ok(())

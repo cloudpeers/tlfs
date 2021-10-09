@@ -80,6 +80,7 @@ impl ArchivedSchema {
                 }
                 true
             }
+            (_, DotStore::Policy(_)) => true,
             _ => false,
         }
     }

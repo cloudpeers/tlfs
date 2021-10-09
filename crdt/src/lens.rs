@@ -276,7 +276,8 @@ impl<'a> LensRef<'a> {
     }
 
     pub fn transform_crdt(&self, _doc: &DocId, _store: &Crdt) -> Result<()> {
-        todo!()
+        // TODO
+        Ok(())
     }
 }
 
@@ -330,6 +331,7 @@ impl ArchivedLenses {
 
     pub fn transform_dotstore(&self, store: &mut DotStore, target: &ArchivedLenses) {
         for lens in self.transform(target) {
+            tracing::info!("{:?}", lens);
             lens.transform_dotstore(store);
         }
     }

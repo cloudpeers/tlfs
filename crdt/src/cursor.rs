@@ -1,6 +1,6 @@
 use crate::{
     Actor, ArchivedSchema, Can, Causal, Crdt, DocId, Dot, Hash, PathBuf, PeerId, Permission,
-    Policy, Primitive, PrimitiveKind, Schema,
+    Policy, Primitive, PrimitiveKind, Schema, Writer,
 };
 use anyhow::{anyhow, Result};
 use rkyv::Archived;
@@ -9,7 +9,7 @@ use rkyv::Archived;
 pub struct Cursor<'a> {
     id: DocId,
     schema_id: Hash,
-    peer_id: PeerId,
+    writer: &'a Writer,
     schema: &'a Archived<Schema>,
     path: PathBuf,
     crdt: &'a Crdt,
@@ -19,14 +19,14 @@ impl<'a> Cursor<'a> {
     pub fn new(
         id: DocId,
         schema_id: Hash,
-        peer_id: PeerId,
+        writer: &'a Writer,
         schema: &'a Archived<Schema>,
         crdt: &'a Crdt,
     ) -> Self {
         Self {
             id,
             schema_id,
-            peer_id,
+            writer,
             schema,
             path: PathBuf::new(id),
             crdt,
@@ -41,7 +41,12 @@ impl<'a> Cursor<'a> {
     /// Returns if a flag is enabled.
     pub fn enabled(&self) -> Result<bool> {
         if let ArchivedSchema::Flag = &self.schema {
-            Ok(self.crdt.contains(self.path.as_path()))
+            Ok(self
+                .crdt
+                .dotset(self.path.as_path())
+                .next()
+                .transpose()?
+                .is_some())
         } else {
             Err(anyhow!("not a flag"))
         }
@@ -140,7 +145,7 @@ impl<'a> Cursor<'a> {
     /// Enables a flag.
     pub fn enable(&self) -> Result<Causal> {
         if let ArchivedSchema::Flag = &self.schema {
-            self.crdt.enable(self.path.as_path(), &self.peer_id)
+            self.crdt.enable(self.path.as_path(), &self.writer)
         } else {
             Err(anyhow!("not a flag"))
         }
@@ -149,7 +154,7 @@ impl<'a> Cursor<'a> {
     /// Disables a flag.
     pub fn disable(&self) -> Result<Causal> {
         if let ArchivedSchema::Flag = &self.schema {
-            self.crdt.disable(self.path.as_path(), &self.peer_id)
+            self.crdt.disable(self.path.as_path(), &self.writer)
         } else {
             Err(anyhow!("not a flag"))
         }
@@ -160,7 +165,7 @@ impl<'a> Cursor<'a> {
         let value = value.into();
         if let ArchivedSchema::Reg(kind) = &self.schema {
             if kind.validate(&value) {
-                self.crdt.assign(self.path.as_path(), &self.peer_id, value)
+                self.crdt.assign(self.path.as_path(), &self.writer, value)
             } else {
                 Err(anyhow!("invalid value"))
             }
@@ -174,7 +179,7 @@ impl<'a> Cursor<'a> {
         let key = key.into();
         if let ArchivedSchema::Table(kind, _) = &self.schema {
             if kind.validate(&key) {
-                self.crdt.remove(self.path.as_path(), &self.peer_id)
+                self.crdt.remove(self.path.as_path(), &self.writer)
             } else {
                 Err(anyhow!("invalid key"))
             }
@@ -187,16 +192,21 @@ impl<'a> Cursor<'a> {
     pub fn say_can(&self, actor: Option<PeerId>, perm: Permission) -> Result<Causal> {
         self.crdt.say(
             self.path.as_path(),
-            &self.peer_id,
+            &self.writer,
             Policy::Can(actor.into(), perm),
         )
+    }
+
+    /// Constructs a new condition.
+    pub fn cond(&self, actor: Actor, perm: Permission) -> Can {
+        Can::new(actor, perm, self.path.clone())
     }
 
     /// Gives conditional permission to a peer.
     pub fn say_can_if(&self, actor: Actor, perm: Permission, cond: Can) -> Result<Causal> {
         self.crdt.say(
             self.path.as_path(),
-            &self.peer_id,
+            &self.writer,
             Policy::CanIf(actor, perm, cond),
         )
     }
@@ -204,6 +214,6 @@ impl<'a> Cursor<'a> {
     /// Revokes a policy.
     pub fn revoke(&self, claim: Dot) -> Result<Causal> {
         self.crdt
-            .say(self.path.as_path(), &self.peer_id, Policy::Revokes(claim))
+            .say(self.path.as_path(), &self.writer, Policy::Revokes(claim))
     }
 }

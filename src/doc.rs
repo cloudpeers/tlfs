@@ -16,7 +16,7 @@ impl Doc {
     /// Adds a decryption key for a peer.
     pub fn add_key(&self, peer_id: PeerId, key: Key) -> Result<()> {
         self.secrets.add_key(
-            Metadata::new().doc(*self.doc.ctx().doc()).peer(peer_id),
+            Metadata::new().doc(*self.doc.id()).peer(peer_id),
             key,
         )?;
         Ok(())
@@ -31,7 +31,7 @@ impl Doc {
             .unwrap()
             .sign(&causal);
         let metadata = Metadata::new()
-            .doc(*self.doc.ctx().doc())
+            .doc(*self.doc.id())
             .peer(*self.doc.peer_id());
         let encrypted = self.secrets.key_nonce(metadata)?.unwrap().encrypt(&signed);
         self.doc.join(self.doc.peer_id(), causal)?;
@@ -43,7 +43,7 @@ impl Doc {
     pub fn join(&mut self, peer_id: &PeerId, payload: &mut [u8]) -> Result<()> {
         let signed = self
             .secrets
-            .key(Metadata::new().doc(*self.doc.ctx().doc()).peer(*peer_id))?
+            .key(Metadata::new().doc(*self.doc.id()).peer(*peer_id))?
             .unwrap()
             .decrypt::<Signed>(payload)?;
         let (peer_id, causal) = signed.verify::<Causal>()?;

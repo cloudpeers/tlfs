@@ -1700,6 +1700,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "log-panics"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae0136257df209261daa18d6c16394757c63e032e27aafd8b07788b051082bef"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "lru-cache"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3150,10 +3159,6 @@ name = "tlfs"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bytecheck",
- "chacha20poly1305 0.9.0",
- "ed25519-dalek",
- "getrandom 0.2.3",
  "rkyv",
  "sled",
  "tlfs-crdt",
@@ -3173,11 +3178,14 @@ dependencies = [
  "ed25519-dalek",
  "getrandom 0.2.3",
  "itertools",
+ "log-panics",
  "proptest",
  "range-collections",
  "rkyv",
  "sled",
  "tracing",
+ "tracing-log",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -3320,9 +3328,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.2.24"
+version = "0.2.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdd0568dbfe3baf7048b7908d2b32bca0d81cd56bec6d2a8f894b01d74f86be3"
+checksum = "0e0d2eaa99c3c2e41547cfa109e910a68ea03823cccad4a0525dcbc9b01e8c71"
 dependencies = [
  "ansi_term",
  "chrono",
