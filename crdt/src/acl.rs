@@ -312,49 +312,6 @@ impl Engine {
         }
         Ok(())
     }
-
-    /*pub fn filter(
-        &self,
-        path: &mut PathBuf,
-        peer: PeerId,
-        perm: Permission,
-        store: &DotStore,
-    ) -> DotStore {
-        if self.can(peer, perm, path.as_path()) {
-            store.clone()
-        } else {
-            match store {
-                DotStore::Null => DotStore::Null,
-                DotStore::DotSet(_) => DotStore::Null,
-                DotStore::DotFun(_) => DotStore::Null,
-                DotStore::DotMap(map) => {
-                    let mut delta = BTreeMap::new();
-                    for (key, store) in map {
-                        path.key(key);
-                        let store2 = self.filter(path, peer, perm, store);
-                        path.pop();
-                        if store2 != DotStore::Null {
-                            delta.insert(key.clone(), store2);
-                        }
-                    }
-                    DotStore::DotMap(delta)
-                }
-                DotStore::Struct(fields) => {
-                    let mut delta = BTreeMap::new();
-                    for (k, v) in fields {
-                        path.field(k);
-                        let v2 = self.filter(path, peer, perm, v);
-                        path.pop();
-                        if v2 != DotStore::Null {
-                            delta.insert(k.clone(), v2);
-                        }
-                    }
-                    DotStore::Struct(delta)
-                }
-                DotStore::Policy(policy) => DotStore::Policy(policy.clone()),
-            }
-        }
-    }*/
 }
 
 impl Future for Engine {
@@ -434,12 +391,7 @@ impl Acl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::CausalContext;
     use Permission::*;
-
-    fn dot(peer: impl AsRef<[u8; 32]>, c: u64) -> Dot {
-        Dot::new(PeerId::new(*peer.as_ref()), c)
-    }
 
     fn doc(i: u8) -> DocId {
         DocId::new([i; 32])
@@ -447,6 +399,10 @@ mod tests {
 
     fn peer(i: char) -> PeerId {
         PeerId::new([i as u8; 32])
+    }
+
+    fn dot(peer: impl AsRef<[u8; 32]>, c: u64) -> Dot {
+        Dot::new(PeerId::new(*peer.as_ref()), c)
     }
 
     fn root(i: u8) -> PathBuf {
@@ -468,179 +424,118 @@ mod tests {
 
     #[async_std::test]
     async fn test_la_says_can() -> Result<()> {
-        let crdt = Crdt::memory("crdt")?;
-        let acl = Acl::memory("acl")?;
-        let mut ctx9 = CausalContext::new(doc(9), [0; 32].into());
-        let actx9 = Ref::archive(&ctx9);
-        let mut ctx42 = CausalContext::new(doc(42), [0; 32].into());
-        let actx42 = Ref::archive(&ctx42);
-        let engine = Engine::new(crdt.clone(), acl.clone())?;
+        let (crdt, engine) = Crdt::memory()?;
 
-        let op1 = crdt.say(
-            root(9).as_path(),
-            actx9.as_ref(),
-            dot(doc(9), 1),
-            can('a', Write),
-        )?;
-        let op2 = crdt.say(
-            root(42).as_path(),
-            actx42.as_ref(),
-            dot(doc(9), 2),
-            can('a', Read),
-        )?;
-        crdt.join(&mut ctx9, &doc(9).into(), &op1)?;
-        crdt.join(&mut ctx42, &doc(9).into(), &op2)?;
+        let op1 = crdt.say(root(9).as_path(), &doc(9).into(), can('a', Write))?;
+        let op2 = crdt.say(root(42).as_path(), &doc(9).into(), can('a', Read))?;
+        crdt.join(&doc(9).into(), &op1)?;
+        crdt.join(&doc(9).into(), &op2)?;
         engine.await?;
 
-        assert!(!acl.can(peer('b'), Read, root(9).as_path())?);
+        assert!(!crdt.can(&peer('b'), Read, root(9).as_path())?);
 
-        assert!(acl.can(peer('a'), Write, root(9).as_path())?);
-        assert!(acl.can(peer('a'), Read, root(9).as_path())?);
-        assert!(!acl.can(peer('a'), Own, root(9).as_path())?);
+        assert!(crdt.can(&peer('a'), Write, root(9).as_path())?);
+        assert!(crdt.can(&peer('a'), Read, root(9).as_path())?);
+        assert!(!crdt.can(&peer('a'), Own, root(9).as_path())?);
 
-        assert!(acl.can(peer('a'), Write, field(root(9), "contacts").as_path())?);
-        assert!(!acl.can(peer('a'), Read, root(42).as_path())?);
+        assert!(crdt.can(&peer('a'), Write, field(root(9), "contacts").as_path())?);
+        assert!(!crdt.can(&peer('a'), Read, root(42).as_path())?);
         Ok(())
     }
 
     #[async_std::test]
     async fn test_says_if() -> Result<()> {
-        let crdt = Crdt::memory("crdt")?;
-        let acl = Acl::memory("acl")?;
-        let mut ctx9 = CausalContext::new(doc(9), [0; 32].into());
-        let actx9 = Ref::archive(&ctx9);
-        let mut ctx42 = CausalContext::new(doc(42), [0; 32].into());
-        let actx42 = Ref::archive(&ctx42);
-        let mut engine = Engine::new(crdt.clone(), acl.clone())?;
+        let (crdt, mut engine) = Crdt::memory()?;
 
         let op1 = crdt.say(
             root(9).as_path(),
-            actx9.as_ref(),
-            dot(doc(9), 1),
+            &doc(9).into(),
             can_if(
                 'a',
                 Write,
                 Can::new(Actor::Peer(peer('a')), Read, field(root(42), "contacts")),
             ),
         )?;
-        crdt.join(&mut ctx9, &doc(9).into(), &op1)?;
+        crdt.join(&doc(9).into(), &op1)?;
         Pin::new(&mut engine).await?;
-        assert!(!acl.can(peer('a'), Read, root(9).as_path())?);
+        assert!(!crdt.can(&peer('a'), Read, root(9).as_path())?);
 
-        let op2 = crdt.say(
-            root(42).as_path(),
-            actx42.as_ref(),
-            dot(doc(42), 1),
-            can('a', Write),
-        )?;
-        crdt.join(&mut ctx42, &doc(42).into(), &op2)?;
+        let op2 = crdt.say(root(42).as_path(), &doc(42).into(), can('a', Write))?;
+        crdt.join(&doc(42).into(), &op2)?;
         Pin::new(&mut engine).await?;
-        assert!(acl.can(peer('a'), Read, root(9).as_path())?);
+        assert!(crdt.can(&peer('a'), Read, root(9).as_path())?);
 
         Ok(())
     }
 
     #[async_std::test]
     async fn test_says_if_unbound() -> Result<()> {
-        let crdt = Crdt::memory("crdt")?;
-        let acl = Acl::memory("acl")?;
-        let mut ctx9 = CausalContext::new(doc(9), [0; 32].into());
-        let actx9 = Ref::archive(&ctx9);
-        let mut ctx42 = CausalContext::new(doc(42), [0; 32].into());
-        let actx42 = Ref::archive(&ctx42);
-        let mut engine = Engine::new(crdt.clone(), acl.clone())?;
+        let (crdt, mut engine) = Crdt::memory()?;
 
         let op1 = crdt.say(
             root(9).as_path(),
-            actx9.as_ref(),
-            dot(doc(9), 1),
+            &doc(9).into(),
             Policy::CanIf(
                 Actor::Unbound,
                 Write,
                 Can::new(Actor::Unbound, Read, field(root(42), "contacts")),
             ),
         )?;
-        crdt.join(&mut ctx9, &doc(9).into(), &op1)?;
+        crdt.join(&doc(9).into(), &op1)?;
         Pin::new(&mut engine).await?;
-        assert!(!acl.can(peer('a'), Read, root(9).as_path())?);
+        assert!(!crdt.can(&peer('a'), Read, root(9).as_path())?);
 
-        let op2 = crdt.say(
-            root(42).as_path(),
-            actx42.as_ref(),
-            dot(doc(42), 1),
-            can('a', Write),
-        )?;
-        crdt.join(&mut ctx42, &doc(42).into(), &op2)?;
+        let op2 = crdt.say(root(42).as_path(), &doc(42).into(), can('a', Write))?;
+        crdt.join(&doc(42).into(), &op2)?;
         Pin::new(&mut engine).await?;
-        assert!(acl.can(peer('a'), Read, root(9).as_path())?);
+        assert!(crdt.can(&peer('a'), Read, root(9).as_path())?);
 
         Ok(())
     }
 
     #[async_std::test]
     async fn test_own_and_control() -> Result<()> {
-        let crdt = Crdt::memory("crdt")?;
-        let acl = Acl::memory("acl")?;
-        let mut ctx9 = CausalContext::new(doc(9), [0; 32].into());
-        let actx9 = Ref::archive(&ctx9);
-        let mut engine = Engine::new(crdt.clone(), acl.clone())?;
+        let (crdt, mut engine) = Crdt::memory()?;
 
-        let op1 = crdt.say(
-            root(9).as_path(),
-            actx9.as_ref(),
-            dot(doc(9), 1),
-            can('a', Own),
-        )?;
-        let op2 = crdt.say(
-            root(9).as_path(),
-            actx9.as_ref(),
-            dot(peer('a'), 1),
-            can('b', Control),
-        )?;
+        let op1 = crdt.say(root(9).as_path(), &doc(9).into(), can('a', Own))?;
+        let op2 = crdt.say(root(9).as_path(), &peer('a').into(), can('b', Control))?;
         let op3 = crdt.say(
             field(root(9), "contacts").as_path(),
-            actx9.as_ref(),
-            dot(peer('b'), 1),
+            &peer('b').into(),
             can('c', Own),
         )?;
 
-        crdt.join(&mut ctx9, &doc(9).into(), &op1)?;
-        crdt.join(&mut ctx9, &doc(9).into(), &op2)?;
-        crdt.join(&mut ctx9, &doc(9).into(), &op3)?;
+        crdt.join(&doc(9).into(), &op1)?;
+        crdt.join(&doc(9).into(), &op2)?;
+        crdt.join(&doc(9).into(), &op3)?;
         Pin::new(&mut engine).await?;
-        assert!(!acl.can(peer('c'), Read, field(root(9), "contacts").as_path())?);
+        assert!(!crdt.can(&peer('c'), Read, field(root(9), "contacts").as_path())?);
 
         let op4 = crdt.say(
             field(root(9), "contacts").as_path(),
-            actx9.as_ref(),
-            dot(peer('b'), 2),
+            &peer('b').into(),
             can('c', Read),
         )?;
-        crdt.join(&mut ctx9, &doc(9).into(), &op4)?;
+        crdt.join(&doc(9).into(), &op4)?;
         Pin::new(&mut engine).await?;
-        assert!(acl.can(peer('c'), Read, field(root(9), "contacts").as_path())?);
+        assert!(crdt.can(&peer('c'), Read, field(root(9), "contacts").as_path())?);
 
         Ok(())
     }
 
     #[async_std::test]
     async fn test_anonymous_can() -> Result<()> {
-        let crdt = Crdt::memory("crdt")?;
-        let acl = Acl::memory("acl")?;
-        let mut ctx9 = CausalContext::new(doc(9), [0; 32].into());
-        let actx9 = Ref::archive(&ctx9);
-        let mut engine = Engine::new(crdt.clone(), acl.clone())?;
-        assert!(!acl.can(peer('a'), Read, root(9).as_path())?);
+        let (crdt, mut engine) = Crdt::memory()?;
+        assert!(!crdt.can(&peer('a'), Read, root(9).as_path())?);
 
         let op = crdt.say(
             root(9).as_path(),
-            actx9.as_ref(),
-            dot(doc(9), 1),
+            &doc(9).into(),
             Policy::Can(Actor::Anonymous, Read),
         )?;
-        crdt.join(&mut ctx9, &doc(9).into(), &op)?;
+        crdt.join(&doc(9).into(), &op)?;
         Pin::new(&mut engine).await?;
-        assert!(acl.can(peer('a'), Read, root(9).as_path())?);
+        assert!(crdt.can(&peer('a'), Read, root(9).as_path())?);
 
         Ok(())
     }
@@ -648,31 +543,21 @@ mod tests {
     #[async_std::test]
     #[ignore]
     async fn test_revoke() -> Result<()> {
-        let crdt = Crdt::memory("crdt")?;
-        let acl = Acl::memory("acl")?;
-        let mut ctx9 = CausalContext::new(doc(9), [0; 32].into());
-        let actx9 = Ref::archive(&ctx9);
-        let mut engine = Engine::new(crdt.clone(), acl.clone())?;
+        let (crdt, mut engine) = Crdt::memory()?;
 
-        let op = crdt.say(
-            root(9).as_path(),
-            actx9.as_ref(),
-            dot(doc(9), 1),
-            can('a', Own),
-        )?;
-        crdt.join(&mut ctx9, &doc(9).into(), &op)?;
+        let op = crdt.say(root(9).as_path(), &doc(9).into(), can('a', Own))?;
+        crdt.join(&doc(9).into(), &op)?;
         Pin::new(&mut engine).await?;
-        assert!(acl.can(peer('a'), Own, root(9).as_path())?);
+        assert!(crdt.can(&peer('a'), Own, root(9).as_path())?);
 
         let op = crdt.say(
             root(9).as_path(),
-            actx9.as_ref(),
-            dot(doc(9), 2),
+            &doc(9).into(),
             Policy::Revokes(dot(doc(9), 1)),
         )?;
-        crdt.join(&mut ctx9, &doc(9).into(), &op)?;
+        crdt.join(&doc(9).into(), &op)?;
         Pin::new(&mut engine).await?;
-        assert!(!acl.can(peer('a'), Own, root(9).as_path())?);
+        assert!(!crdt.can(&peer('a'), Own, root(9).as_path())?);
 
         Ok(())
     }
@@ -680,41 +565,26 @@ mod tests {
     #[async_std::test]
     #[ignore]
     async fn test_revoke_trans() -> Result<()> {
-        let crdt = Crdt::memory("crdt")?;
-        let acl = Acl::memory("acl")?;
-        let mut ctx9 = CausalContext::new(doc(9), [0; 32].into());
-        let actx9 = Ref::archive(&ctx9);
-        let mut engine = Engine::new(crdt.clone(), acl.clone())?;
+        let (crdt, mut engine) = Crdt::memory()?;
 
-        let op = crdt.say(
-            root(9).as_path(),
-            actx9.as_ref(),
-            dot(doc(9), 1),
-            can('a', Own),
-        )?;
-        crdt.join(&mut ctx9, &doc(9).into(), &op)?;
+        let op = crdt.say(root(9).as_path(), &doc(9).into(), can('a', Own))?;
+        crdt.join(&doc(9).into(), &op)?;
 
-        let op = crdt.say(
-            root(9).as_path(),
-            actx9.as_ref(),
-            dot(peer('a'), 1),
-            can('b', Own),
-        )?;
-        crdt.join(&mut ctx9, &doc(9).into(), &op)?;
+        let op = crdt.say(root(9).as_path(), &peer('a').into(), can('b', Own))?;
+        crdt.join(&doc(9).into(), &op)?;
 
         Pin::new(&mut engine).await?;
-        assert!(acl.can(peer('b'), Own, root(9).as_path())?);
+        assert!(crdt.can(&peer('b'), Own, root(9).as_path())?);
 
         let op = crdt.say(
             root(9).as_path(),
-            actx9.as_ref(),
-            dot(doc(9), 2),
+            &doc(9).into(),
             Policy::Revokes(dot(peer('a'), 1)),
         )?;
-        crdt.join(&mut ctx9, &doc(9).into(), &op)?;
+        crdt.join(&doc(9).into(), &op)?;
 
         Pin::new(&mut engine).await?;
-        assert!(!acl.can(peer('b'), Own, root(9).as_path())?);
+        assert!(!crdt.can(&peer('b'), Own, root(9).as_path())?);
 
         Ok(())
     }
@@ -722,41 +592,26 @@ mod tests {
     #[async_std::test]
     #[ignore]
     async fn test_cant_revoke_inv() -> Result<()> {
-        let crdt = Crdt::memory("crdt")?;
-        let acl = Acl::memory("acl")?;
-        let mut ctx9 = CausalContext::new(doc(9), [0; 32].into());
-        let actx9 = Ref::archive(&ctx9);
-        let mut engine = Engine::new(crdt.clone(), acl.clone())?;
+        let (crdt, mut engine) = Crdt::memory()?;
 
-        let op = crdt.say(
-            root(9).as_path(),
-            actx9.as_ref(),
-            dot(doc(9), 1),
-            can('a', Own),
-        )?;
-        crdt.join(&mut ctx9, &doc(9).into(), &op)?;
+        let op = crdt.say(root(9).as_path(), &doc(9).into(), can('a', Own))?;
+        crdt.join(&doc(9).into(), &op)?;
 
-        let op = crdt.say(
-            root(9).as_path(),
-            actx9.as_ref(),
-            dot(peer('a'), 1),
-            can('b', Own),
-        )?;
-        crdt.join(&mut ctx9, &doc(9).into(), &op)?;
+        let op = crdt.say(root(9).as_path(), &peer('a'), can('b', Own))?;
+        crdt.join(&doc(9).into(), &op)?;
 
         Pin::new(&mut engine).await?;
-        assert!(acl.can(peer('b'), Own, root(9).as_path())?);
+        assert!(crdt.can(&peer('b'), Own, root(9).as_path())?);
 
         let op = crdt.say(
             root(9).as_path(),
-            actx9.as_ref(),
-            dot(peer('b'), 1),
+            &peer('b'),
             Policy::Revokes(dot(peer('a'), 1)),
         )?;
-        crdt.join(&mut ctx9, &doc(9).into(), &op)?;
+        crdt.join(&doc(9).into(), &op)?;
 
         Pin::new(&mut engine).await?;
-        assert!(acl.can(peer('a'), Own, root(9).as_path())?);
+        assert!(crdt.can(&peer('a'), Own, root(9).as_path())?);
 
         Ok(())
     }

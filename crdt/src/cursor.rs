@@ -1,6 +1,6 @@
 use crate::{
-    Acl, Actor, ArchivedSchema, Can, Causal, Crdt, Docs, Dot, PathBuf, PeerId,
-    Permission, Policy, Primitive, PrimitiveKind, Schema, Hash, DocId,
+    Actor, ArchivedSchema, Can, Causal, Crdt, DocId, Dot, Hash, PathBuf, PeerId, Permission,
+    Policy, Primitive, PrimitiveKind, Schema,
 };
 use anyhow::{anyhow, Result};
 use rkyv::Archived;
@@ -13,8 +13,6 @@ pub struct Cursor<'a> {
     schema: &'a Archived<Schema>,
     path: PathBuf,
     crdt: &'a Crdt,
-    docs: &'a Docs,
-    acl: &'a Acl,
 }
 
 impl<'a> Cursor<'a> {
@@ -24,8 +22,6 @@ impl<'a> Cursor<'a> {
         peer_id: PeerId,
         schema: &'a Archived<Schema>,
         crdt: &'a Crdt,
-        docs: &'a Docs,
-        acl: &'a Acl,
     ) -> Self {
         Self {
             id,
@@ -34,14 +30,12 @@ impl<'a> Cursor<'a> {
             schema,
             path: PathBuf::new(id),
             crdt,
-            docs,
-            acl,
         }
     }
 
     /// Checks permissions.
-    pub fn can(&self, peer: PeerId, perm: Permission) -> Result<bool> {
-        self.acl.can(peer, perm, self.path.as_path())
+    pub fn can(&self, peer: &PeerId, perm: Permission) -> Result<bool> {
+        self.crdt.can(peer, perm, self.path.as_path())
     }
 
     /// Returns if a flag is enabled.
@@ -143,19 +137,10 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    fn dot(&self) -> Result<Dot> {
-        let counter = self.docs.increment(&self.id, &self.peer_id)?;
-        Ok(Dot::new(self.peer_id, counter))
-    }
-
     /// Enables a flag.
     pub fn enable(&self) -> Result<Causal> {
         if let ArchivedSchema::Flag = &self.schema {
-            if self.can(self.peer_id, Permission::Write)? {
-                self.crdt.enable(self.path.as_path(), self.ctx, self.dot()?)
-            } else {
-                Err(anyhow!("unauthorized"))
-            }
+            self.crdt.enable(self.path.as_path(), &self.peer_id)
         } else {
             Err(anyhow!("not a flag"))
         }
@@ -164,12 +149,7 @@ impl<'a> Cursor<'a> {
     /// Disables a flag.
     pub fn disable(&self) -> Result<Causal> {
         if let ArchivedSchema::Flag = &self.schema {
-            if self.can(self.peer_id, Permission::Write)? {
-                self.crdt
-                    .disable(self.path.as_path(), self.ctx, self.dot()?)
-            } else {
-                Err(anyhow!("unauthorized"))
-            }
+            self.crdt.disable(self.path.as_path(), &self.peer_id)
         } else {
             Err(anyhow!("not a flag"))
         }
@@ -180,12 +160,7 @@ impl<'a> Cursor<'a> {
         let value = value.into();
         if let ArchivedSchema::Reg(kind) = &self.schema {
             if kind.validate(&value) {
-                if self.can(self.peer_id, Permission::Write)? {
-                    self.crdt
-                        .assign(self.path.as_path(), self.ctx, self.dot()?, value)
-                } else {
-                    Err(anyhow!("unauthorized"))
-                }
+                self.crdt.assign(self.path.as_path(), &self.peer_id, value)
             } else {
                 Err(anyhow!("invalid value"))
             }
@@ -199,11 +174,7 @@ impl<'a> Cursor<'a> {
         let key = key.into();
         if let ArchivedSchema::Table(kind, _) = &self.schema {
             if kind.validate(&key) {
-                if self.can(self.peer_id, Permission::Write)? {
-                    self.crdt.remove(self.path.as_path(), self.ctx, self.dot()?)
-                } else {
-                    Err(anyhow!("unauthorized"))
-                }
+                self.crdt.remove(self.path.as_path(), &self.peer_id)
             } else {
                 Err(anyhow!("invalid key"))
             }
@@ -214,44 +185,25 @@ impl<'a> Cursor<'a> {
 
     /// Gives permission to a peer.
     pub fn say_can(&self, actor: Option<PeerId>, perm: Permission) -> Result<Causal> {
-        if !self.can(self.peer_id, Permission::Control)? {
-            return Err(anyhow!("unauthoried"));
-        }
-        if !perm.controllable() && !self.can(self.peer_id, Permission::Own)? {
-            return Err(anyhow!("unauthorized"));
-        }
         self.crdt.say(
             self.path.as_path(),
-            self.ctx,
-            self.dot()?,
+            &self.peer_id,
             Policy::Can(actor.into(), perm),
         )
     }
 
     /// Gives conditional permission to a peer.
     pub fn say_can_if(&self, actor: Actor, perm: Permission, cond: Can) -> Result<Causal> {
-        if !self.can(self.peer_id, Permission::Control)? {
-            return Err(anyhow!("unauthorized"));
-        }
-        if !perm.controllable() && !self.can(self.peer_id, Permission::Own)? {
-            return Err(anyhow!("unauthorized"));
-        }
         self.crdt.say(
             self.path.as_path(),
-            self.ctx,
-            self.dot()?,
+            &self.peer_id,
             Policy::CanIf(actor, perm, cond),
         )
     }
 
     /// Revokes a policy.
     pub fn revoke(&self, claim: Dot) -> Result<Causal> {
-        // TODO: check permission to revoke
-        self.crdt.say(
-            self.path.as_path(),
-            self.ctx,
-            self.dot()?,
-            Policy::Revokes(claim),
-        )
+        self.crdt
+            .say(self.path.as_path(), &self.peer_id, Policy::Revokes(claim))
     }
 }

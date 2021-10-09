@@ -1,4 +1,4 @@
-use crate::{Crdt, DotStore, PrimitiveKind, Prop, Schema};
+use crate::{Crdt, DocId, DotStore, PrimitiveKind, Prop, Schema};
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
 use rkyv::ser::serializers::AllocSerializer;
@@ -275,7 +275,7 @@ impl<'a> LensRef<'a> {
         }
     }
 
-    pub fn transform_crdt(&self, _store: &Crdt) {
+    pub fn transform_crdt(&self, _doc: &DocId, _store: &Crdt) -> Result<()> {
         todo!()
     }
 }
@@ -334,10 +334,11 @@ impl ArchivedLenses {
         }
     }
 
-    pub fn transform_crdt(&self, crdt: &Crdt, target: &ArchivedLenses) {
+    pub fn transform_crdt(&self, doc: &DocId, crdt: &Crdt, target: &ArchivedLenses) -> Result<()> {
         for lens in self.transform(target) {
-            lens.transform_crdt(crdt);
+            lens.transform_crdt(doc, crdt)?;
         }
+        Ok(())
     }
 }
 
@@ -371,9 +372,9 @@ mod tests {
         fn crdt_transform((lens, schema, mut causal) in lens_schema_and_causal()) {
             let lens = Ref::archive(&lens);
             prop_assume!(validate(&schema, &causal));
-            let (ctx, crdt) = causal_to_crdt(&causal);
-            lens.as_ref().to_ref().transform_crdt(&crdt);
-            let causal2 = crdt_to_causal(&crdt, &ctx);
+            let crdt = causal_to_crdt(&causal);
+            lens.as_ref().to_ref().transform_crdt(&causal.ctx.doc, &crdt).unwrap();
+            let causal2 = crdt_to_causal(&crdt, &causal.ctx);
             lens.as_ref().to_ref().transform_dotstore(&mut causal.store);
             assert_eq!(causal, causal2);
         }

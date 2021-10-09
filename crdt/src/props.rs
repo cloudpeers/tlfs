@@ -323,21 +323,19 @@ prop_compose! {
 
 pub fn join(c: &Causal, o: &Causal) -> Causal {
     let mut c = c.clone();
-    c.join(Ref::archive(o).as_ref());
+    c.join(o);
     c
 }
 
-pub fn causal_to_crdt(causal: &Causal) -> (CausalContext, Crdt) {
-    let mut ctx = CausalContext::new(DocId::new([0; 32]), [0; 32].into());
-    let crdt = Crdt::memory("mem").unwrap();
-    crdt.join(&mut ctx, &PeerId::new([0; 32]), causal).unwrap();
-    (ctx, crdt)
+pub fn causal_to_crdt(causal: &Causal) -> Crdt {
+    let crdt = Crdt::memory().unwrap().0;
+    crdt.join(&PeerId::new([0; 32]), causal).unwrap();
+    crdt
 }
 
 pub fn crdt_to_causal(crdt: &Crdt, ctx: &CausalContext) -> Causal {
     let other = CausalContext::new(*ctx.doc(), ctx.schema());
     let peer_id = (*ctx.doc()).into();
-    let ctx = Ref::archive(ctx);
     let other = Ref::archive(&other);
-    crdt.unjoin(ctx.as_ref(), &peer_id, other.as_ref()).unwrap()
+    crdt.unjoin(&peer_id, other.as_ref()).unwrap()
 }

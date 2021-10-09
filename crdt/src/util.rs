@@ -63,3 +63,9 @@ impl<T> From<Ref<T>> for Vec<u8> {
         r.bytes.to_vec()
     }
 }
+
+pub fn as_bytes<'a, T: Archive>(archived: &'a Archived<T>) -> &'a [u8] {
+    let ptr = archived as *const _ as *const _;
+    let len = std::mem::size_of::<Archived<T>>();
+    unsafe { std::slice::from_raw_parts(ptr, len) }
+}

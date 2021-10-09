@@ -1,4 +1,7 @@
-use crate::{AbstractDotSet, ArchivedLenses, DocId, Dot, DotSet, Hash, PeerId, Policy, Ref};
+use crate::{
+    util, AbstractDotSet, Acl, ArchivedLenses, DocId, Docs, Dot, DotSet, Engine, Hash, PeerId,
+    Permission, Policy, Ref,
+};
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Archived, Deserialize, Serialize};
@@ -338,17 +341,15 @@ impl Causal {
         &self.store
     }
 
-    pub fn join(&mut self, other: &Archived<Causal>) {
+    pub fn join(&mut self, other: &Causal) {
         assert_eq!(self.ctx().doc(), &other.ctx.doc);
         assert_eq!(&self.ctx().schema, &other.ctx.schema);
-        // TODO
-        let other_store: DotStore = other.store.deserialize(&mut rkyv::Infallible).unwrap();
         self.store
-            .join(&self.ctx.dots, &other_store, &other.ctx.dots);
+            .join(&self.ctx.dots, &other.store, &other.ctx.dots);
         self.ctx.dots.union(&other.ctx.dots);
     }
 
-    pub fn unjoin(&self, ctx: &Archived<CausalContext>) -> Self {
+    pub fn unjoin(&self, ctx: &CausalContext) -> Self {
         let dots = self.ctx.dots.difference(&ctx.dots);
         let store = self.store.unjoin(&dots);
         Self {
@@ -395,6 +396,10 @@ impl PathBuf {
 
     pub fn key(&mut self, key: &Primitive) {
         self.extend(DotStoreType::Map, Ref::archive(key).as_bytes());
+    }
+
+    pub fn archived_key(&mut self, key: &Archived<Primitive>) {
+        self.extend(DotStoreType::Map, util::as_bytes::<Primitive>(key));
     }
 
     pub fn field(&mut self, field: &str) {
@@ -574,33 +579,37 @@ pub struct Crdt {
 }
 
 impl Crdt {
-    pub fn new(state: sled::Tree) -> Self {
-        Self {
-            state,
-            acl,
-            docs,
-        }
+    pub fn new(state: sled::Tree, acl: Acl, docs: Docs) -> Self {
+        Self { state, acl, docs }
     }
 
-    pub fn memory(name: &str) -> Result<Self> {
+    pub fn memory() -> Result<(Self, Engine)> {
         let db = sled::Config::new().temporary(true).open()?;
-        let tree = db.open_tree(name)?;
-        Ok(Self(tree))
+        let state = db.open_tree("state")?;
+        let acl = Acl::new(db.open_tree("acl")?);
+        let docs = Docs::new(db.open_tree("docs")?);
+        let me = Self::new(state, acl.clone(), docs);
+        let engine = Engine::new(me.clone(), acl)?;
+        Ok((me, engine))
     }
 
     pub fn iter(&self) -> impl Iterator<Item = sled::Result<(sled::IVec, sled::IVec)>> {
-        self.0.iter()
+        self.state.iter()
     }
 
     pub fn contains(&self, path: Path) -> bool {
-        self.0.scan_prefix(path).next().is_some()
+        self.state.scan_prefix(path).next().is_some()
+    }
+
+    pub fn watch_path(&self, path: Path<'_>) -> sled::Subscriber {
+        self.state.watch_prefix(path)
     }
 
     pub fn primitive(&self, path: Path) -> Result<Option<Ref<Primitive>>> {
         if path.ty() != Some(DotStoreType::Fun) {
             return Err(anyhow!("is not a primitive path"));
         }
-        if let Some(bytes) = self.0.get(path.as_ref())? {
+        if let Some(bytes) = self.state.get(path.as_ref())? {
             Ok(Some(Ref::new(bytes)))
         } else {
             Ok(None)
@@ -608,7 +617,7 @@ impl Crdt {
     }
 
     pub fn primitives(&self, path: Path) -> impl Iterator<Item = Result<Ref<Primitive>>> + '_ {
-        self.0
+        self.state
             .scan_prefix(path)
             .filter(|r| {
                 r.as_ref()
@@ -622,25 +631,25 @@ impl Crdt {
         if path.ty() != Some(DotStoreType::Policy) {
             return Err(anyhow!("is not a policy path"));
         }
-        if let Some(bytes) = self.0.get(path.as_ref())? {
+        if let Some(bytes) = self.state.get(path.as_ref())? {
             Ok(Some(Ref::new(bytes)))
         } else {
             Ok(None)
         }
     }
 
-    pub fn watch_path(&self, path: Path<'_>) -> sled::Subscriber {
-        self.0.watch_prefix(path)
+    pub fn can(&self, peer: &PeerId, perm: Permission, path: Path) -> Result<bool> {
+        self.acl.can(*peer, perm, path)
     }
 
     fn join_dotset(
         &self,
         path: &mut PathBuf,
-        ctx: &DotSet,
+        peer_id: &PeerId,
         other: &DotSet,
         other_ctx: &DotSet,
     ) -> Result<()> {
-        for res in self.0.scan_prefix(&path).keys() {
+        /*for res in self.state.scan_prefix(&path).keys() {
             let key = res?;
             let key = Path::new(&key[..]);
             if key.ty() != Some(DotStoreType::Set) {
@@ -648,27 +657,27 @@ impl Crdt {
             }
             let dot = key.dot();
             if !other.contains(&dot) && other_ctx.contains(&dot) {
-                self.0.remove(key)?;
+                self.state.remove(key)?;
             }
         }
         for dot in other.iter() {
             if !ctx.contains(&dot) {
                 path.dotset(&dot);
-                self.0.insert(&path, &[])?;
+                self.state.insert(&path, &[])?;
                 path.pop();
             }
-        }
+        }*/
         Ok(())
     }
 
     fn join_dotfun(
         &self,
         path: &mut PathBuf,
-        ctx: &DotSet,
+        peer_id: &PeerId,
         other: &BTreeMap<Dot, Primitive>,
         other_ctx: &DotSet,
     ) -> Result<()> {
-        for res in self.0.scan_prefix(&path).keys() {
+        /*for res in self.state.scan_prefix(&path).keys() {
             let key = res?;
             let key = Path::new(&key[..]);
             if key.ty() != Some(DotStoreType::Fun) {
@@ -676,7 +685,7 @@ impl Crdt {
             }
             let dot = key.dot();
             if !other.contains_key(&dot) && other_ctx.contains(&dot) {
-                self.0.remove(key)?;
+                self.state.remove(key)?;
             }
         }
         for (dot, v) in other {
@@ -684,23 +693,23 @@ impl Crdt {
                 continue;
             }
             path.dotfun(dot);
-            if self.0.contains_key(&path)? {
+            if self.state.contains_key(&path)? {
                 continue;
             }
-            self.0.insert(&path, Ref::archive(v).as_bytes())?;
+            self.state.insert(&path, Ref::archive(v).as_bytes())?;
             path.pop();
-        }
+        }*/
         Ok(())
     }
 
     fn join_dotmap(
         &self,
         path: &mut PathBuf,
-        ctx: &DotSet,
+        peer_id: &PeerId,
         other: &BTreeMap<Primitive, DotStore>,
         other_ctx: &DotSet,
     ) -> Result<()> {
-        for res in self.0.scan_prefix(&path).keys() {
+        for res in self.state.scan_prefix(&path).keys() {
             let leaf = res?;
             let key = Path::new(&leaf[path.as_ref().len()..])
                 .first()
@@ -714,12 +723,12 @@ impl Crdt {
                 .default()
                 .unwrap();
             let store = other.get(&key).unwrap_or(&default);
-            self.join_store(path, ctx, store, other_ctx)?;
+            self.join_store(path, peer_id, store, other_ctx)?;
             path.pop();
         }
-        for (k, store) in other {
-            path.key(k);
-            self.join_store(path, ctx, store, other_ctx)?;
+        for (key, store) in other {
+            path.key(key);
+            self.join_store(path, peer_id, store, other_ctx)?;
             path.pop();
         }
         Ok(())
@@ -728,19 +737,20 @@ impl Crdt {
     fn join_struct(
         &self,
         path: &mut PathBuf,
-        ctx: &DotSet,
+        peer_id: &PeerId,
         other: &BTreeMap<String, DotStore>,
         other_ctx: &DotSet,
     ) -> Result<()> {
+        use DotStore::*;
         for (k, v) in other {
             path.field(k);
             match v {
-                DotStore::Null => {}
-                DotStore::DotSet(set) => self.join_dotset(path, ctx, set, other_ctx)?,
-                DotStore::DotFun(fun) => self.join_dotfun(path, ctx, fun, other_ctx)?,
-                DotStore::DotMap(map) => self.join_dotmap(path, ctx, map, other_ctx)?,
-                DotStore::Struct(fields) => self.join_struct(path, ctx, fields, other_ctx)?,
-                DotStore::Policy(policy) => self.join_policy(path, ctx, policy, other_ctx)?,
+                Null => {}
+                DotSet(set) => self.join_dotset(path, peer_id, set, other_ctx)?,
+                DotFun(fun) => self.join_dotfun(path, peer_id, fun, other_ctx)?,
+                DotMap(map) => self.join_dotmap(path, peer_id, map, other_ctx)?,
+                Struct(fields) => self.join_struct(path, peer_id, fields, other_ctx)?,
+                Policy(policy) => self.join_policy(path, peer_id, policy, other_ctx)?,
             }
             path.pop();
         }
@@ -750,13 +760,13 @@ impl Crdt {
     fn join_policy(
         &self,
         path: &mut PathBuf,
-        _: &DotSet,
+        _: &PeerId,
         other: &BTreeMap<Dot, BTreeSet<Policy>>,
         _: &DotSet,
     ) -> Result<()> {
-        for (dot, ps) in other {
+        /*for (dot, ps) in other {
             path.policy(dot);
-            self.0.transaction::<_, _, std::io::Error>(|tree| {
+            self.state.transaction::<_, _, std::io::Error>(|tree| {
                 let mut policies = if let Some(bytes) = tree.get(path.as_ref())? {
                     Ref::<BTreeSet<Policy>>::new(bytes).to_owned().unwrap()
                 } else {
@@ -769,52 +779,48 @@ impl Crdt {
                 Ok(())
             })?;
             path.pop();
-        }
+        }*/
         Ok(())
     }
 
     fn join_store(
         &self,
         path: &mut PathBuf,
-        ctx: &DotSet,
+        peer_id: &PeerId,
         other: &DotStore,
         other_ctx: &DotSet,
     ) -> Result<()> {
+        use DotStore::*;
         match other {
-            DotStore::Null => {}
-            DotStore::DotSet(set) => self.join_dotset(path, ctx, set, other_ctx)?,
-            DotStore::DotFun(fun) => self.join_dotfun(path, ctx, fun, other_ctx)?,
-            DotStore::DotMap(map) => self.join_dotmap(path, ctx, map, other_ctx)?,
-            DotStore::Struct(fields) => self.join_struct(path, ctx, fields, other_ctx)?,
-            DotStore::Policy(policy) => self.join_policy(path, ctx, policy, other_ctx)?,
+            Null => {}
+            DotSet(set) => self.join_dotset(path, peer_id, set, other_ctx)?,
+            DotFun(fun) => self.join_dotfun(path, peer_id, fun, other_ctx)?,
+            DotMap(map) => self.join_dotmap(path, peer_id, map, other_ctx)?,
+            Struct(fields) => self.join_struct(path, peer_id, fields, other_ctx)?,
+            Policy(policy) => self.join_policy(path, peer_id, policy, other_ctx)?,
         }
         Ok(())
     }
 
-    pub fn join(&self, ctx: &mut CausalContext, _peer_id: &PeerId, causal: &Causal) -> Result<()> {
-        assert_eq!(ctx.doc(), causal.ctx().doc());
-        // TODO: check write permission
-        let mut path = PathBuf::new(ctx.doc);
-        self.join_store(&mut path, &ctx.dots, &causal.store, &causal.ctx.dots)?;
-        ctx.dots.union(&causal.ctx.dots);
+    pub fn join(&self, peer_id: &PeerId, causal: &Causal) -> Result<()> {
+        let mut path = PathBuf::new(causal.ctx.doc);
+        self.join_store(&mut path, peer_id, &causal.store, &causal.ctx.dots)?;
         Ok(())
     }
 
-    pub fn unjoin(
-        &self,
-        ctx: &Archived<CausalContext>,
-        _peer_id: &PeerId,
-        other: &Archived<CausalContext>,
-    ) -> Result<Causal> {
-        // TODO: check read permission
-        assert_eq!(ctx.doc, other.doc);
+    pub fn unjoin(&self, peer_id: &PeerId, other: &Archived<CausalContext>) -> Result<Causal> {
+        let prefix = PathBuf::new(other.doc);
+        let ctx = self.ctx(prefix.as_path())?;
         let diff = ctx.dots.difference(&other.dots);
         let mut store = DotStore::Null;
-        for r in self.0.scan_prefix(PathBuf::new(ctx.doc)) {
+        for r in self.state.scan_prefix(prefix) {
             let (k, v) = r?;
             let path = Path::new(&k[..]);
             let dot = path.dot();
             if !diff.contains(&dot) {
+                continue;
+            }
+            if !self.can(peer_id, Permission::Read, path)? {
                 continue;
             }
             let delta = match path.ty() {
@@ -847,81 +853,89 @@ impl Crdt {
         })
     }
 
-    pub fn enable(
-        &self,
-        path: Path<'_>,
-        ctx: &Archived<CausalContext>,
-        dot: Dot,
-    ) -> Result<Causal> {
-        assert_eq!(path.root().unwrap(), ctx.doc);
-        let mut store = DotSet::new();
-        store.insert(dot);
-        let mut causal = Causal {
-            store: DotStore::DotSet(store),
-            ctx: ctx.deserialize(&mut rkyv::Infallible)?,
+    fn empty_ctx(&self, path: Path) -> Result<CausalContext> {
+        let doc = path.root().unwrap();
+        let schema = self.docs.schema_id(&doc)?.unwrap();
+        Ok(CausalContext {
+            doc,
+            schema: schema.into(),
+            dots: Default::default(),
+        })
+    }
+
+    fn ctx(&self, path: Path) -> Result<CausalContext> {
+        let mut ctx = self.empty_ctx(path)?;
+        ctx.dots = DotSet::from_map(self.docs.present(&ctx.doc).collect::<Result<_>>()?);
+        Ok(ctx)
+    }
+
+    fn dot(&self, path: Path, peer: &PeerId) -> Result<Dot> {
+        self.docs.dot(&path.root().unwrap(), peer)
+    }
+
+    pub fn enable(&self, path: Path, peer: &PeerId) -> Result<Causal> {
+        if !self.can(peer, Permission::Write, path)? {
+            return Err(anyhow!("unauthorized"));
+        }
+        let mut ctx = self.empty_ctx(path)?;
+        let dot = self.dot(path, peer)?;
+        ctx.dots.insert(dot);
+        let causal = Causal {
+            store: DotStore::DotSet(ctx.dots.clone()),
+            ctx,
         };
-        causal.ctx.dots.insert(dot);
         path.wrap(causal)
     }
 
-    pub fn disable(
-        &self,
-        path: Path<'_>,
-        ctx: &Archived<CausalContext>,
-        dot: Dot,
-    ) -> Result<Causal> {
-        assert_eq!(path.root().unwrap(), ctx.doc);
-        let mut causal = Causal {
+    pub fn disable(&self, path: Path, peer: &PeerId) -> Result<Causal> {
+        if !self.can(peer, Permission::Write, path)? {
+            return Err(anyhow!("unauthorized"));
+        }
+        let mut ctx = self.ctx(path)?;
+        let dot = self.dot(path, peer)?;
+        ctx.dots.insert(dot);
+        let causal = Causal {
             store: DotStore::DotSet(Default::default()),
-            ctx: ctx.deserialize(&mut rkyv::Infallible)?,
+            ctx,
         };
-        causal.ctx.dots.insert(dot);
         path.wrap(causal)
     }
 
     pub fn is_enabled(&self, path: Path<'_>) -> bool {
-        self.0.scan_prefix(path).next().is_some()
+        self.state.scan_prefix(path).next().is_some()
     }
 
-    pub fn assign(
-        &self,
-        path: Path<'_>,
-        ctx: &Archived<CausalContext>,
-        dot: Dot,
-        v: Primitive,
-    ) -> Result<Causal> {
-        assert_eq!(path.root().unwrap(), ctx.doc);
+    pub fn assign(&self, path: Path, peer: &PeerId, v: Primitive) -> Result<Causal> {
+        if !self.can(peer, Permission::Write, path)? {
+            return Err(anyhow!("unauthorized"));
+        }
+        let mut ctx = self.ctx(path)?;
+        let dot = self.dot(path, peer)?;
+        ctx.dots.insert(dot);
         let mut store = BTreeMap::new();
         store.insert(dot, v);
-        let mut causal = Causal {
+        let causal = Causal {
             store: DotStore::DotFun(store),
-            ctx: ctx.deserialize(&mut rkyv::Infallible)?,
+            ctx,
         };
-        causal.ctx.dots.insert(dot);
         path.wrap(causal)
     }
 
     pub fn values(&self, path: Path<'_>) -> impl Iterator<Item = sled::Result<Ref<Primitive>>> {
-        self.0
+        self.state
             .scan_prefix(path)
             .values()
             .map(|res| res.map(Ref::new))
     }
 
-    pub fn remove(
-        &self,
-        path: Path<'_>,
-        ctx: &Archived<CausalContext>,
-        dot: Dot,
-    ) -> Result<Causal> {
-        assert_eq!(path.root().unwrap(), ctx.doc);
-        let mut ctx = CausalContext {
-            doc: ctx.doc,
-            schema: ctx.schema,
-            dots: Default::default(),
-        };
+    pub fn remove(&self, path: Path, peer: &PeerId) -> Result<Causal> {
+        if !self.can(peer, Permission::Write, path)? {
+            return Err(anyhow!("unauthorized"));
+        }
+        let mut ctx = self.empty_ctx(path)?;
+        let dot = self.dot(path, peer)?;
         ctx.dots.insert(dot);
-        for res in self.0.scan_prefix(path).keys() {
+        for res in self.state.scan_prefix(path).keys() {
             let key = res?;
             let key = Path::new(&key[..]);
             let ty = key.ty();
@@ -938,19 +952,21 @@ impl Crdt {
         path.wrap(causal)
     }
 
-    pub fn say(
-        &self,
-        path: Path<'_>,
-        ctx: &Archived<CausalContext>,
-        dot: Dot,
-        policy: Policy,
-    ) -> Result<Causal> {
-        assert_eq!(path.root().unwrap(), ctx.doc);
-        let mut ctx = CausalContext {
-            doc: ctx.doc,
-            schema: ctx.schema,
-            dots: Default::default(),
-        };
+    pub fn say(&self, path: Path<'_>, peer: &PeerId, policy: Policy) -> Result<Causal> {
+        if match &policy {
+            Policy::Can(_, perm) | Policy::CanIf(_, perm, _) => {
+                if perm.controllable() {
+                    self.can(peer, Permission::Control, path)?
+                } else {
+                    self.can(peer, Permission::Own, path)?
+                }
+            }
+            Policy::Revokes(_) => todo!(),
+        } {
+            return Err(anyhow!("unauthorized"));
+        }
+        let mut ctx = self.empty_ctx(path)?;
+        let dot = self.dot(path, peer)?;
         ctx.dots.insert(dot);
         let mut set = BTreeSet::new();
         set.insert(policy);
@@ -963,60 +979,56 @@ impl Crdt {
         path.wrap(causal)
     }
 
-    pub fn transform(&self, from: &ArchivedLenses, to: &ArchivedLenses) {
-        from.transform_crdt(self, to)
+    pub fn transform(
+        &self,
+        doc: &DocId,
+        schema_id: Hash,
+        from: &ArchivedLenses,
+        to: &ArchivedLenses,
+    ) -> Result<()> {
+        from.transform_crdt(doc, self, to)?;
+        self.docs.set_schema_id(doc, schema_id)?;
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    /*use super::*;
+    use super::*;
     use crate::props::*;
     use proptest::prelude::*;
 
     #[test]
     fn test_ewflag() -> Result<()> {
-        let crdt = Crdt::memory("test")?;
+        let crdt = Crdt::memory()?.0;
         let doc = DocId::new([0; 32]);
-        let peer_id = PeerId::new([0; 32]);
-        let mut dot = Dot::new(PeerId::new([0; 32]), 1);
-        let mut ctx = CausalContext {
-            doc,
-            schema: [0; 32],
-            dots: Default::default(),
-        };
+        let peer = PeerId::new([1; 32]);
         let mut path = PathBuf::new(doc);
         path.field("a");
         path.field("b");
-        let op = crdt.enable(path.as_path(), &ctx, dot.inc())?;
+        let op = crdt.enable(path.as_path(), &peer)?;
         assert!(!crdt.is_enabled(path.as_path()));
-        crdt.join(&mut ctx, &peer_id, &op)?;
+        crdt.join(&peer, &op)?;
         assert!(crdt.is_enabled(path.as_path()));
-        let op = crdt.disable(path.as_path(), &ctx, dot.inc())?;
-        crdt.join(&mut ctx, &peer_id, &op)?;
+        let op = crdt.disable(path.as_path(), &peer)?;
+        crdt.join(&peer, &op)?;
         assert!(!crdt.is_enabled(path.as_path()));
         Ok(())
     }
 
     #[test]
     fn test_mvreg() -> Result<()> {
-        let crdt = Crdt::memory("test")?;
+        let crdt = Crdt::memory()?.0;
         let doc = DocId::new([0; 32]);
-        let peer_id = PeerId::new([0; 32]);
-        let mut dot1 = Dot::new(PeerId::new([0; 32]), 1);
-        let mut dot2 = Dot::new(PeerId::new([1; 32]), 1);
-        let mut ctx = CausalContext {
-            doc,
-            schema: [0; 32],
-            dots: Default::default(),
-        };
+        let peer1 = PeerId::new([1; 32]);
+        let peer2 = PeerId::new([2; 32]);
         let mut path = PathBuf::new(doc);
         path.field("a");
         path.field("b");
-        let op1 = crdt.assign(path.as_path(), &ctx, dot1.inc(), Primitive::U64(42))?;
-        let op2 = crdt.assign(path.as_path(), &ctx, dot2.inc(), Primitive::U64(43))?;
-        crdt.join(&mut ctx, &peer_id, &op1)?;
-        crdt.join(&mut ctx, &peer_id, &op2)?;
+        let op1 = crdt.assign(path.as_path(), &peer1, Primitive::U64(42))?;
+        let op2 = crdt.assign(path.as_path(), &peer2, Primitive::U64(43))?;
+        crdt.join(&peer1, &op1)?;
+        crdt.join(&peer2, &op2)?;
 
         let mut values = BTreeSet::new();
         for value in crdt.values(path.as_path()) {
@@ -1030,8 +1042,8 @@ mod tests {
         assert!(values.contains(&42));
         assert!(values.contains(&43));
 
-        let op = crdt.assign(path.as_path(), &ctx, dot1.inc(), Primitive::U64(99))?;
-        crdt.join(&mut ctx, &op)?;
+        let op = crdt.assign(path.as_path(), &peer1, Primitive::U64(99))?;
+        crdt.join(&peer1, &op)?;
 
         let mut values = BTreeSet::new();
         for value in crdt.values(path.as_path()) {
@@ -1049,20 +1061,14 @@ mod tests {
 
     #[test]
     fn test_ormap() -> Result<()> {
-        let crdt = Crdt::memory("test")?;
+        let crdt = Crdt::memory()?.0;
         let doc = DocId::new([0; 32]);
-        let peer_id = PeerId::new([0; 32]);
-        let mut dot1 = Dot::new(PeerId::new([0; 32]), 1);
-        let mut ctx = CausalContext {
-            doc,
-            schema: [0; 32],
-            dots: Default::default(),
-        };
+        let peer = PeerId::new([1; 32]);
         let mut path = PathBuf::new(doc);
         path.key(&"a".into());
         path.key(&"b".into());
-        let op = crdt.assign(path.as_path(), &ctx, dot1.inc(), Primitive::U64(42))?;
-        crdt.join(&mut ctx, &peer_id, &op)?;
+        let op = crdt.assign(path.as_path(), &peer, Primitive::U64(42))?;
+        crdt.join(&peer, &op)?;
 
         let mut values = BTreeSet::new();
         for value in crdt.values(path.as_path()) {
@@ -1077,8 +1083,8 @@ mod tests {
 
         let mut path2 = PathBuf::new(doc);
         path2.key(&"a".into());
-        let op = crdt.remove(path2.as_path(), &ctx, dot1.inc())?;
-        crdt.join(&mut ctx, &peer_id, &op)?;
+        let op = crdt.remove(path2.as_path(), &peer)?;
+        crdt.join(&peer, &op)?;
 
         let mut values = BTreeSet::new();
         for value in crdt.values(path.as_path()) {
@@ -1107,10 +1113,8 @@ mod tests {
 
         #[test]
         fn causal_join_commutative(dots in arb_causal(arb_dotstore()), a in arb_causal_ctx(), b in arb_causal_ctx()) {
-            let a = Ref::archive(&a);
-            let a = dots.unjoin(a.as_ref());
-            let b = Ref::archive(&b);
-            let b = dots.unjoin(b.as_ref());
+            let a = dots.unjoin(&a);
+            let b = dots.unjoin(&b);
             prop_assert_eq!(join(&a, &b), join(&b, &a));
         }
 
@@ -1128,10 +1132,10 @@ mod tests {
         fn crdt_join(dots in arb_causal(arb_dotstore()), a in arb_causal_ctx(), b in arb_causal_ctx()) {
             let a = dots.unjoin(&a);
             let b = dots.unjoin(&b);
-            let (mut ctx, crdt) = causal_to_crdt(&a);
+            let crdt = causal_to_crdt(&a);
             let c = join(&a, &b);
-            crdt.join(&mut ctx, &b).unwrap();
-            let c2 = crdt_to_causal(&crdt, &ctx);
+            crdt.join(&dots.ctx.doc.into(), &b).unwrap();
+            let c2 = crdt_to_causal(&crdt, &dots.ctx);
             assert_eq!(c, c2);
         }
 
@@ -1139,12 +1143,11 @@ mod tests {
         #[ignore]
         fn crdt_unjoin(causal in arb_causal(arb_dotstore()), ctx in arb_causal_ctx()) {
             let peer_id = PeerId::new([0; 32]);
-            let (crdt_ctx, crdt) = causal_to_crdt(&causal);
-            let crdt_ctx = Ref::archive(&crdt_ctx);
-            let ctx = Ref::archive(&ctx);
-            let c = causal.unjoin(ctx.as_ref());
-            let c2 = crdt.unjoin(crdt_ctx.as_ref(), &peer_id, ctx.as_ref()).unwrap();
+            let crdt = causal_to_crdt(&causal);
+            let c = causal.unjoin(&ctx);
+            let actx = Ref::archive(&ctx);
+            let c2 = crdt.unjoin(&peer_id, actx.as_ref()).unwrap();
             assert_eq!(c, c2);
         }
-    }*/
+    }
 }
