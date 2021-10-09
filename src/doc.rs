@@ -15,10 +15,8 @@ impl Doc {
 
     /// Adds a decryption key for a peer.
     pub fn add_key(&self, peer_id: PeerId, key: Key) -> Result<()> {
-        self.secrets.add_key(
-            Metadata::new().doc(*self.doc.id()).peer(peer_id),
-            key,
-        )?;
+        self.secrets
+            .add_key(Metadata::new().doc(*self.doc.id()).peer(peer_id), key)?;
         Ok(())
     }
 
