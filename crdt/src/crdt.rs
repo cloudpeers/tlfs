@@ -4,7 +4,9 @@ use crate::{
 };
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
-use rkyv::{Archive, Archived, Deserialize, Serialize};
+use rkyv::{
+    archived_root, ser::serializers::AllocSerializer, Archive, Archived, Deserialize, Serialize,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Archive, Deserialize, Serialize)]
@@ -44,6 +46,123 @@ impl From<String> for Primitive {
 impl From<&str> for Primitive {
     fn from(s: &str) -> Self {
         Self::Str(s.to_string())
+    }
+}
+
+pub struct FlatDotStore(BTreeMap<PathBuf, Vec<u8>>);
+
+fn archive<T>(value: &T) -> Vec<u8>
+where
+    T: Serialize<AllocSerializer<256>>,
+{
+    Ref::archive(value).as_bytes().to_owned()
+}
+
+fn unarchive<T>(value: &[u8]) -> anyhow::Result<T>
+where
+    T: Archive,
+    Archived<T>: Deserialize<T, rkyv::Infallible>,
+{
+    let archived = unsafe { archived_root::<T>(&value) };
+    Ok(archived.deserialize(&mut rkyv::Infallible)?)
+}
+
+impl FlatDotStore {
+    pub fn from_dot_store(value: &DotStore, prefix: PathBuf) -> Self {
+        Self(iter(value, prefix).collect())
+    }
+
+    pub fn into_dot_store(&self) -> anyhow::Result<DotStore> {
+        let atoms: Vec<DotStore> = self
+            .0
+            .iter()
+            .map(|(path, value)| pair_to_dot_store(path.as_path(), value))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        Ok(atoms.into_iter().fold(DotStore::Null, |mut agg, elem| {
+            agg.merge(&elem);
+            agg
+        }))
+    }
+}
+
+fn pair_to_dot_store(mut path: Path<'_>, value: &[u8]) -> anyhow::Result<DotStore> {
+    let mut store = match path.ty() {
+        Some(DotStoreType::Policy) => {
+            let key = path.dot();
+            let value = unarchive(value)?;
+            let mut res = BTreeMap::new();
+            res.insert(key, value);
+            DotStore::Policy(res)
+        }
+        Some(DotStoreType::Fun) => {
+            let key = path.dot();
+            let value = unarchive(value)?;
+            let mut res = BTreeMap::new();
+            res.insert(key, value);
+            DotStore::DotFun(res)
+        }
+        Some(DotStoreType::Set) => {
+            let key = path.dot();
+            let mut res = DotSet::new();
+            res.insert(key);
+            DotStore::DotSet(res)
+        }
+        _ => DotStore::Null,
+    };
+    while let Some(parent) = path.parent() {
+        match parent.ty() {
+            Some(DotStoreType::Map) => {
+                let key = parent.key().to_owned()?;
+                let mut res = BTreeMap::new();
+                res.insert(key, store);
+                store = DotStore::DotMap(res);
+            }
+            Some(DotStoreType::Struct) => {
+                let key = parent.field();
+                let mut res = BTreeMap::new();
+                res.insert(key.to_owned(), store);
+                store = DotStore::Struct(res);
+            }
+            _ => {
+                panic!()
+            }
+        }
+        path = parent;
+    }
+    Ok(store)
+}
+
+fn iter<'a>(
+    value: &'a DotStore,
+    prefix: PathBuf,
+) -> Box<dyn Iterator<Item = (PathBuf, Vec<u8>)> + 'a> {
+    match value {
+        DotStore::DotSet(s) => Box::new(s.iter().map(move |dot| {
+            let mut path = prefix.clone();
+            path.dotset(&dot);
+            (path, Vec::new())
+        })),
+        DotStore::DotFun(s) => Box::new(s.iter().map(move |(dot, value)| {
+            let mut path = prefix.clone();
+            path.dotset(&dot);
+            (path, archive(value))
+        })),
+        DotStore::DotMap(s) => Box::new(s.iter().flat_map(move |(k, v)| {
+            let mut path = prefix.clone();
+            path.key(&k);
+            iter(v, path)
+        })),
+        DotStore::Struct(s) => Box::new(s.iter().flat_map(move |(k, v)| {
+            let mut path = prefix.clone();
+            path.field(&k);
+            iter(v, path)
+        })),
+        DotStore::Policy(s) => Box::new(s.iter().flat_map(move |(dot, policies)| {
+            let mut path = prefix.clone();
+            path.policy(dot);
+            std::iter::once((path, archive(policies)))
+        })),
+        DotStore::Null => Box::new(std::iter::once((prefix.clone(), Vec::new()))),
     }
 }
 
@@ -275,6 +394,38 @@ impl DotStore {
                     .collect();
                 Self::Policy(delta)
             }
+        }
+    }
+
+    pub fn merge(&mut self, that: &Self) {
+        match (self, that) {
+            (me @ Self::Null, that) => *me = that.clone(),
+            (_, Self::Null) => {}
+            (Self::DotSet(this), Self::DotSet(that)) => this.union(that),
+            (Self::Policy(this), Self::Policy(that)) => {
+                for (k, w) in that {
+                    let v = this.entry(k.clone()).or_default();
+                    v.extend(w.iter().cloned());
+                }
+            }
+            (Self::DotFun(this), Self::DotFun(that)) => {
+                for (k, w) in that {
+                    this.insert(k.clone(), w.clone());
+                }
+            }
+            (Self::DotMap(this), Self::DotMap(that)) => {
+                for (k, w) in that {
+                    let v = this.entry(k.clone()).or_insert(DotStore::Null);
+                    v.merge(w)
+                }
+            }
+            (Self::Struct(this), Self::Struct(that)) => {
+                for (k, w) in that {
+                    let v = this.entry(k.clone()).or_insert(DotStore::Null);
+                    v.merge(w)
+                }
+            }
+            (x, y) => panic!("invalid data\n l: {:?}\n r: {:?}", x, y),
         }
     }
 }
