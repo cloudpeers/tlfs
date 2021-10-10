@@ -213,6 +213,7 @@ impl FlatDotStore {
                 }
             },
         );
+        self.assert_invariants();
     }
 
     pub fn unjoin(&self, diff: &DotSet) -> Self {
@@ -234,7 +235,7 @@ impl FlatDotStore {
         Self(iter(value, prefix).collect())
     }
 
-    pub fn into_dot_store(&self) -> anyhow::Result<DotStore> {
+    pub fn to_dot_store(&self) -> anyhow::Result<DotStore> {
         let atoms: Vec<DotStore> = self
             .0
             .iter()
@@ -661,8 +662,18 @@ impl Causal {
     pub fn join(&mut self, other: &Causal) {
         assert_eq!(self.ctx().doc(), &other.ctx.doc);
         assert_eq!(&self.ctx().schema, &other.ctx.schema);
+        // reference
+        let path = PathBuf::new(self.ctx.doc);
+        let mut l = FlatDotStore::from_dot_store(&self.store, path.clone());
+        let r = FlatDotStore::from_dot_store(&other.store, path.clone());
+        l.join(&self.ctx.dots, &r, &other.ctx.dots);
+        let res = l.to_dot_store().unwrap();
+
         self.store
             .join(&self.ctx.dots, &other.store, &other.ctx.dots);
+        if res != DotStore::Null {
+            assert_eq!(self.store, res);
+        }
         self.ctx.dots.union(&other.ctx.dots);
     }
 
@@ -1436,25 +1447,25 @@ mod tests {
 
     proptest! {
         #[test]
-        fn causal_unjoin(a in arb_causal(arb_dotstore()), b in arb_causal_ctx()) {
+        fn causal_unjoin(a in arb_causal(arb_non_empty_dotstore()), b in arb_causal_ctx()) {
             let b = a.unjoin(&b);
             prop_assert_eq!(join(&a, &b), a);
         }
 
         #[test]
-        fn causal_join_idempotent(a in arb_causal(arb_dotstore())) {
+        fn causal_join_idempotent(a in arb_causal(arb_non_empty_dotstore())) {
             prop_assert_eq!(join(&a, &a), a);
         }
 
         #[test]
-        fn causal_join_commutative(dots in arb_causal(arb_dotstore()), a in arb_causal_ctx(), b in arb_causal_ctx()) {
+        fn causal_join_commutative(dots in arb_causal(arb_non_empty_dotstore()), a in arb_causal_ctx(), b in arb_causal_ctx()) {
             let a = dots.unjoin(&a);
             let b = dots.unjoin(&b);
             prop_assert_eq!(join(&a, &b), join(&b, &a));
         }
 
         #[test]
-        fn causal_join_associative(dots in arb_causal(arb_dotstore()), a in arb_causal_ctx(), b in arb_causal_ctx(), c in arb_causal_ctx()) {
+        fn causal_join_associative(dots in arb_causal(arb_non_empty_dotstore()), a in arb_causal_ctx(), b in arb_causal_ctx(), c in arb_causal_ctx()) {
             let a = dots.unjoin(&a);
             let b = dots.unjoin(&b);
             let c = dots.unjoin(&c);
@@ -1489,7 +1500,7 @@ mod tests {
         fn flat_dotstore(ds in arb_non_empty_dotstore(), id in arb_doc_id()) {
             let prefix = PathBuf::new(id);
             let flat = FlatDotStore::from_dot_store(&ds, prefix);
-            let ds2 = flat.into_dot_store().unwrap();
+            let ds2 = flat.to_dot_store().unwrap();
             if ds != ds2 {
                 for (k, v) in flat.0 {
                     println!("{} {:?}", k.as_path(), v);
