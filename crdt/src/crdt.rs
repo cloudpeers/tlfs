@@ -68,7 +68,64 @@ where
     Ok(archived.deserialize(&mut rkyv::Infallible)?)
 }
 
+pub trait InPlaceRelationalOps<K, V> {
+    fn outer_join_with<W, L, R>(&mut self, that: &BTreeMap<K, W>, l: L, r: R)
+    where
+        K: Ord + Clone,
+        L: Fn(&K, &mut V, Option<&W>) -> bool,
+        R: Fn(&K, &W) -> Option<V>;
+}
+
+impl<K, V> InPlaceRelationalOps<K, V> for BTreeMap<K, V> {
+    fn outer_join_with<W, L, R>(&mut self, that: &BTreeMap<K, W>, l: L, r: R)
+    where
+        K: Ord + Clone,
+        L: Fn(&K, &mut V, Option<&W>) -> bool,
+        R: Fn(&K, &W) -> Option<V>,
+    {
+        // k in that
+        for (k, w) in that.iter() {
+            match self.get_mut(k) {
+                Some(v) => {
+                    if !l(k, v, Some(w)) {
+                        self.remove(k);
+                    }
+                }
+                None => {
+                    if let Some(v) = r(k, w) {
+                        self.insert(k.clone(), v);
+                    }
+                }
+            }
+        }
+        // k not in that
+        self.retain(|k, v| that.get(k).is_some() || l(k, v, None));
+    }
+}
+
 impl FlatDotStore {
+    fn assert_invariants(&self) {
+        self.0.keys().all(|x| !x.as_path().is_empty());
+        self.0.keys().all(|x| {
+            x.as_path().ty() == Some(DotStoreType::Policy)
+                || x.as_path().ty() == Some(DotStoreType::Set)
+                || x.as_path().ty() == Some(DotStoreType::Fun)
+        });
+    }
+
+    pub fn dots(&self) -> impl Iterator<Item = Dot> + '_ {
+        self.0.keys().map(|x| x.as_path().dot())
+    }
+
+    pub fn join(
+        &mut self,
+        ctx: &impl AbstractDotSet<PeerId>,
+        that: &Self,
+        that_ctx: &impl AbstractDotSet<PeerId>,
+    ) {
+        self.0.outer_join_with(&that.0, |k, v, w| true, |k, w| None);
+    }
+
     pub fn from_dot_store(value: &DotStore, prefix: PathBuf) -> Self {
         Self(iter(value, prefix).collect())
     }
@@ -167,7 +224,7 @@ fn iter<'a>(
             path.policy(dot);
             std::iter::once((path, archive(policies)))
         })),
-        DotStore::Null => Box::new(std::iter::once((prefix.clone(), Vec::new()))),
+        DotStore::Null => Box::new(std::iter::empty()),
     }
 }
 
@@ -694,6 +751,10 @@ impl<'a> Path<'a> {
 
     pub fn to_owned(&self) -> PathBuf {
         PathBuf(self.0.to_vec())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 }
 
