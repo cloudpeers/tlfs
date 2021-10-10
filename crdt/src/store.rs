@@ -35,9 +35,7 @@ impl<I: ReplicaId> DotStore<I> for DotSet<I> {
     }
 
     fn dots(&self, dots: &mut BTreeSet<Dot<I>>) {
-        for dot in self.iter() {
-            dots.insert(dot);
-        }
+        dots.extend(self.iter());
     }
 
     /// from the paper
@@ -216,8 +214,12 @@ where
     ///                     where v(k) = fst ((m(k), c) ∐ (m'(k), c'))
     fn join(&mut self, ctx: &CausalContext<I>, other: &Self, other_ctx: &CausalContext<I>) {
         let t = V::default();
-        let mut all = self.map.keys().cloned().collect::<Vec<_>>();
-        all.extend(other.map.keys().cloned());
+        let all = self
+            .map
+            .keys()
+            .chain(other.map.keys())
+            .cloned()
+            .collect::<Vec<_>>();
         for key in all {
             let v1 = self.map.entry(key.clone()).or_default();
             let v2 = other.map.get(&key).unwrap_or(&t);

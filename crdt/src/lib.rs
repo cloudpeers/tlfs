@@ -1,7 +1,20 @@
-//! Delta crdts
+//! Delta State Conflict-Free Replicated Data Types (δ-CRDTs)
+//!
+//! [Almeida et al. 2016] introduced δ-CRDTs, that try to combine the advantages of op-based CRDTs
+//! (small message sizes) with those of state-based CRDTs (dissemination over unreliable
+//! communication channels). This is achieved by creating a δ-state through the application of
+//! δ-mutators, that typically are of a much smaller size than the whole state. Those δ-states
+//! (or short _delta_) are fundamentally a fragment of the whole state, and are joined onto it on
+//! local and remote nodes.
+//!
+//! The main challenge in δ-CRDTs is that the individual deltas mut be causally merged to maintain
+//! the desired semantics.
+//!
+//! [Almeida et al. 2016]: https://arxiv.org/abs/1603.01529v1
 
 mod crdts;
 mod dotset;
+mod pos_identifier;
 #[cfg(any(feature = "proptest", test))]
 pub mod props;
 mod store;
@@ -102,7 +115,7 @@ impl<I: ReplicaId, S> Causal<I, S> {
         self.ctx.union(&other.ctx);
     }
 
-    pub fn unjoin(&self, other: &DotSet<I>) -> Self
+    pub fn unjoin(&self, other: &CausalContext<I>) -> Self
     where
         S: DotStore<I>,
     {
