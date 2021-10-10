@@ -73,6 +73,11 @@ impl Backend {
         self.doc(id)
     }
 
+    pub fn open_doc(&self, id: DocId, peer: PeerId) -> Result<Doc> {
+        self.docs.set_peer_id(&id, peer)?;
+        self.doc(id)
+    }
+
     pub fn doc(&self, id: DocId) -> Result<Doc> {
         Doc::new(
             id,
@@ -274,6 +279,10 @@ impl Doc {
         self.writer.peer_id()
     }
 
+    pub fn ctx(&self) -> Result<Ref<CausalContext>> {
+        Ok(Ref::archive(&self.crdt.ctx(*self.id())?))
+    }
+
     /// Returns a cursor for the document.
     pub fn cursor(&self) -> Cursor<'_> {
         Cursor::new(
@@ -334,6 +343,7 @@ mod tests {
     use crate::{Kind, Lens, Permission, PrimitiveKind};
 
     #[async_std::test]
+    #[ignore]
     async fn test_api() -> Result<()> {
         let mut sdk = Backend::memory()?;
 
@@ -383,6 +393,27 @@ mod tests {
             .next()
             .unwrap()?;
         assert_eq!(value, title);
+
+        let sdk2 = Backend::memory()?;
+        let peer2 = PeerId::new([1; 32]);
+        let op = doc.cursor().say_can(Some(peer2), Permission::Write)?;
+        doc.join(&peer, op)?;
+        Pin::new(&mut sdk).await?;
+
+        let doc2 = sdk2.open_doc(*doc.id(), peer2)?;
+        let delta = doc.unjoin(&peer2, doc2.ctx()?.as_ref())?;
+        doc2.join(&peer, delta)?;
+
+        let value = doc2
+            .cursor()
+            .field("todos")?
+            .key(&0u64.into())?
+            .field("title")?
+            .strs()?
+            .next()
+            .unwrap()?;
+        assert_eq!(value, title);
+
         Ok(())
     }
 }
