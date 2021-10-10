@@ -1,7 +1,7 @@
 //! This module contains an efficient set of dots for use as both a dot store and a causal context
 use bytecheck::CheckBytes;
 use itertools::Itertools;
-use range_collections::{AbstractRangeSet, RangeSet, RangeSet2};
+use range_collections::{range_set::ArchivedRangeSet, AbstractRangeSet, RangeSet, RangeSet2};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::{
     collections::{btree_map, BTreeMap, BTreeSet},
@@ -19,7 +19,7 @@ impl<T: Copy + std::fmt::Debug + Ord + rkyv::Archive<Archived = Self> + 'static>
 
 /// Dot is a version marker for a single replica.
 #[derive(
-    Clone, Copy, Eq, PartialEq, Hash, Ord, PartialOrd, Archive, CheckBytes, Deserialize, Serialize,
+    Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd, Archive, CheckBytes, Deserialize, Serialize,
 )]
 #[archive(as = "Dot<I>")]
 #[repr(C)]
@@ -69,6 +69,145 @@ impl<I: ReplicaId> From<(I, u64)> for Dot<I> {
     }
 }
 
+type EntryIter<'a, I, R> = Box<dyn Iterator<Item = (&'a I, &'a R)> + 'a>;
+
+pub trait AbstractDotSet<I: ReplicaId> {
+    fn entry(&self, id: &I) -> Option<&Self::RangeSet>;
+    fn entries(&self) -> EntryIter<'_, I, Self::RangeSet>;
+    fn to_dotset(&self) -> DotSet<I>;
+    type RangeSet: AbstractRangeSet<u64>;
+
+    fn contains(&self, dot: &Dot<I>) -> bool {
+        self.entry(&dot.id)
+            .map(|range| range.contains(&dot.counter))
+            .unwrap_or_default()
+    }
+
+    fn iter(&self) -> Box<dyn Iterator<Item = Dot<I>> + '_> {
+        Box::new(self.entries().flat_map(|(id, ranges)| {
+            ranges.iter().flat_map(move |(from, to)| {
+                elems(from, to)
+                    .filter(|counter| *counter != 0)
+                    .map(move |counter| Dot::new(*id, counter))
+            })
+        }))
+    }
+
+    /// Return the associated counter for this replica.
+    ///
+    /// The associated counter is the maximum counter value for the replica id.
+    /// All replicas not in the set have an implied count of 0.
+    ///
+    /// maxᵢ(c) = max({ n | (i, n) ∈ c} ∪ { 0 })
+    fn max(&self, id: &I) -> u64 {
+        if let Some(r) = self.entry(id) {
+            r.boundaries()
+                .last()
+                .map(|x| *x - 1)
+                .expect("must not have explicit empty ranges")
+        } else {
+            0
+        }
+    }
+
+    /// Returns the associated dot for this replica.
+    fn dot(&self, id: I) -> Dot<I> {
+        Dot::new(id, self.max(&id))
+    }
+
+    /// Returns the incremented dot for this replica.
+    ///
+    /// nextᵢ(c) = (i, maxᵢ(c) + 1)
+    fn next(&self, id: I) -> Dot<I> {
+        self.dot(id).inc()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.entries().next().is_none()
+    }
+
+    fn is_causal(&self) -> bool {
+        self.entries().all(|(_, r)| {
+            let b = r.boundaries();
+            b.len() <= 2 && b[0] == 1
+        })
+    }
+
+    /// Returns the intersection of two dot sets.
+    fn intersection(&self, other: &impl AbstractDotSet<I>) -> DotSet<I> {
+        DotSet(
+            self.entries()
+                .filter_map(|(k, vl)| {
+                    other.entry(k).and_then(|vr| {
+                        let r = vl.intersection(vr);
+                        if !r.is_empty() {
+                            Some((*k, r))
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect(),
+        )
+    }
+
+    /// Returns the difference of two dot sets.
+    fn difference(&self, other: &impl AbstractDotSet<I>) -> DotSet<I> {
+        DotSet(
+            self.entries()
+                .filter_map(|(k, vl)| {
+                    if let Some(vr) = other.entry(k) {
+                        let r: RangeSet2<u64> = vl.difference(vr);
+                        if !r.is_empty() {
+                            Some((*k, r))
+                        } else {
+                            None
+                        }
+                    } else {
+                        Some((*k, vl.to_range_set()))
+                    }
+                })
+                .collect(),
+        )
+    }
+}
+
+impl<I: ReplicaId> AbstractDotSet<I> for DotSet<I> {
+    fn entry(&self, id: &I) -> Option<&RangeSet2<u64>> {
+        self.0.get(id)
+    }
+
+    type RangeSet = RangeSet2<u64>;
+
+    fn to_dotset(&self) -> DotSet<I> {
+        self.clone()
+    }
+
+    fn entries(&self) -> EntryIter<'_, I, Self::RangeSet> {
+        Box::new(self.0.iter())
+    }
+}
+
+impl<I: ReplicaId> AbstractDotSet<I> for ArchivedDotSet<I> {
+    fn entry(&self, id: &I) -> Option<&ArchivedRangeSet<u64>> {
+        self.0.get(id)
+    }
+
+    type RangeSet = ArchivedRangeSet<u64>;
+
+    fn to_dotset(&self) -> DotSet<I> {
+        DotSet(
+            self.entries()
+                .map(|(i, r)| (*i, r.to_range_set()))
+                .collect(),
+        )
+    }
+
+    fn entries(&self) -> EntryIter<'_, I, Self::RangeSet> {
+        Box::new(self.0.iter())
+    }
+}
+
 /// An opaque set of dots.
 ///
 /// Supports membership tests as well as the typical set operations union, intersection, difference.
@@ -100,12 +239,20 @@ impl<I: ReplicaId> FromIterator<Dot<I>> for DotSet<I> {
 
 impl<I: ReplicaId> Default for DotSet<I> {
     fn default() -> Self {
-        Self(Default::default())
+        Self::new()
     }
 }
 
 impl<I: ReplicaId> DotSet<I> {
-    pub fn new(elems: BTreeSet<Dot<I>>) -> Self {
+    pub fn new() -> Self {
+        Self(Default::default())
+    }
+
+    pub fn peers(&self) -> impl Iterator<Item = &I> + '_ {
+        self.0.keys()
+    }
+
+    pub fn from_set(elems: BTreeSet<Dot<I>>) -> Self {
         elems.into_iter().collect()
     }
 
@@ -119,23 +266,6 @@ impl<I: ReplicaId> DotSet<I> {
                 .map(|(i, max)| (i, RangeSet::from(1..max + 1)))
                 .collect(),
         )
-    }
-
-    pub fn contains(&self, dot: &Dot<I>) -> bool {
-        self.0
-            .get(&dot.id)
-            .map(|range| range.contains(&dot.counter))
-            .unwrap_or_default()
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = Dot<I>> + '_ {
-        self.0.iter().flat_map(|(id, ranges)| {
-            ranges.iter().flat_map(move |(from, to)| {
-                elems(from, to)
-                    .filter(|counter| *counter != 0)
-                    .map(move |counter| Dot::new(*id, counter))
-            })
-        })
     }
 
     pub fn insert(&mut self, item: Dot<I>) {
@@ -154,103 +284,18 @@ impl<I: ReplicaId> DotSet<I> {
         }
     }
 
-    /// Return the associated counter for this replica.
-    ///
-    /// The associated counter is the maximum counter value for the replica id.
-    /// All replicas not in the set have an implied count of 0.
-    ///
-    /// maxᵢ(c) = max({ n | (i, n) ∈ c} ∪ { 0 })
-    pub fn max(&self, id: &I) -> u64 {
-        if let Some(r) = self.0.get(id) {
-            r.boundaries()
-                .last()
-                .map(|x| *x - 1)
-                .expect("must not have explicit empty ranges")
-        } else {
-            0
-        }
-    }
-
-    /// Returns the associated dot for this replica.
-    pub fn dot(&self, id: I) -> Dot<I> {
-        Dot::new(id, self.max(&id))
-    }
-
-    /// Returns the incremented dot for this replica.
-    ///
-    /// nextᵢ(c) = (i, maxᵢ(c) + 1)
-    pub fn next(&self, id: I) -> Dot<I> {
-        self.dot(id).inc()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    /// Returns the intersection of two dot sets.
-    pub fn intersection(&self, other: &Self) -> Self {
-        Self(
-            self.0
-                .iter()
-                .filter_map(|(k, vl)| {
-                    other.0.get(k).and_then(|vr| {
-                        let r = vl & vr;
-                        if !r.is_empty() {
-                            Some((*k, r))
-                        } else {
-                            None
-                        }
-                    })
-                })
-                .collect(),
-        )
-    }
-
-    /// Returns the difference of two dot sets.
-    pub fn difference(&self, other: &Self) -> Self {
-        Self(
-            self.0
-                .iter()
-                .filter_map(|(k, vl)| {
-                    if let Some(vr) = other.0.get(k) {
-                        let r = vl - vr;
-                        if !r.is_empty() {
-                            Some((*k, r))
-                        } else {
-                            None
-                        }
-                    } else {
-                        Some((*k, vl.clone()))
-                    }
-                })
-                .collect(),
-        )
-    }
-
     /// Merges with the other dot set.
-    pub fn union(&mut self, other: &Self) {
-        for (k, vr) in other.0.iter() {
+    pub fn union(&mut self, other: &impl AbstractDotSet<I>) {
+        for (k, vr) in other.entries() {
             match self.0.entry(*k) {
                 btree_map::Entry::Occupied(e) => {
                     e.into_mut().union_with(vr);
                 }
                 btree_map::Entry::Vacant(e) => {
-                    e.insert(vr.clone());
+                    e.insert(vr.to_range_set());
                 }
             }
         }
-    }
-
-    pub fn is_causal(&self) -> bool {
-        self.assert_invariants();
-        self.0.iter().all(|(_, r)| {
-            let b = r.boundaries();
-            b.len() <= 2 && b[0] == 1
-        })
-    }
-
-    fn assert_invariants(&self) {
-        assert!(self.0.iter().all(|(_, r)| !r.is_empty()));
     }
 }
 
@@ -264,22 +309,40 @@ fn elems(lower: Bound<&u64>, upper: Bound<&u64>) -> Range<u64> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{props::*, Dot, DotSet};
+    use crate::dotset::AbstractDotSet;
+    use crate::props::*;
+    use crate::{Dot, DotSet, PeerId};
     use proptest::prelude::*;
     use std::collections::BTreeSet;
 
     /// convert a dotset into a std set for reference ops
-    fn std_set(x: &DotSet<u8>) -> BTreeSet<Dot<u8>> {
+    fn std_set(x: &DotSet) -> BTreeSet<Dot> {
         x.iter().collect()
     }
 
     /// convert an iterator into a dotset
-    fn dot_set<'a>(x: impl IntoIterator<Item = &'a Dot<u8>>) -> DotSet<u8> {
+    fn dot_set<'a>(x: impl IntoIterator<Item = &'a Dot>) -> DotSet {
         x.into_iter().cloned().collect()
     }
 
-    fn from_tuples(x: impl IntoIterator<Item = (u8, u64)>) -> DotSet<u8> {
-        x.into_iter().map(|(i, c)| Dot::new(i, c)).collect()
+    fn from_tuples(x: impl IntoIterator<Item = (u8, u64)>) -> DotSet {
+        x.into_iter()
+            .map(|(i, c)| Dot::new(PeerId::new([i; 32]), c))
+            .collect()
+    }
+
+    fn union(a: &DotSet, b: &DotSet) -> DotSet {
+        let mut a = a.clone();
+        a.union(b);
+        a
+    }
+
+    fn intersect(a: &DotSet, b: &DotSet) -> DotSet {
+        a.intersection(b)
+    }
+
+    fn difference(a: &DotSet, b: &DotSet) -> DotSet {
+        a.difference(b)
     }
 
     #[test]

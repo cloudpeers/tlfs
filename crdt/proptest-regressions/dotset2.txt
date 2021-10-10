@@ -1,9 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc d3c552a450b04a09219c3ef4fb6e6252a079239e312a055c89a2338daa9d890a # shrinks to s1 = DotSet({2: RangeSet{1..2}}), s2 = DotSet({})
-cc 9b8fe63a39f73998d027484f66f9c7827716e4f616de856c4bc68aeedf459368 # shrinks to s1 = DotSet({2: RangeSet{1..2}}), s2 = DotSet({2: RangeSet{2..3}})
-cc 3c2bf4f3b98490bf106ae58c67002ada0fa06acf55fb0a474cd413bb0d3e0ccb # shrinks to s1 = DotSet({1: RangeSet{1..2}}), s2 = DotSet({})

@@ -1,10 +1,10 @@
+use crate::{Crdt, DocId, DotStore, PrimitiveKind, Prop, Schema};
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
 use rkyv::ser::serializers::AllocSerializer;
 use rkyv::ser::Serializer;
 use rkyv::string::ArchivedString;
 use rkyv::{Archive, Serialize};
-use tlfs_acl::{Crdt, Data, PrimitiveKind, Prop, Schema};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Archive, Serialize)]
 #[archive_attr(derive(Clone, Copy, Debug, Eq, PartialEq, CheckBytes))]
@@ -220,67 +220,64 @@ impl<'a> LensRef<'a> {
         Ok(())
     }
 
-    pub fn transform_crdt(&self, c: &mut Crdt) {
-        match (self, &mut c.data) {
+    pub fn transform_dotstore(&self, store: &mut DotStore) {
+        match (self, store) {
             (Self::Make(k), v) => {
                 *v = match k {
-                    ArchivedKind::Null => Data::Null,
-                    ArchivedKind::Flag => Data::Flag(Default::default()),
-                    ArchivedKind::Reg(_) => Data::Reg(Default::default()),
-                    ArchivedKind::Table(_) => Data::Table(Default::default()),
-                    ArchivedKind::Struct => Data::Struct(Default::default()),
+                    ArchivedKind::Null => DotStore::Null,
+                    ArchivedKind::Flag => DotStore::DotSet(Default::default()),
+                    ArchivedKind::Reg(_) => DotStore::DotFun(Default::default()),
+                    ArchivedKind::Table(_) => DotStore::DotMap(Default::default()),
+                    ArchivedKind::Struct => DotStore::Struct(Default::default()),
                 };
             }
             (Self::Destroy(_), v) => {
-                *v = Data::Null;
+                *v = DotStore::Null;
             }
-            (Self::AddProperty(key), Data::Struct(m)) => {
-                m.insert(key.to_string(), Crdt::new(Data::Null));
+            (Self::AddProperty(key), DotStore::Struct(m)) => {
+                m.insert(key.to_string(), DotStore::Null);
             }
-            (Self::RemoveProperty(key), Data::Struct(m)) => {
+            (Self::RemoveProperty(key), DotStore::Struct(m)) => {
                 m.remove(key.as_str());
             }
-            (Self::RenameProperty(from, to), Data::Struct(m)) => {
+            (Self::RenameProperty(from, to), DotStore::Struct(m)) => {
                 if let Some(v) = m.remove(from.as_str()) {
                     m.insert(to.to_string(), v);
                 }
             }
-            (Self::HoistProperty(host, target), Data::Struct(m)) => {
-                if let Some(Crdt {
-                    data: Data::Struct(host),
-                    ..
-                }) = m.get_mut(host.as_str())
-                {
+            (Self::HoistProperty(host, target), DotStore::Struct(m)) => {
+                if let Some(DotStore::Struct(host)) = m.get_mut(host.as_str()) {
                     if let Some(v) = host.remove(target.as_str()) {
                         m.insert(target.to_string(), v);
                     }
                 }
             }
-            (Self::PlungeProperty(host, target), Data::Struct(m)) => {
+            (Self::PlungeProperty(host, target), DotStore::Struct(m)) => {
                 if let Some(v) = m.remove(target.as_str()) {
-                    if let Some(Crdt {
-                        data: Data::Struct(host),
-                        ..
-                    }) = m.get_mut(host.as_str())
-                    {
+                    if let Some(DotStore::Struct(host)) = m.get_mut(host.as_str()) {
                         host.insert(target.to_string(), v);
                     } else {
                         m.insert(target.to_string(), v);
                     }
                 }
             }
-            (Self::LensIn(rev, key, lens), Data::Struct(m)) => {
+            (Self::LensIn(rev, key, lens), DotStore::Struct(m)) => {
                 if let Some(v) = m.get_mut(key.as_str()) {
-                    lens.to_ref().maybe_reverse(*rev).transform_crdt(v);
+                    lens.to_ref().maybe_reverse(*rev).transform_dotstore(v);
                 }
             }
-            (Self::LensMapValue(rev, lens), Data::Table(vs)) => {
+            (Self::LensMapValue(rev, lens), DotStore::DotMap(vs)) => {
                 for v in vs.values_mut() {
-                    lens.to_ref().maybe_reverse(*rev).transform_crdt(v);
+                    lens.to_ref().maybe_reverse(*rev).transform_dotstore(v);
                 }
             }
             _ => {}
         }
+    }
+
+    pub fn transform_crdt(&self, _doc: &DocId, _store: &Crdt) -> Result<()> {
+        // TODO
+        Ok(())
     }
 }
 
@@ -293,12 +290,6 @@ pub struct Lenses(Vec<Lens>);
 impl Lenses {
     pub fn new(lenses: Vec<Lens>) -> Self {
         Self(lenses)
-    }
-
-    pub fn archive(&self) -> Vec<u8> {
-        let mut ser = AllocSerializer::<256>::default();
-        ser.serialize_value(self).unwrap();
-        ser.into_serializer().into_inner().to_vec()
     }
 }
 
@@ -336,5 +327,58 @@ impl ArchivedLenses {
             c.push(b.to_ref());
         }
         c
+    }
+
+    pub fn transform_dotstore(&self, store: &mut DotStore, target: &ArchivedLenses) {
+        for lens in self.transform(target) {
+            tracing::info!("{:?}", lens);
+            lens.transform_dotstore(store);
+        }
+    }
+
+    pub fn transform_crdt(&self, doc: &DocId, crdt: &Crdt, target: &ArchivedLenses) -> Result<()> {
+        for lens in self.transform(target) {
+            lens.transform_crdt(doc, crdt)?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::props::*;
+    use crate::Ref;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn reversible((lens, schema) in lens_and_schema()) {
+            let lens = Ref::archive(&lens);
+            let mut schema2 = schema.clone();
+            prop_assume!(lens.as_ref().to_ref().transform_schema(&mut schema2).is_ok());
+            lens.as_ref().to_ref().reverse().transform_schema(&mut schema2).unwrap();
+            prop_assert_eq!(schema, schema2);
+        }
+
+        #[test]
+        fn transform_preserves_validity((lens, mut schema, mut causal) in lens_schema_and_causal()) {
+            let lens = Ref::archive(&lens);
+            prop_assume!(validate(&schema, &causal));
+            prop_assume!(lens.as_ref().to_ref().transform_schema(&mut schema).is_ok());
+            lens.as_ref().to_ref().transform_dotstore(&mut causal.store);
+            prop_assert!(validate(&schema, &causal));
+        }
+
+        #[test]
+        #[ignore]
+        fn crdt_transform((lens, schema, mut causal) in lens_schema_and_causal()) {
+            let lens = Ref::archive(&lens);
+            prop_assume!(validate(&schema, &causal));
+            let crdt = causal_to_crdt(&causal);
+            lens.as_ref().to_ref().transform_crdt(&causal.ctx.doc, &crdt).unwrap();
+            let causal2 = crdt_to_causal(&crdt, &causal.ctx);
+            lens.as_ref().to_ref().transform_dotstore(&mut causal.store);
+            assert_eq!(causal, causal2);
+        }
     }
 }

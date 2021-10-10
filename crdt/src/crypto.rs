@@ -1,4 +1,4 @@
-use crate::id::PeerId;
+use crate::PeerId;
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
 use chacha20poly1305::aead::{AeadInPlace, NewAead};
@@ -148,7 +148,7 @@ impl Encrypted {
     }
 }
 
-#[derive(Clone, Copy, Archive, Serialize, Deserialize)]
+#[derive(Archive, Serialize, Deserialize)]
 #[archive(as = "KeyNonce")]
 #[repr(C)]
 pub struct KeyNonce {
@@ -157,23 +157,18 @@ pub struct KeyNonce {
 }
 
 impl KeyNonce {
-    pub fn generate() -> Self {
-        Self {
-            key: Key::generate(),
-            nonce: 0,
-        }
+    pub fn new(key: Key, nonce: u64) -> Self {
+        Self { key, nonce }
     }
 
     pub fn key(&self) -> &Key {
         &self.key
     }
 
-    pub fn encrypt<P>(&mut self, payload: &P) -> Encrypted
+    pub fn encrypt<P>(self, payload: &P) -> Encrypted
     where
         P: Serialize<AllocSerializer<256>>,
     {
-        let encrypted = self.key.encrypt(payload, self.nonce);
-        self.nonce += 1;
-        encrypted
+        self.key.encrypt(payload, self.nonce)
     }
 }

@@ -110,23 +110,3 @@ impl From<DocId> for PeerId {
         Self::new(id.into())
     }
 }
-
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Archive)]
-#[archive(as = "Id")]
-#[repr(C)]
-pub enum Id {
-    Doc(DocId),
-    Peer(PeerId),
-}
-
-impl From<DocId> for Id {
-    fn from(id: DocId) -> Self {
-        Self::Doc(id)
-    }
-}
-
-impl From<PeerId> for Id {
-    fn from(id: PeerId) -> Self {
-        Self::Peer(id)
-    }
-}

@@ -1,7 +1,5 @@
 [workspace]
 members = [
-    "acl",
-    "cambria",
     "cloud-relay",
     "crdt",
     ".",
@@ -14,10 +12,9 @@ edition = "2018"
 
 [dependencies]
 anyhow = "1.0.44"
-bytecheck = "0.6.5"
 rkyv = "0.7.18"
-tlfs-acl = { version = "0.1.0", path = "acl" }
-tlfs-cambria = { version = "0.1.0", path = "cambria" }
+sled = { git = "https://github.com/spacejam/sled" }
+tlfs-crdt = { version = "0.1.0", path = "crdt" }
 
 [patch.crates-io]
 libp2p = { git = "https://github.com/wngr/rust-libp2p", branch = "ow/wasm" }
