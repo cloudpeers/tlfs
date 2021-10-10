@@ -15,6 +15,24 @@ anyhow = "1.0.44"
 rkyv = "0.7.18"
 sled = { git = "https://github.com/spacejam/sled" }
 tlfs-crdt = { version = "0.1.0", path = "crdt" }
+async-trait = "0.1.51"
+futures = "0.3.17"
+bytecheck = "0.6.5"
+ed25519-dalek = "1.0.1"
+
+[dependencies.libp2p]
+version = "0.39.1"
+default-features = false
+features = [
+    "dns-async-std",
+    "gossipsub",
+    "mplex",
+    "noise",
+    "request-response",
+    "tcp-async-io",
+    "yamux",
+    "websocket",
+]
 
 [patch.crates-io]
 libp2p = { git = "https://github.com/wngr/rust-libp2p", branch = "ow/wasm" }

@@ -367,6 +367,12 @@ impl Causal {
     }
 }
 
+impl ArchivedCausal {
+    pub fn ctx(&self) -> &Archived<CausalContext> {
+        &self.ctx
+    }
+}
+
 #[derive(
     Clone, Debug, Default, Eq, PartialEq, Hash, Ord, PartialOrd, Archive, Deserialize, Serialize,
 )]

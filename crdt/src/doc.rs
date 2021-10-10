@@ -57,7 +57,7 @@ impl Backend {
 
     pub fn register(&self, lenses: Vec<Lens>) -> Result<Hash> {
         self.registry
-            .register(Ref::archive(&Lenses::new(lenses)).into())
+            .register(Ref::archive(&Lenses::new(lenses)).as_bytes())
     }
 
     pub fn create_doc(&self, owner: PeerId) -> Result<Doc> {
@@ -279,8 +279,8 @@ impl Doc {
         self.writer.peer_id()
     }
 
-    pub fn ctx(&self) -> Result<Ref<CausalContext>> {
-        Ok(Ref::archive(&self.crdt.ctx(*self.id())?))
+    pub fn ctx(&self) -> Result<CausalContext> {
+        self.crdt.ctx(*self.id())
     }
 
     /// Returns a cursor for the document.

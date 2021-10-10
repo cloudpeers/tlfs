@@ -1,7 +1,9 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
+use bytecheck::CheckBytes;
 use rkyv::ser::serializers::AllocSerializer;
 use rkyv::ser::Serializer;
-use rkyv::{archived_root, Archive, Archived, Deserialize, Serialize};
+use rkyv::validation::validators::DefaultValidator;
+use rkyv::{archived_root, check_archived_root, Archive, Archived, Deserialize, Serialize};
 use std::marker::PhantomData;
 
 fn archive<T>(t: &T) -> Vec<u8>
@@ -25,6 +27,14 @@ impl<T: Archive> Ref<T> {
             marker: PhantomData,
             bytes,
         }
+    }
+
+    pub fn checked<'a>(buffer: &'a [u8]) -> Result<Self>
+    where
+        Archived<T>: CheckBytes<DefaultValidator<'a>> + 'static,
+    {
+        check_archived_root::<T>(buffer).map_err(|err| anyhow!("{}", err))?;
+        Ok(Self::new(buffer.into()))
     }
 
     pub fn archive(t: &T) -> Self

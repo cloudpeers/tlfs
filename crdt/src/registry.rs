@@ -18,17 +18,16 @@ impl Registry {
         Self(tree)
     }
 
-    pub fn register(&self, lenses: Vec<u8>) -> Result<Hash> {
-        let lenses_ref =
-            check_archived_root::<Lenses>(&lenses[..]).map_err(|err| anyhow!("{}", err))?;
+    pub fn register(&self, lenses: &[u8]) -> Result<Hash> {
+        let lenses_ref = check_archived_root::<Lenses>(lenses).map_err(|err| anyhow!("{}", err))?;
         let schema = lenses_ref.to_schema()?;
-        let hash = blake3::hash(&lenses[..]);
+        let hash = blake3::hash(lenses);
         let mut key1 = [0; 33];
         key1[..32].copy_from_slice(hash.as_bytes());
         let mut key2 = key1;
         key2[32] = 1;
         self.0.transaction::<_, _, std::io::Error>(|tree| {
-            tree.insert(&key1[..], &lenses[..])?;
+            tree.insert(&key1[..], lenses)?;
             tree.insert(&key2[..], &schema[..])?;
             Ok(())
         })?;

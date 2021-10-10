@@ -1,5 +1,5 @@
-mod doc;
 mod secrets;
+mod sync;
 
-pub use crate::doc::Doc;
-pub use crate::secrets::Secrets;
+pub use crate::secrets::{Metadata, Secrets};
+pub use crate::sync::Behaviour;
