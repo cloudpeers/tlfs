@@ -49,6 +49,7 @@ impl From<&str> for Primitive {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FlatDotStore(BTreeMap<PathBuf, Vec<u8>>);
 
 fn archive<T>(value: &T) -> Vec<u8>
@@ -123,8 +124,12 @@ fn pair_to_dot_store(mut path: Path<'_>, value: &[u8]) -> anyhow::Result<DotStor
                 res.insert(key.to_owned(), store);
                 store = DotStore::Struct(res);
             }
-            _ => {
-                panic!()
+            Some(DotStoreType::Root) => {
+                let doc = parent.doc();
+            }
+            None => {}
+            x => {
+                panic!("unexpected parent type {:?} {:?}", x, parent)
             }
         }
         path = parent;
@@ -144,7 +149,7 @@ fn iter<'a>(
         })),
         DotStore::DotFun(s) => Box::new(s.iter().map(move |(dot, value)| {
             let mut path = prefix.clone();
-            path.dotset(&dot);
+            path.dotfun(&dot);
             (path, archive(value))
         })),
         DotStore::DotMap(s) => Box::new(s.iter().flat_map(move |(k, v)| {
@@ -1313,6 +1318,19 @@ mod tests {
             let actx = Ref::archive(&ctx);
             let c2 = crdt.unjoin(&peer_id, actx.as_ref()).unwrap();
             assert_eq!(c, c2);
+        }
+
+        #[test]
+        fn flat_dotstore(ds in arb_non_empty_dotstore(), id in arb_doc_id()) {
+            let prefix = PathBuf::new(id);
+            let flat = FlatDotStore::from_dot_store(&ds, prefix);
+            let ds2 = flat.into_dot_store().unwrap();
+            if ds != ds2 {
+                for (k, v) in flat.0 {
+                    println!("{} {:?}", k.as_path(), v);
+                }
+                assert_eq!(ds, ds2);
+            }
         }
     }
 }
