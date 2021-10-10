@@ -1,4 +1,4 @@
-use crate::{DotStore, Primitive};
+use crate::{DotStore, Primitive, crdt::FlatDotStore};
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Serialize};
 use std::collections::BTreeMap;
@@ -40,7 +40,13 @@ pub enum Schema {
 }
 
 impl ArchivedSchema {
-    pub fn validate(&self, v: &DotStore) -> bool {
+
+    pub fn validate(&self, v: &FlatDotStore) -> bool {
+        let store = v.to_dot_store().unwrap();
+        self.validate0(&store)
+    }
+
+    fn validate0(&self, v: &DotStore) -> bool {
         match (self, v) {
             (Self::Null, DotStore::Null) => true,
             (Self::Flag, DotStore::DotSet(_)) => true,
@@ -57,7 +63,7 @@ impl ArchivedSchema {
                     if !kind.validate(key) {
                         return false;
                     }
-                    if !schema.validate(crdt) {
+                    if !schema.validate0(crdt) {
                         return false;
                     }
                 }
@@ -71,7 +77,7 @@ impl ArchivedSchema {
                 }*/
                 for (prop, crdt) in fields {
                     if let Some(schema) = schema.get(prop.as_str()) {
-                        if !schema.validate(crdt) {
+                        if !schema.validate0(crdt) {
                             return false;
                         }
                     } else {

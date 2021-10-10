@@ -1,7 +1,5 @@
-use crate::{
-    AbstractDotSet, Causal, CausalContext, Crdt, DocId, Dot, DotSet, DotStore, Kind, Lens, Lenses,
-    PeerId, Primitive, PrimitiveKind, Prop, Ref, Schema,
-};
+use crate::crdt::FlatDotStore;
+use crate::{AbstractDotSet, Causal, CausalContext, Crdt, DocId, Dot, DotSet, DotStore, Kind, Lens, Lenses, Path, PeerId, Primitive, PrimitiveKind, Prop, Ref, Schema};
 use proptest::collection::SizeRange;
 use proptest::prelude::*;
 use std::collections::BTreeMap;
@@ -80,6 +78,22 @@ fn arb_dotfun(
 
 fn arb_dotmap(
     kind: PrimitiveKind,
+    inner: impl Strategy<Value = FlatDotStore>,
+    size: impl Into<SizeRange>,
+) -> impl Strategy<Value = BTreeMap<Primitive, FlatDotStore>> {
+    prop::collection::btree_map(arb_primitive_for_kind(kind), inner, size)
+        .prop_map(|map| map.into_iter().filter(|(_, v)| !v.is_empty()).collect())
+}
+
+fn arb_struct(
+    inner: impl Strategy<Value = FlatDotStore>,
+    size: impl Into<SizeRange>,
+) -> impl Strategy<Value = BTreeMap<String, FlatDotStore>> {
+    prop::collection::btree_map(arb_prop(), inner, size)
+}
+
+fn arb_hdotmap(
+    kind: PrimitiveKind,
     inner: impl Strategy<Value = DotStore>,
     size: impl Into<SizeRange>,
 ) -> impl Strategy<Value = BTreeMap<Primitive, DotStore>> {
@@ -87,52 +101,51 @@ fn arb_dotmap(
         .prop_map(|map| map.into_iter().filter(|(_, v)| !v.is_empty()).collect())
 }
 
-fn arb_struct(
+fn arb_hstruct(
     inner: impl Strategy<Value = DotStore>,
     size: impl Into<SizeRange>,
 ) -> impl Strategy<Value = BTreeMap<String, DotStore>> {
     prop::collection::btree_map(arb_prop(), inner, size)
 }
 
-pub fn arb_dotstore() -> impl Strategy<Value = DotStore> {
+pub fn arb_flatdotstore() -> impl Strategy<Value = FlatDotStore> {
     let leaf = prop_oneof![
-        arb_dotset(0..10).prop_map(DotStore::DotSet),
+        arb_dotset(0..10).prop_map(|x| FlatDotStore::dotset(Path::empty(), &x)),
         arb_primitive_kind()
-            .prop_flat_map(|kind| arb_dotfun(kind, 0..10).prop_map(DotStore::DotFun)),
+            .prop_flat_map(|kind| arb_dotfun(kind, 0..10).prop_map(|x| FlatDotStore::dotfun(Path::empty(), x))),
     ];
     leaf.prop_recursive(8, 256, 10, |inner| {
         let inner2 = inner.clone();
         prop_oneof![
             arb_primitive_kind().prop_flat_map(
-                move |kind| arb_dotmap(kind, inner2.clone(), 0..10).prop_map(DotStore::DotMap)
+                move |kind| arb_dotmap(kind, inner2.clone(), 0..10).prop_map(|x| FlatDotStore::dotmap(Path::empty(), x))
             ),
-            arb_struct(inner, 0..10).prop_map(DotStore::Struct),
+            arb_struct(inner, 0..10).prop_map(|x| FlatDotStore::strct(Path::empty(), x)),
         ]
     })
 }
 
-pub fn arb_non_empty_dotstore() -> impl Strategy<Value = DotStore> {
+pub fn arb_non_empty_dotstore() -> impl Strategy<Value = FlatDotStore> {
     let leaf = prop_oneof![
-        arb_dotset(1..10).prop_map(DotStore::DotSet),
+        arb_dotset(1..10).prop_map(|x| FlatDotStore::dotset(Path::empty(), &x)),
         arb_primitive_kind()
-            .prop_flat_map(|kind| arb_dotfun(kind, 1..10).prop_map(DotStore::DotFun)),
+            .prop_flat_map(|kind| arb_dotfun(kind, 1..10).prop_map(|x| FlatDotStore::dotfun(Path::empty(), x))),
     ];
     leaf.prop_recursive(8, 256, 10, |inner| {
         let inner2 = inner.clone();
         prop_oneof![
             arb_primitive_kind().prop_flat_map(
-                move |kind| arb_dotmap(kind, inner2.clone(), 1..10).prop_map(DotStore::DotMap)
+                move |kind| arb_dotmap(kind, inner2.clone(), 1..10).prop_map(|x| FlatDotStore::dotmap(Path::empty(), x))
             ),
-            arb_struct(inner, 1..10).prop_map(DotStore::Struct),
+            arb_struct(inner, 1..10).prop_map(|x| FlatDotStore::strct(Path::empty(), x)),
         ]
     })
     .prop_filter("non_empty", |x| !x.is_empty())
 }
 
-pub fn arb_causal(store: impl Strategy<Value = DotStore>) -> impl Strategy<Value = Causal> {
+pub fn arb_causal(store: impl Strategy<Value = crate::crdt::FlatDotStore>) -> impl Strategy<Value = Causal> {
     store.prop_map(|store| {
-        let mut dots = DotSet::new();
-        store.dots(&mut dots);
+        let dots = store.dots().collect::<DotSet>();
         let mut present = BTreeMap::new();
         for dot in dots.iter() {
             let counter = dot.counter();
@@ -167,21 +180,25 @@ pub fn arb_schema() -> impl Strategy<Value = Schema> {
     })
 }
 
-pub fn arb_dotstore_for_schema(s: Schema) -> BoxedStrategy<DotStore> {
+pub fn arb_hdotstore_for_schema(s: Schema) -> BoxedStrategy<DotStore> {
     match s {
         Schema::Null => Just(DotStore::Null).boxed(),
         Schema::Flag => arb_dotset(0..10).prop_map(DotStore::DotSet).boxed(),
         Schema::Reg(kind) => arb_dotfun(kind, 0..10).prop_map(DotStore::DotFun).boxed(),
-        Schema::Table(kind, schema) => arb_dotmap(kind, arb_dotstore_for_schema(*schema), 0..10)
+        Schema::Table(kind, schema) => arb_hdotmap(kind, arb_hdotstore_for_schema(*schema), 0..10)
             .prop_map(DotStore::DotMap)
             .boxed(),
         Schema::Struct(fields) => fields
             .into_iter()
-            .map(|(k, s)| arb_dotstore_for_schema(s).prop_map(move |v| (k.clone(), v)))
+            .map(|(k, s)| arb_hdotstore_for_schema(s).prop_map(move |v| (k.clone(), v)))
             .collect::<Vec<_>>()
             .prop_map(|v| DotStore::Struct(v.into_iter().collect()))
             .boxed(),
     }
+}
+
+pub fn arb_dotstore_for_schema(s: Schema) -> BoxedStrategy<FlatDotStore> {
+    arb_hdotstore_for_schema(s).prop_map(|x| FlatDotStore::from_dot_store(&x, Path::empty().to_owned())).boxed()
 }
 
 pub fn validate(schema: &Schema, value: &Causal) -> bool {

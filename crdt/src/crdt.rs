@@ -48,8 +48,13 @@ impl From<&str> for Primitive {
         Self::Str(s.to_string())
     }
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize, Default)]
+#[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
+#[archive_attr(derive(CheckBytes))]
+#[archive_attr(check_bytes(
+    bound = "__C: rkyv::validation::ArchiveContext, <__C as rkyv::Fallible>::Error: std::error::Error"
+))]
+#[repr(C)]
 pub struct FlatDotStore(BTreeMap<PathBuf, Vec<u8>>);
 
 fn archive<T>(value: &T) -> Vec<u8>
@@ -111,6 +116,55 @@ fn join_policy(a: &mut Vec<u8>, r: &[u8]) {
 }
 
 impl FlatDotStore {
+
+    pub fn policy(path: Path, args: BTreeMap<Dot, BTreeSet<Policy>>) -> Self {
+        Self(args.iter().map(|(dot, policies)| {
+            let mut path = path.to_owned();
+            path.policy(dot);
+            (path, archive(policies))
+        }).collect())
+    }
+
+    pub fn dotfun(path: Path, args: BTreeMap<Dot, Primitive>) -> Self {
+        Self(args.iter().map(|(dot, primitive)| {
+            let mut path = path.to_owned();
+            path.dotfun(&dot);
+            (path, archive(primitive))
+        }).collect())
+    }
+
+    pub fn dotset(path: Path, args: &DotSet) -> Self {
+        Self(args.iter().map(|dot| {
+            let mut path = path.to_owned();
+            path.dotset(&dot);
+            (path, Vec::new())
+        }).collect())
+    }
+
+    pub fn dotmap(path: Path, args: BTreeMap<Primitive, Self>) -> Self {
+        let entries = args.into_iter().flat_map(move |(key, store)| {
+            store.0.into_iter().map(move |(k, v)| (key.clone(), k, v))
+        });
+        Self(entries.map(|(key, k, v)| {
+            let mut path = path.to_owned();
+            path.key(&key);
+            path.0.extend(k.0.into_iter());
+            (path, v)
+        }).collect())
+    }
+
+    pub fn strct(path: Path, args: BTreeMap<String, Self>) -> Self {
+        let entries = args.into_iter().flat_map(move |(field, store)| {
+            store.0.into_iter().map(move |(k, v)| (field.clone(), k, v))
+        });
+        Self(entries.map(|(field, k, v)| {
+            let mut path = path.to_owned();
+            path.field(&field);
+            path.0.extend(k.0.into_iter());
+            (path, v)
+        }).collect())
+    }
+
     fn assert_invariants(&self) {
         debug_assert!(self.0.keys().all(|x| !x.as_path().is_empty()));
         debug_assert!(self.0.keys().all(|x| {
@@ -142,6 +196,9 @@ impl FlatDotStore {
                             true
                         }
                         DotStoreType::Set => {
+                            if !v.is_empty() {
+                                println!("{:?}", v);
+                            }
                             assert!(v.is_empty());
                             assert!(w.is_empty());
                             // if we get here, the dot exists on both sides
@@ -245,6 +302,10 @@ impl FlatDotStore {
             agg.merge(&elem);
             agg
         }))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 }
 
@@ -647,7 +708,7 @@ impl ArchivedCausalContext {
 #[repr(C)]
 pub struct Causal {
     pub(crate) ctx: CausalContext,
-    pub(crate) store: DotStore,
+    pub(crate) store: FlatDotStore,
 }
 
 impl Causal {
@@ -655,25 +716,16 @@ impl Causal {
         &self.ctx
     }
 
-    pub fn store(&self) -> &DotStore {
+    pub fn store(&self) -> &FlatDotStore {
         &self.store
     }
 
     pub fn join(&mut self, other: &Causal) {
         assert_eq!(self.ctx().doc(), &other.ctx.doc);
         assert_eq!(&self.ctx().schema, &other.ctx.schema);
-        // reference
-        let path = PathBuf::new(self.ctx.doc);
-        let mut l = FlatDotStore::from_dot_store(&self.store, path.clone());
-        let r = FlatDotStore::from_dot_store(&other.store, path.clone());
-        l.join(&self.ctx.dots, &r, &other.ctx.dots);
-        let res = l.to_dot_store().unwrap();
 
         self.store
             .join(&self.ctx.dots, &other.store, &other.ctx.dots);
-        if res != DotStore::Null {
-            assert_eq!(self.store, res);
-        }
         self.ctx.dots.union(&other.ctx.dots);
     }
 
@@ -830,27 +882,6 @@ impl<'a> Path<'a> {
         dot
     }
 
-    fn wrap(&self, mut causal: Causal) -> Result<Causal> {
-        use DotStoreType::*;
-        match self.ty() {
-            Some(Map) => {
-                let mut map = BTreeMap::new();
-                let key = self.key().to_owned()?;
-                map.insert(key, causal.store);
-                causal.store = DotStore::DotMap(map);
-                self.parent().unwrap().wrap(causal)
-            }
-            Some(Struct) => {
-                let mut map = BTreeMap::new();
-                map.insert(self.field().to_string(), causal.store);
-                causal.store = DotStore::Struct(map);
-                self.parent().unwrap().wrap(causal)
-            }
-            Some(Root) => Ok(causal),
-            ty => Err(anyhow!("invalid path {:?}", ty)),
-        }
-    }
-
     pub fn root(&self) -> Option<DocId> {
         let first = self.first();
         if let Some(DotStoreType::Root) = first.ty() {
@@ -870,6 +901,10 @@ impl<'a> Path<'a> {
 
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    pub fn empty() -> Self {
+        Self(&[])
     }
 }
 
@@ -1158,7 +1193,8 @@ impl Crdt {
 
     pub fn join(&self, peer_id: &PeerId, causal: &Causal) -> Result<()> {
         let mut path = PathBuf::new(causal.ctx.doc);
-        self.join_store(&mut path, peer_id, &causal.store, &causal.ctx.dots)?;
+        let causal_store = causal.store.to_dot_store().unwrap();
+        self.join_store(&mut path, peer_id, &causal_store, &causal.ctx.dots)?;
         for peer_id in causal.ctx.dots.peers() {
             self.docs
                 .extend_present(&causal.ctx.doc, peer_id, causal.ctx.dots.max(peer_id))?;
@@ -1207,7 +1243,7 @@ impl Crdt {
                 schema: ctx.schema,
                 dots: diff,
             },
-            store: DotStore::Null,
+            store: FlatDotStore::default(),
         })
     }
 
@@ -1234,11 +1270,10 @@ impl Crdt {
         let mut ctx = self.empty_ctx(path)?;
         let dot = writer.dot();
         ctx.dots.insert(dot);
-        let causal = Causal {
-            store: DotStore::DotSet(ctx.dots.clone()),
+        Ok(Causal {
+            store: FlatDotStore::dotset(path, &ctx.dots),
             ctx,
-        };
-        path.wrap(causal)
+        })
     }
 
     pub fn disable(&self, path: Path, writer: &Writer) -> Result<Causal> {
@@ -1248,11 +1283,10 @@ impl Crdt {
         let mut ctx = self.ctx(path)?;
         let dot = writer.dot();
         ctx.dots.insert(dot);
-        let causal = Causal {
-            store: DotStore::DotSet(Default::default()),
+        Ok(Causal {
+            store: FlatDotStore::dotset(path, &Default::default()),
             ctx,
-        };
-        path.wrap(causal)
+        })
     }
 
     pub fn is_enabled(&self, path: Path<'_>) -> bool {
@@ -1268,11 +1302,10 @@ impl Crdt {
         ctx.dots.insert(dot);
         let mut store = BTreeMap::new();
         store.insert(dot, v);
-        let causal = Causal {
-            store: DotStore::DotFun(store),
+        Ok(Causal {
+            store: FlatDotStore::dotfun(path, store),
             ctx,
-        };
-        path.wrap(causal)
+        })
     }
 
     pub fn values(&self, path: Path<'_>) -> impl Iterator<Item = sled::Result<Ref<Primitive>>> {
@@ -1299,11 +1332,10 @@ impl Crdt {
             let dot = key.dot();
             ctx.dots.insert(dot);
         }
-        let causal = Causal {
-            store: DotStore::DotMap(Default::default()),
+        Ok(Causal {
+            store: FlatDotStore::default(),
             ctx,
-        };
-        path.wrap(causal)
+        })
     }
 
     pub fn say(&self, path: Path, writer: &Writer, policy: Policy) -> Result<Causal> {
@@ -1326,11 +1358,10 @@ impl Crdt {
         set.insert(policy);
         let mut store = BTreeMap::new();
         store.insert(dot, set);
-        let causal = Causal {
-            store: DotStore::Policy(store),
+        Ok(Causal {
+            store: FlatDotStore::policy(path, store),
             ctx,
-        };
-        path.wrap(causal)
+        })
     }
 
     pub fn transform(
@@ -1447,25 +1478,25 @@ mod tests {
 
     proptest! {
         #[test]
-        fn causal_unjoin(a in arb_causal(arb_non_empty_dotstore()), b in arb_causal_ctx()) {
+        fn causal_unjoin(a in arb_causal(arb_flatdotstore()), b in arb_causal_ctx()) {
             let b = a.unjoin(&b);
             prop_assert_eq!(join(&a, &b), a);
         }
 
         #[test]
-        fn causal_join_idempotent(a in arb_causal(arb_non_empty_dotstore())) {
+        fn causal_join_idempotent(a in arb_causal(arb_flatdotstore())) {
             prop_assert_eq!(join(&a, &a), a);
         }
 
         #[test]
-        fn causal_join_commutative(dots in arb_causal(arb_non_empty_dotstore()), a in arb_causal_ctx(), b in arb_causal_ctx()) {
+        fn causal_join_commutative(dots in arb_causal(arb_flatdotstore()), a in arb_causal_ctx(), b in arb_causal_ctx()) {
             let a = dots.unjoin(&a);
             let b = dots.unjoin(&b);
             prop_assert_eq!(join(&a, &b), join(&b, &a));
         }
 
         #[test]
-        fn causal_join_associative(dots in arb_causal(arb_non_empty_dotstore()), a in arb_causal_ctx(), b in arb_causal_ctx(), c in arb_causal_ctx()) {
+        fn causal_join_associative(dots in arb_causal(arb_flatdotstore()), a in arb_causal_ctx(), b in arb_causal_ctx(), c in arb_causal_ctx()) {
             let a = dots.unjoin(&a);
             let b = dots.unjoin(&b);
             let c = dots.unjoin(&c);
@@ -1475,7 +1506,7 @@ mod tests {
         #[test]
         #[ignore]
         // TODO: crdt can infer defaults from path, causal just sets it to null
-        fn crdt_join(dots in arb_causal(arb_dotstore()), a in arb_causal_ctx(), b in arb_causal_ctx()) {
+        fn crdt_join(dots in arb_causal(arb_flatdotstore()), a in arb_causal_ctx(), b in arb_causal_ctx()) {
             let a = dots.unjoin(&a);
             let b = dots.unjoin(&b);
             let crdt = causal_to_crdt(&a);
@@ -1487,26 +1518,13 @@ mod tests {
 
         #[test]
         #[ignore]
-        fn crdt_unjoin(causal in arb_causal(arb_dotstore()), ctx in arb_causal_ctx()) {
+        fn crdt_unjoin(causal in arb_causal(arb_flatdotstore()), ctx in arb_causal_ctx()) {
             let peer_id = PeerId::new([0; 32]);
             let crdt = causal_to_crdt(&causal);
             let c = causal.unjoin(&ctx);
             let actx = Ref::archive(&ctx);
             let c2 = crdt.unjoin(&peer_id, actx.as_ref()).unwrap();
             assert_eq!(c, c2);
-        }
-
-        #[test]
-        fn flat_dotstore(ds in arb_non_empty_dotstore(), id in arb_doc_id()) {
-            let prefix = PathBuf::new(id);
-            let flat = FlatDotStore::from_dot_store(&ds, prefix);
-            let ds2 = flat.to_dot_store().unwrap();
-            if ds != ds2 {
-                for (k, v) in flat.0 {
-                    println!("{} {:?}", k.as_path(), v);
-                }
-                assert_eq!(ds, ds2);
-            }
         }
     }
 }
