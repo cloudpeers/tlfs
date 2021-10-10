@@ -103,14 +103,20 @@ impl<K, V> InPlaceRelationalOps<K, V> for BTreeMap<K, V> {
     }
 }
 
+fn join_policy(a: &mut Vec<u8>, r: &[u8]) {
+    let mut l: BTreeSet<Policy> = unarchive(a.as_ref()).unwrap();
+    let r: BTreeSet<Policy> = unarchive(r).unwrap();
+    l.extend(r.into_iter());
+    *a = archive(&l);
+}
+
 impl FlatDotStore {
     fn assert_invariants(&self) {
-        self.0.keys().all(|x| !x.as_path().is_empty());
-        self.0.keys().all(|x| {
-            x.as_path().ty() == Some(DotStoreType::Policy)
-                || x.as_path().ty() == Some(DotStoreType::Set)
-                || x.as_path().ty() == Some(DotStoreType::Fun)
-        });
+        debug_assert!(self.0.keys().all(|x| !x.as_path().is_empty()));
+        debug_assert!(self.0.keys().all(|x| {
+            let t = x.as_path().ty().unwrap();
+            t == DotStoreType::Policy || t == DotStoreType::Set || t == DotStoreType::Fun
+        }));
     }
 
     pub fn dots(&self) -> impl Iterator<Item = Dot> + '_ {
@@ -123,7 +129,105 @@ impl FlatDotStore {
         that: &Self,
         that_ctx: &impl AbstractDotSet<PeerId>,
     ) {
-        self.0.outer_join_with(&that.0, |k, v, w| true, |k, w| None);
+        self.0.outer_join_with(
+            &that.0,
+            |k, v, w| {
+                let ty = k.as_path().ty().unwrap();
+                let dot = k.as_path().dot();
+                if let Some(w) = w {
+                    match ty {
+                        DotStoreType::Policy => {
+                            // this is a grow only set, so we just merge them without looking at the contexts at all
+                            join_policy(v, w);
+                            true
+                        }
+                        DotStoreType::Set => {
+                            assert!(v.is_empty());
+                            assert!(w.is_empty());
+                            // if we get here, the dot exists on both sides
+                            // (s ∩ s')
+                            true
+                        }
+                        DotStoreType::Fun => {
+                            // { k -> m(k) ∐ m'(k), k ∈ dom m ∩ dom m' }
+                            // different value for the same dot would be a bug
+                            assert_eq!(v, w);
+                            true
+                        }
+                        _ => {
+                            panic!()
+                        }
+                    }
+                } else {
+                    match ty {
+                        DotStoreType::Policy => {
+                            // keep the policy unchanged
+                            true
+                        }
+                        DotStoreType::Set => {
+                            // only keep the dot from v if it is not in the other context
+                            // (s \ c')
+                            !that_ctx.contains(&dot)
+                        }
+                        DotStoreType::Fun => {
+                            // keep all elements unmodified that are not in the other causal context
+                            // { (d, v) ∊ m | d ∉ c' }
+                            !that_ctx.contains(&dot)
+                        }
+                        _ => {
+                            panic!()
+                        }
+                    }
+                }
+            },
+            |k, w| {
+                let ty = k.as_path().ty().unwrap();
+                let dot = k.as_path().dot();
+                match ty {
+                    DotStoreType::Policy => {
+                        // take the policy from the right
+                        Some(w.clone())
+                    }
+                    DotStoreType::Set => {
+                        // only keep the dot from w if it is not in our context
+                        // (s' \ c)
+                        if !ctx.contains(&dot) {
+                            Some(w.clone())
+                        } else {
+                            None
+                        }
+                    }
+                    DotStoreType::Fun => {
+                        // copy all elements from the other fun, that are neither in our fun nor in our
+                        // causal context
+                        // { (d, v) ∊ m' | d ∉ c }
+                        if !ctx.contains(&dot) {
+                            Some(w.clone())
+                        } else {
+                            None
+                        }
+                    }
+                    _ => {
+                        panic!()
+                    }
+                }
+            },
+        );
+    }
+
+    pub fn unjoin(&self, diff: &DotSet) -> Self {
+        Self(
+            self.0
+                .iter()
+                .filter_map(|(k, v)| {
+                    if diff.contains(&k.as_path().dot()) {
+                        Some((k.clone(), v.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+        )
     }
 
     pub fn from_dot_store(value: &DotStore, prefix: PathBuf) -> Self {
@@ -354,7 +458,7 @@ impl DotStore {
                 let b = other.difference(ctx);
                 // ((s ∩ s')
                 *set = set.intersection(other);
-                // (s ∩ s') ∪ (s \ c') (s' \ c)
+                // (s ∩ s') ∪ (s \ c') ∪ (s' \ c)
                 set.union(&a);
                 set.union(&b);
             }
