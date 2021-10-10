@@ -658,7 +658,6 @@ impl Crdt {
         other: &DotSet,
         other_ctx: &DotSet,
     ) -> Result<()> {
-        tracing::info!("join_dotset {:?} {:?}", other, other_ctx);
         if !self.can(peer, Permission::Write, path.as_path())? {
             tracing::info!("join_dotset denied");
             return Ok(());
@@ -672,10 +671,8 @@ impl Crdt {
             }
         }
         for dot in other.iter() {
-            tracing::info!("join dot {}", dot);
             if !self.docs.contains(&path.as_path().root().unwrap(), &dot)? {
                 path.dotset(&dot);
-                tracing::info!("inserting");
                 self.state.insert(&path, &[])?;
                 path.pop();
             }
@@ -836,7 +833,7 @@ impl Crdt {
 
     pub fn unjoin(&self, peer_id: &PeerId, other: &Archived<CausalContext>) -> Result<Causal> {
         let prefix = PathBuf::new(other.doc);
-        let ctx = self.ctx(prefix.as_path())?;
+        let ctx = self.ctx(other.doc)?;
         let diff = ctx.dots.difference(&other.dots);
         let mut store = DotStore::Null;
         for r in self.state.scan_prefix(prefix) {
@@ -879,8 +876,7 @@ impl Crdt {
         })
     }
 
-    fn empty_ctx(&self, path: Path) -> Result<CausalContext> {
-        let doc = path.root().unwrap();
+    fn empty_ctx(&self, doc: DocId) -> Result<CausalContext> {
         let schema = self.docs.schema_id(&doc)?;
         Ok(CausalContext {
             doc,
@@ -889,9 +885,9 @@ impl Crdt {
         })
     }
 
-    fn ctx(&self, path: Path) -> Result<CausalContext> {
-        let mut ctx = self.empty_ctx(path)?;
-        ctx.dots = DotSet::from_map(self.docs.present(&ctx.doc).collect::<Result<_>>()?);
+    pub fn ctx(&self, doc: DocId) -> Result<CausalContext> {
+        let mut ctx = self.empty_ctx(doc)?;
+        ctx.dots = DotSet::from_map(self.docs.present(&doc).collect::<Result<_>>()?);
         Ok(ctx)
     }
 
@@ -899,7 +895,7 @@ impl Crdt {
         if !self.can(writer.peer_id(), Permission::Write, path)? {
             return Err(anyhow!("unauthorized"));
         }
-        let mut ctx = self.empty_ctx(path)?;
+        let mut ctx = self.empty_ctx(path.root().unwrap())?;
         let dot = writer.dot();
         ctx.dots.insert(dot);
         let causal = Causal {
@@ -913,7 +909,7 @@ impl Crdt {
         if !self.can(writer.peer_id(), Permission::Write, path)? {
             return Err(anyhow!("unauthorized"));
         }
-        let mut ctx = self.ctx(path)?;
+        let mut ctx = self.ctx(path.root().unwrap())?;
         let dot = writer.dot();
         ctx.dots.insert(dot);
         let causal = Causal {
@@ -931,7 +927,7 @@ impl Crdt {
         if !self.can(writer.peer_id(), Permission::Write, path)? {
             return Err(anyhow!("unauthorized"));
         }
-        let mut ctx = self.ctx(path)?;
+        let mut ctx = self.ctx(path.root().unwrap())?;
         let dot = writer.dot();
         ctx.dots.insert(dot);
         let mut store = BTreeMap::new();
@@ -954,7 +950,7 @@ impl Crdt {
         if !self.can(writer.peer_id(), Permission::Write, path)? {
             return Err(anyhow!("unauthorized"));
         }
-        let mut ctx = self.empty_ctx(path)?;
+        let mut ctx = self.empty_ctx(path.root().unwrap())?;
         let dot = writer.dot();
         ctx.dots.insert(dot);
         for res in self.state.scan_prefix(path).keys() {
@@ -987,7 +983,7 @@ impl Crdt {
         } {
             return Err(anyhow!("unauthorized"));
         }
-        let mut ctx = self.empty_ctx(path)?;
+        let mut ctx = self.empty_ctx(path.root().unwrap())?;
         let dot = writer.dot();
         ctx.dots.insert(dot);
         let mut set = BTreeSet::new();
@@ -1032,7 +1028,6 @@ mod tests {
         sdk.await?;
         let op = doc.cursor().enable()?;
         assert!(!doc.cursor().enabled()?);
-        tracing::info!("{:?}", op);
         doc.join(&peer, op)?;
         assert!(doc.cursor().enabled()?);
         let op = doc.cursor().disable()?;
