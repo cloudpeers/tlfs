@@ -104,7 +104,6 @@ impl<I: ReplicaId> Default for DotSet<I> {
     }
 }
 
-// Why keep all dots around? --> Causal Context Compression?
 impl<I: ReplicaId> DotSet<I> {
     pub fn new(elems: BTreeSet<Dot<I>>) -> Self {
         elems.into_iter().collect()

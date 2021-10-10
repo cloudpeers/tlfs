@@ -1,3 +1,8 @@
+//! Identifiers in totally ordered set. It's always possible to construct a new identifier between
+//! two existing identifiers:
+//!
+//! Given Some identifiers `x`, and `z`, where `x != z`, then it's possible to construct an
+//! identifier y with `x < y < z` or `x > y > z`.
 use std::cmp::Ordering;
 
 use bytecheck::CheckBytes;
@@ -8,12 +13,12 @@ use crate::{Dot, Lattice, ReplicaId};
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(CheckBytes, Ord, PartialEq, Eq, PartialOrd))]
 #[repr(C)]
-pub struct Number {
+pub struct Position {
     mantissa: u128,
     exponent: u8,
 }
 
-impl Number {
+impl Position {
     fn new(mantissa: u128, exponent: u8) -> Self {
         Self { mantissa, exponent }
     }
@@ -33,13 +38,13 @@ impl Number {
     }
 }
 
-impl PartialOrd for Number {
+impl PartialOrd for Position {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for Number {
+impl Ord for Position {
     fn cmp(&self, other: &Self) -> Ordering {
         let exp = self.exponent.max(other.exponent);
         self.value(exp).cmp(&other.value(exp))
@@ -53,13 +58,14 @@ pub struct PositionalIdentifier<I: ReplicaId>
 where
     Archived<Dot<I>>: Ord,
 {
-    val: Number,
+    val: Position,
     id: Dot<I>,
 }
 
 impl<I: ReplicaId> Lattice for PositionalIdentifier<I> {
+    // TODO: The Lattice bound should probably be removed form the DotFun
     fn join(&mut self, other: &Self) {
-        panic!("{:?} {:?}", self, other)
+        unreachable!("{:?} {:?}", self, other)
     }
 }
 
@@ -87,9 +93,9 @@ impl<I: ReplicaId> PositionalIdentifier<I> {
     }
 }
 
-fn between(left: Option<&Number>, right: Option<&Number>) -> Number {
+fn between(left: Option<&Position>, right: Option<&Position>) -> Position {
     match (left, right) {
-        (None, None) => Number::zero(),
+        (None, None) => Position::zero(),
         (None, Some(right)) => {
             let mut r = *right;
             r.mantissa -= 1;
@@ -108,17 +114,17 @@ fn between(left: Option<&Number>, right: Option<&Number>) -> Number {
                 *left
             } else {
                 match left.exponent.cmp(&right.exponent) {
-                    Ordering::Greater => Number::new(
+                    Ordering::Greater => Position::new(
                         left.mantissa
                             + right.mantissa * 2u128.pow((left.exponent - right.exponent).into()),
                         left.exponent,
                     ),
-                    Ordering::Less => Number::new(
+                    Ordering::Less => Position::new(
                         right.mantissa
                             + left.mantissa * 2u128.pow((right.exponent - left.exponent).into()),
                         right.exponent,
                     ),
-                    Ordering::Equal => Number::new(left.mantissa + right.mantissa, left.exponent),
+                    Ordering::Equal => Position::new(left.mantissa + right.mantissa, left.exponent),
                 }
             };
             r.exponent += 1;
@@ -133,13 +139,13 @@ mod test {
 
     #[test]
     fn value() {
-        assert!(Number::new(5, 1) > Number::new(2, 0));
-        assert!(Number::new(5, 1) == Number::new(5, 1));
-        assert!(Number::new(5, 1) < Number::new(9, 0));
+        assert!(Position::new(5, 1) > Position::new(2, 0));
+        assert!(Position::new(5, 1) == Position::new(5, 1));
+        assert!(Position::new(5, 1) < Position::new(9, 0));
 
         assert_eq!(
-            between(Some(&Number::new(2, 0)), Some(&Number::new(5, 1))),
-            Number::new(9, 2)
+            between(Some(&Position::new(2, 0)), Some(&Position::new(5, 1))),
+            Position::new(9, 2)
         );
     }
 }

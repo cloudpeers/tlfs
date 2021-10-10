@@ -151,13 +151,26 @@ impl<I: ReplicaId, L: Lattice> MVReg<I, L> {
     }
 }
 
-/// Dot for initial insertion delta used as an uid
+/// Dot for initial insertion delta used as an uid for the lifetime of the pos.
 type Uid<I> = Dot<I>;
 type Metadata<I> = DotMap<Uid<I>, DotMap<Dot<I>, DotFun<I, PositionalIdentifier<I>>>>;
+//                         ^              ^             ^          ^
+//                         |              |             |          |
+//              Stable identifier         |             |          |
+//                              Dot of last update      |          |
+//                                              Dot of last move   |
+//                                                             Position
 
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(CheckBytes))]
 #[repr(C)]
+/// Observed-Remove Array (ORArray) supporting the following operations: insert, move, update, and
+/// delete.
+/// The precedence of concurrent operations is as follows: UPDATE > DELETE > MOVE.
+/// Based on [Rinberg et al. 2021], but doesn't support nested CRDTs (yet).
+///
+///
+/// [Rinberg et al. 2021]: https://dl.acm.org/doi/10.1145/3447865.3457971
 pub struct ORArray<I: ReplicaId, V> {
     meta: Metadata<I>,
     content: BTreeMap<PositionalIdentifier<I>, V>,
@@ -199,6 +212,7 @@ impl<I: ReplicaId, V: Archive + Clone + std::fmt::Debug> DotStore<I> for ORArray
         self.meta.join(ctx, &other.meta, other_ctx);
         // FIXME: Keep track of the positional diffs while joining, and then change `self.content`
         // accordingly.
+        // I didn't want to spend the time optimizing this yet, as this is still based on master..
         let all_pos = self
             .meta
             .values()
@@ -480,24 +494,6 @@ mod tests {
         map.join(&op4);
         // flag will be gone
         assert!(map.store.get("flag").is_none());
-    }
-
-    #[test]
-    fn test_or_map_string() {
-        let mut map: Causal<_, ORMap<_, MVReg<_, u64>>> = Causal::new();
-        let op1 = map.as_ref().apply(
-            "flag".to_string(),
-            |s| {
-                s.write(
-                    Dot::new(0, 1),
-                    s.store.read().next().cloned().unwrap_or_default() + 1,
-                )
-            },
-            Default::default,
-        );
-        map.join(&op1);
-        assert!(map.store.get("flag").unwrap().read().next().unwrap() == &1);
-        // set it to false
     }
 
     #[test]
