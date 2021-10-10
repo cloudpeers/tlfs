@@ -219,7 +219,7 @@ where
             .keys()
             .chain(other.map.keys())
             .cloned()
-            .collect::<Vec<_>>();
+            .collect::<BTreeSet<_>>();
         for key in all {
             let v1 = self.map.entry(key.clone()).or_default();
             let v2 = other.map.get(&key).unwrap_or(&t);

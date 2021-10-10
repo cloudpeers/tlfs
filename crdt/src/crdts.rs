@@ -160,7 +160,7 @@ type Metadata<I> = DotMap<Uid<I>, DotMap<Dot<I>, DotFun<I, PositionalIdentifier<
 #[repr(C)]
 pub struct ORArray<I: ReplicaId, V> {
     meta: Metadata<I>,
-    content: BTreeMap<PositionalIdentifier<I>, (Uid<I>, V)>,
+    content: BTreeMap<PositionalIdentifier<I>, V>,
 }
 impl<I: ReplicaId, V> Default for ORArray<I, V> {
     fn default() -> Self {
@@ -179,7 +179,7 @@ impl<I: ReplicaId, V> CheckBottom for ORArray<I, V> {
 
 impl<I: ReplicaId, V> ORArray<I, V> {
     pub fn iter(&self) -> impl Iterator<Item = &V> {
-        self.content.values().map(|(_, v)| v)
+        self.content.values()
     }
     pub fn position(&self, ix: usize) -> Option<&V> {
         self.iter().nth(ix)
@@ -197,7 +197,8 @@ impl<I: ReplicaId, V: Archive + Clone + std::fmt::Debug> DotStore<I> for ORArray
 
     fn join(&mut self, ctx: &CausalContext<I>, other: &Self, other_ctx: &CausalContext<I>) {
         self.meta.join(ctx, &other.meta, other_ctx);
-        // TODO: Optimize book-keeping. This is brutally wasteful.
+        // FIXME: Keep track of the positional diffs while joining, and then change `self.content`
+        // accordingly.
         let all_pos = self
             .meta
             .values()
@@ -234,14 +235,13 @@ impl<'a, I: ReplicaId, V: Clone> CausalRef<'a, I, ORArray<I, V>> {
                 (None, iter.next())
             }
         };
-        let pos = PositionalIdentifier::between(left, right, dot.id);
-        println!("pos: {:?}, left: {:?}, right: {:?}", pos, left, right);
+        let pos = PositionalIdentifier::between(left, right, dot);
 
         let mut delta = Causal::<_, ORArray<_, _>>::new();
         let mut inner: DotMap<Dot<I>, DotFun<I, PositionalIdentifier<I>>> = Default::default();
         inner.entry(dot).or_default().insert(dot, pos);
         delta.store.meta.insert(dot, inner);
-        delta.store.content.insert(pos, (dot, v));
+        delta.store.content.insert(pos, v);
         delta.ctx.insert(dot);
         delta
     }
@@ -249,8 +249,8 @@ impl<'a, I: ReplicaId, V: Clone> CausalRef<'a, I, ORArray<I, V>> {
     pub fn delete(self, ix: usize, dot: Dot<I>) -> Causal<I, ORArray<I, V>> {
         let mut delta = Causal::<_, ORArray<_, _>>::new();
         if let Some(pos) = self.store.content.keys().nth(ix) {
-            let (uid, _) = self.store.content.get(pos).expect("Positions in sync");
-            let v = self.store.meta.get(uid).expect("Positions in sync");
+            let uid = pos.id();
+            let v = self.store.meta.get(&uid).expect("Positions in sync");
             let mut dots = BTreeSet::new();
             v.dots(&mut dots);
             delta.ctx = dots.into_iter().chain(std::iter::once(dot)).collect();
@@ -265,25 +265,28 @@ impl<'a, I: ReplicaId, V: Clone> CausalRef<'a, I, ORArray<I, V>> {
         mut f: impl FnMut(&mut V),
     ) -> Causal<I, ORArray<I, V>> {
         let mut delta = Causal::<_, ORArray<_, _>>::new();
-        if let Some((pos, (uid, v))) = self.store.content.iter().nth(ix) {
+        if let Some((pos, v)) = self.store.content.iter().nth(ix) {
+            let uid = pos.id();
             let mut v = v.clone();
             f(&mut v);
 
             let mut dots = Default::default();
-            self.store.meta.get(uid).unwrap().dots(&mut dots);
+            self.store.meta.get(&uid).unwrap().dots(&mut dots);
             delta.ctx = dots.into_iter().collect();
 
             let mut inner: DotMap<Dot<I>, DotFun<I, PositionalIdentifier<I>>> = Default::default();
             inner.entry(dot).or_default().insert(dot, *pos);
-            delta.store.meta.insert(*uid, inner);
-            delta.store.content.insert(*pos, (*uid, v));
+            delta.store.meta.insert(uid, inner);
+            delta.store.content.insert(*pos, v);
         }
         delta.ctx.insert(dot);
         delta
     }
+
     pub fn r#move(self, ix: usize, mut to: usize, dot: Dot<I>) -> Causal<I, ORArray<I, V>> {
         let mut delta = Causal::<_, ORArray<_, _>>::new();
-        if let Some((_, (uid, v))) = self.store.content.iter().nth(ix) {
+        if let Some((pos, v)) = self.store.content.iter().nth(ix) {
+            let uid = pos.id();
             let new_pos = {
                 to = to.min(self.store.content.len());
                 let (left, right) = match to.checked_sub(1) {
@@ -296,11 +299,10 @@ impl<'a, I: ReplicaId, V: Clone> CausalRef<'a, I, ORArray<I, V>> {
                         (None, iter.next())
                     }
                 };
-                // TODO: maybe put the whole dot into the identifier and simplify the mapping?
-                PositionalIdentifier::between(left, right, dot.id)
+                PositionalIdentifier::between(left, right, uid)
             };
             let mut dots = Default::default();
-            let mut inner = self.store.meta.get(uid).unwrap().clone();
+            let mut inner = self.store.meta.get(&uid).unwrap().clone();
             inner.dots(&mut dots);
             delta.ctx = dots.into_iter().collect();
             let mut path: DotFun<I, PositionalIdentifier<I>> = Default::default();
@@ -309,8 +311,8 @@ impl<'a, I: ReplicaId, V: Clone> CausalRef<'a, I, ORArray<I, V>> {
                 *v = path.clone();
             }
 
-            delta.store.meta.insert(*uid, inner);
-            delta.store.content.insert(new_pos, (*uid, v.clone()));
+            delta.store.meta.insert(uid, inner);
+            delta.store.content.insert(new_pos, v.clone());
         }
         delta.ctx.insert(dot);
         delta

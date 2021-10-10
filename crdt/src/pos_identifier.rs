@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 
 use bytecheck::CheckBytes;
-use rkyv::{Archive, Deserialize, Serialize};
+use rkyv::{Archive, Archived, Deserialize, Serialize};
 
 use crate::{Dot, Lattice, ReplicaId};
 
@@ -49,17 +49,17 @@ impl Ord for Number {
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Archive, CheckBytes, Deserialize, Serialize)]
 #[archive_attr(derive(CheckBytes, Ord, PartialEq, Eq, PartialOrd))]
 #[repr(C)]
-pub struct PositionalIdentifier<I: ReplicaId> {
+pub struct PositionalIdentifier<I: ReplicaId>
+where
+    Archived<Dot<I>>: Ord,
+{
     val: Number,
-    // FIXME:  Make this a `Dot<I>` to simplify book-keeping
-    id: I,
+    id: Dot<I>,
 }
 
 impl<I: ReplicaId> Lattice for PositionalIdentifier<I> {
     fn join(&mut self, other: &Self) {
-        println!("{:?} {:?}", self, other)
-        // Just take the first one?
-        // FIXME
+        panic!("{:?} {:?}", self, other)
     }
 }
 
@@ -78,7 +78,10 @@ impl<I: ReplicaId + Ord> Ord for PositionalIdentifier<I> {
 }
 
 impl<I: ReplicaId> PositionalIdentifier<I> {
-    pub fn between(left: Option<&Self>, right: Option<&Self>, id: I) -> Self {
+    pub fn id(&self) -> Dot<I> {
+        self.id
+    }
+    pub fn between(left: Option<&Self>, right: Option<&Self>, id: Dot<I>) -> Self {
         let val = between(left.map(|x| x.val).as_ref(), right.map(|x| x.val).as_ref());
         Self { val, id }
     }
