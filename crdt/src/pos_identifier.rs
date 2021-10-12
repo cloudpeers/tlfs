@@ -59,6 +59,8 @@ where
     Archived<Dot<I>>: Ord,
 {
     val: Position,
+    // stable identifier of the element, uid created at insertion, dot that created the element,
+    // that this this identifier points to
     id: Dot<I>,
 }
 
