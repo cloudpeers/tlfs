@@ -119,13 +119,13 @@ fn join_policy(a: &mut Vec<u8>, r: &[u8]) {
 }
 
 impl FlatDotStore {
-    pub fn policy(path: Path, args: BTreeMap<Dot, BTreeSet<Policy>>) -> Self {
+    pub fn policy(path: Path, args: BTreeMap<Dot, Policy>) -> Self {
         Self(
             args.iter()
-                .map(|(dot, policies)| {
+                .map(|(dot, policy)| {
                     let mut path = path.to_owned();
                     path.policy(dot);
-                    (path, archive(policies))
+                    (path, archive(policy))
                 })
                 .collect(),
         )
@@ -441,7 +441,7 @@ pub enum DotStore {
         #[archive_attr(omit_bounds)]
         BTreeMap<String, DotStore>,
     ),
-    Policy(BTreeMap<Dot, BTreeSet<Policy>>),
+    Policy(BTreeMap<Dot, Policy>),
 }
 
 #[derive(
@@ -658,8 +658,7 @@ impl DotStore {
             (Self::DotSet(this), Self::DotSet(that)) => this.union(that),
             (Self::Policy(this), Self::Policy(that)) => {
                 for (k, w) in that {
-                    let v = this.entry(k.clone()).or_default();
-                    v.extend(w.iter().cloned());
+                    this.insert(k.clone(), w.clone());
                 }
             }
             (Self::DotFun(this), Self::DotFun(that)) => {
@@ -1175,25 +1174,22 @@ impl Crdt {
         &self,
         path: &mut PathBuf,
         peer: &PeerId,
-        other: &BTreeMap<Dot, BTreeSet<Policy>>,
+        other: &BTreeMap<Dot, Policy>,
         _: &DotSet,
     ) -> Result<()> {
         if !self.can(peer, Permission::Control, path.as_path())? {
             tracing::info!("join_policy denied");
             return Ok(());
         }
-        for (dot, ps) in other {
+        for (dot, policy) in other {
             path.policy(dot);
             self.state.transaction::<_, _, std::io::Error>(|tree| {
-                let mut policies = if let Some(bytes) = tree.get(path.as_ref())? {
-                    Ref::<BTreeSet<Policy>>::new(bytes).to_owned().unwrap()
+                if let Some(bytes) = tree.get(path.as_ref())? {
+                    let current = Ref::<Policy>::new(bytes).to_owned().unwrap();
+                    assert!(policy == &current);
                 } else {
-                    Default::default()
+                    tree.insert(path.as_ref(), Ref::archive(policy).as_bytes())?;
                 };
-                for policy in ps {
-                    policies.insert(policy.clone());
-                }
-                tree.insert(path.as_ref(), Ref::archive(&policies).as_bytes())?;
                 Ok(())
             })?;
             path.pop();
@@ -1315,7 +1311,7 @@ impl Crdt {
                 }
                 Some(DotStoreType::Policy) => {
                     let mut policy = BTreeMap::new();
-                    policy.insert(dot, Ref::<BTreeSet<Policy>>::new(v).to_owned()?);
+                    policy.insert(dot, Ref::<Policy>::new(v).to_owned()?);
                     DotStore::Policy(policy)
                 }
                 _ => continue,
@@ -1438,10 +1434,8 @@ impl Crdt {
         let mut ctx = self.empty_ctx(path.root().unwrap())?;
         let dot = writer.dot();
         ctx.dots.insert(dot);
-        let mut set = BTreeSet::new();
-        set.insert(policy);
         let mut store = BTreeMap::new();
-        store.insert(dot, set);
+        store.insert(dot, policy);
         Ok(Causal {
             store: FlatDotStore::policy(path, store),
             ctx,
