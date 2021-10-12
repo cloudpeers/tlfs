@@ -1,4 +1,4 @@
-use crate::{DotStore, Primitive, crdt::FlatDotStore};
+use crate::{crdt::FlatDotStore, DotStore, Primitive};
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Serialize};
 use std::collections::BTreeMap;
@@ -40,7 +40,6 @@ pub enum Schema {
 }
 
 impl ArchivedSchema {
-
     pub fn validate(&self, v: &FlatDotStore) -> bool {
         let store = v.to_dot_store().unwrap();
         self.validate0(&store)

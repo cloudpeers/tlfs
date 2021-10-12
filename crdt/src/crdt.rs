@@ -7,7 +7,10 @@ use bytecheck::CheckBytes;
 use rkyv::{
     archived_root, ser::serializers::AllocSerializer, Archive, Archived, Deserialize, Serialize,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    borrow::Borrow,
+    collections::{BTreeMap, BTreeSet},
+};
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(Debug, Eq, Hash, Ord, PartialEq, PartialOrd, CheckBytes))]
@@ -116,53 +119,72 @@ fn join_policy(a: &mut Vec<u8>, r: &[u8]) {
 }
 
 impl FlatDotStore {
-
     pub fn policy(path: Path, args: BTreeMap<Dot, BTreeSet<Policy>>) -> Self {
-        Self(args.iter().map(|(dot, policies)| {
-            let mut path = path.to_owned();
-            path.policy(dot);
-            (path, archive(policies))
-        }).collect())
+        Self(
+            args.iter()
+                .map(|(dot, policies)| {
+                    let mut path = path.to_owned();
+                    path.policy(dot);
+                    (path, archive(policies))
+                })
+                .collect(),
+        )
     }
 
     pub fn dotfun(path: Path, args: BTreeMap<Dot, Primitive>) -> Self {
-        Self(args.iter().map(|(dot, primitive)| {
-            let mut path = path.to_owned();
-            path.dotfun(&dot);
-            (path, archive(primitive))
-        }).collect())
+        Self(
+            args.iter()
+                .map(|(dot, primitive)| {
+                    let mut path = path.to_owned();
+                    path.dotfun(&dot);
+                    (path, archive(primitive))
+                })
+                .collect(),
+        )
     }
 
     pub fn dotset(path: Path, args: &DotSet) -> Self {
-        Self(args.iter().map(|dot| {
-            let mut path = path.to_owned();
-            path.dotset(&dot);
-            (path, Vec::new())
-        }).collect())
+        Self(
+            args.iter()
+                .map(|dot| {
+                    let mut path = path.to_owned();
+                    path.dotset(&dot);
+                    (path, Vec::new())
+                })
+                .collect(),
+        )
     }
 
     pub fn dotmap(path: Path, args: BTreeMap<Primitive, Self>) -> Self {
         let entries = args.into_iter().flat_map(move |(key, store)| {
             store.0.into_iter().map(move |(k, v)| (key.clone(), k, v))
         });
-        Self(entries.map(|(key, k, v)| {
-            let mut path = path.to_owned();
-            path.key(&key);
-            path.0.extend(k.0.into_iter());
-            (path, v)
-        }).collect())
+        Self(
+            entries
+                .map(|(key, k, v)| {
+                    let mut path = path.to_owned();
+                    path.key(&key);
+                    path.0.extend(k.0.into_iter());
+                    (path, v)
+                })
+                .collect(),
+        )
     }
 
     pub fn strct(path: Path, args: BTreeMap<String, Self>) -> Self {
         let entries = args.into_iter().flat_map(move |(field, store)| {
             store.0.into_iter().map(move |(k, v)| (field.clone(), k, v))
         });
-        Self(entries.map(|(field, k, v)| {
-            let mut path = path.to_owned();
-            path.field(&field);
-            path.0.extend(k.0.into_iter());
-            (path, v)
-        }).collect())
+        Self(
+            entries
+                .map(|(field, k, v)| {
+                    let mut path = path.to_owned();
+                    path.field(&field);
+                    path.0.extend(k.0.into_iter());
+                    (path, v)
+                })
+                .collect(),
+        )
     }
 
     fn assert_invariants(&self) {
@@ -171,6 +193,10 @@ impl FlatDotStore {
             let t = x.as_path().ty().unwrap();
             t == DotStoreType::Policy || t == DotStoreType::Set || t == DotStoreType::Fun
         }));
+    }
+
+    pub fn get(&self, key: &Path) -> Option<&[u8]> {
+        self.0.get(key.as_ref()).map(|x| x.as_ref())
     }
 
     pub fn dots(&self) -> impl Iterator<Item = Dot> + '_ {
@@ -754,6 +780,12 @@ impl Causal {
 #[repr(C)]
 pub struct PathBuf(Vec<u8>);
 
+impl Borrow<[u8]> for PathBuf {
+    fn borrow(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
 impl PathBuf {
     pub fn new(id: DocId) -> Self {
         let mut path = Self::default();
@@ -1184,6 +1216,62 @@ impl Crdt {
             DotMap(map) => self.join_dotmap(path, peer_id, map, other_ctx)?,
             Struct(fields) => self.join_struct(path, peer_id, fields, other_ctx)?,
             Policy(policy) => self.join_policy(path, peer_id, policy, other_ctx)?,
+        }
+        Ok(())
+    }
+
+    fn join_flat_store(
+        &self,
+        doc: DocId,
+        peer_id: PeerId,
+        that: &FlatDotStore,
+        that_ctx: &DotSet,
+    ) -> Result<()> {
+        let path = PathBuf::new(doc);
+        let mut common = BTreeSet::new();
+        for item in self.state.scan_prefix(path) {
+            let (k, v) = item?;
+            let k = Path::new(&k);
+            assert!(!k.is_empty());
+            let ty = k.ty().unwrap();
+            let dot = k.dot();
+            match that.get(&k) {
+                Some(w) => {
+                    common.insert(k.to_owned());
+                    match k.ty().unwrap() {
+                        DotStoreType::Policy => {
+                            // this is a grow only set, so we just merge them without looking at the contexts at all
+                            let mut v: BTreeSet<Policy> = unarchive(&v)?;
+                            let w: BTreeSet<Policy> = unarchive(&w)?;
+                            v.extend(w);
+                            let v = archive(&v);
+                            self.state.insert(k, v)?;
+                        }
+                        DotStoreType::Set => {
+                            assert!(v.is_empty());
+                            assert!(w.is_empty());
+                            // if we get here, the dot exists on both sides, so we keep it
+                            // (s ∩ s')
+                        }
+                        DotStoreType::Fun => {
+                            // { k -> m(k) ∐ m'(k), k ∈ dom m ∩ dom m' }
+                            // different value for the same dot would be a bug
+                            assert_eq!(v, w);
+                        }
+                        _ => panic!(),
+                    }
+                }
+                None => match k.ty().unwrap() {
+                    _ => panic!(),
+                },
+            }
+        }
+        for (k, w) in &that.0 {
+            if !common.contains(k) {
+                match k.as_path().ty().unwrap() {
+                    _ => panic!(),
+                }
+            }
         }
         Ok(())
     }
