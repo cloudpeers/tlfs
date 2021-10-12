@@ -50,6 +50,11 @@ impl Backend {
         Self::new(sled::Config::new().temporary(true).open()?)
     }
 
+    pub fn register(&self, lenses: Vec<Lens>) -> Result<Hash> {
+        self.registry
+            .register(Ref::archive(&Lenses::new(lenses)).as_bytes())
+    }
+
     pub fn registry(&self) -> &Registry {
         &self.registry
     }
@@ -96,7 +101,7 @@ impl Backend {
         self.crdt.unjoin(peer_id, ctx)
     }
 
-    pub fn transform(&mut self, id: DocId, schema_id: Hash) -> Result<()> {
+    pub fn transform(&mut self, id: DocId, schema_id: &Hash) -> Result<()> {
         let doc_schema_id = self.docs.schema_id(&id)?;
         let doc_lenses = self
             .registry
@@ -140,19 +145,14 @@ impl Frontend {
         }
     }
 
-    pub fn register(&self, lenses: Vec<Lens>) -> Result<Hash> {
-        self.registry
-            .register(Ref::archive(&Lenses::new(lenses)).as_bytes())
-    }
-
     pub fn docs(&self) -> impl Iterator<Item = Result<DocId>> + '_ {
         self.docs.docs()
     }
 
-    pub fn create_doc(&self, owner: PeerId) -> Result<Doc> {
+    pub fn create_doc(&self, owner: PeerId, schema: &Hash) -> Result<Doc> {
         let la = Keypair::generate();
         let id = DocId::new(la.peer_id().into());
-        self.docs.create(id, owner)?;
+        self.docs.create(&id, &owner, schema)?;
         let delta = self.crdt.say(
             PathBuf::new(id).as_path(),
             &Writer::new(id.into(), 0),
@@ -162,8 +162,9 @@ impl Frontend {
         self.doc(id)
     }
 
-    pub fn add_doc(&self, id: DocId, peer: PeerId) -> Result<Doc> {
+    pub fn add_doc(&self, id: DocId, peer: &PeerId, schema: &Hash) -> Result<Doc> {
         self.docs.set_peer_id(&id, peer)?;
+        self.docs.set_schema_id(&id, schema)?;
         self.doc(id)
     }
 
@@ -203,11 +204,11 @@ impl Docs {
         })
     }
 
-    pub fn create(&self, id: DocId, owner: PeerId) -> Result<()> {
+    pub fn create(&self, id: &DocId, owner: &PeerId, schema: &Hash) -> Result<()> {
         let mut key = [0; 33];
         key[..32].copy_from_slice(id.as_ref());
         key[32] = 0;
-        self.0.insert(key, EMPTY_HASH.as_ref())?;
+        self.0.insert(key, schema.as_bytes())?;
         key[32] = 1;
         self.0.insert(key, owner.as_ref())?;
         Ok(())
@@ -227,12 +228,11 @@ impl Docs {
             .unwrap_or_else(|| EMPTY_HASH.into()))
     }
 
-    pub fn set_schema_id(&self, id: &DocId, hash: Hash) -> Result<()> {
+    pub fn set_schema_id(&self, id: &DocId, hash: &Hash) -> Result<()> {
         let mut key = [0; 33];
         key[..32].copy_from_slice(id.as_ref());
         key[32] = 0;
-        let hash: [u8; 32] = hash.into();
-        self.0.insert(key, &hash)?;
+        self.0.insert(key, hash.as_bytes())?;
         Ok(())
     }
 
@@ -247,7 +247,7 @@ impl Docs {
         Ok(peer)
     }
 
-    pub fn set_peer_id(&self, id: &DocId, peer: PeerId) -> Result<()> {
+    pub fn set_peer_id(&self, id: &DocId, peer: &PeerId) -> Result<()> {
         let mut key = [0; 33];
         key[..32].copy_from_slice(id.as_ref());
         key[32] = 1;

@@ -17,14 +17,13 @@ use tlfs_crdt::{Backend, Doc, Frontend};
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::EnvFilter;
 
-pub struct Sdk {
-    frontend: Frontend,
+pub struct Migrate {
+    backend: Backend,
     secrets: Secrets,
-    swarm: mpsc::UnboundedSender<Command>,
 }
 
-impl Sdk {
-    pub async fn new(db: sled::Db) -> Result<Self> {
+impl Migrate {
+    pub fn new(db: sled::Db) -> Result<Self> {
         tracing_log::LogTracer::init().ok();
         let env = std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or_else(|_| "info".to_owned());
         let subscriber = tracing_subscriber::FmtSubscriber::builder()
@@ -36,8 +35,36 @@ impl Sdk {
         log_panics::init();
 
         let backend = Backend::new(db.clone())?;
-        let frontend = backend.frontend();
         let secrets = Secrets::new(db.open_tree("secrets")?);
+        Ok(Self { backend, secrets })
+    }
+
+    pub fn memory() -> Result<Self> {
+        Self::new(sled::Config::new().temporary(true).open()?)
+    }
+
+    pub fn register(&self, lenses: Vec<Lens>) -> Result<Hash> {
+        self.backend.register(lenses)
+    }
+
+    pub fn migrate(&mut self, doc: DocId, hash: &Hash) -> Result<()> {
+        self.backend.transform(doc, hash)
+    }
+
+    pub async fn finish(self) -> Result<Sdk> {
+        Sdk::new(self.backend, self.secrets).await
+    }
+}
+
+pub struct Sdk {
+    frontend: Frontend,
+    secrets: Secrets,
+    swarm: mpsc::UnboundedSender<Command>,
+}
+
+impl Sdk {
+    async fn new(backend: Backend, secrets: Secrets) -> Result<Self> {
+        let frontend = backend.frontend();
 
         if secrets.keypair(Metadata::new())?.is_none() {
             secrets.generate_keypair(Metadata::new())?;
@@ -88,10 +115,6 @@ impl Sdk {
         })
     }
 
-    pub async fn memory() -> Result<Self> {
-        Self::new(sled::Config::new().temporary(true).open()?).await
-    }
-
     pub fn peer_id(&self) -> Result<PeerId> {
         Ok(self.secrets.keypair(Metadata::new())?.unwrap().peer_id())
     }
@@ -118,26 +141,22 @@ impl Sdk {
         vec![]
     }
 
-    pub fn register(&self, lenses: Vec<Lens>) -> Result<Hash> {
-        self.frontend.register(lenses)
-    }
-
     pub fn docs(&self) -> impl Iterator<Item = Result<DocId>> + '_ {
         self.frontend.docs()
     }
 
-    pub fn create_doc(&self) -> Result<Doc> {
+    pub fn create_doc(&self, schema: &Hash) -> Result<Doc> {
         let peer_id = self.peer_id()?;
-        let doc = self.frontend.create_doc(peer_id)?;
+        let doc = self.frontend.create_doc(peer_id, schema)?;
         self.swarm
             .unbounded_send(Command::Subscribe(*doc.id()))
             .ok();
         Ok(doc)
     }
 
-    pub fn add_doc(&self, id: DocId) -> Result<Doc> {
+    pub fn add_doc(&self, id: DocId, schema: &Hash) -> Result<Doc> {
         let peer_id = self.peer_id()?;
-        let doc = self.frontend.add_doc(id, peer_id)?;
+        let doc = self.frontend.add_doc(id, &peer_id, schema)?;
         self.swarm
             .unbounded_send(Command::Subscribe(*doc.id()))
             .ok();
@@ -178,10 +197,7 @@ mod tests {
     #[async_std::test]
     #[ignore]
     async fn test_api() -> Result<()> {
-        let sdk = Sdk::memory().await?;
-        let doc = sdk.create_doc()?;
-        assert!(doc.cursor().can(&sdk.peer_id()?, Permission::Write)?);
-
+        let migrate = Migrate::memory()?;
         let lenses = vec![
             Lens::Make(Kind::Struct),
             Lens::AddProperty("todos".into()),
@@ -202,8 +218,11 @@ mod tests {
                 .lens_map_value()
                 .lens_in("todos"),
         ];
-        let hash = sdk.register(lenses)?;
-        sdk.transform(doc.id(), hash)?;
+        let hash = migrate.register(lenses)?;
+
+        let sdk = migrate.finish().await?;
+        let doc = sdk.create_doc(&hash)?;
+        assert!(doc.cursor().can(&sdk.peer_id()?, Permission::Write)?);
 
         let title = "something that needs to be done";
         let delta = doc
@@ -224,16 +243,16 @@ mod tests {
             .unwrap()?;
         assert_eq!(value, title);
 
-        let sdk2 = Sdk::memory().await?;
+        let sdk2 = Migrate::memory()?.finish().await?;
         let op = doc
             .cursor()
             .say_can(Some(sdk2.peer_id()?), Permission::Write)?;
         sdk.apply(op)?;
 
-        for addr in sdk.addresses() {
+        for addr in sdk.addresses().await {
             sdk2.add_address(sdk.peer_id()?, addr);
         }
-        let doc2 = sdk2.add_doc(*doc.id())?;
+        let doc2 = sdk2.add_doc(*doc.id(), &hash)?;
         // TODO: wait for unjoin
 
         let value = doc2

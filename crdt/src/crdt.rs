@@ -1006,7 +1006,7 @@ impl Crdt {
     pub fn transform(
         &self,
         doc: &DocId,
-        schema_id: Hash,
+        schema_id: &Hash,
         from: &ArchivedLenses,
         to: &ArchivedLenses,
     ) -> Result<()> {
