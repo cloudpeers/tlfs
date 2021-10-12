@@ -12,7 +12,7 @@ use libp2p::request_response::{
     RequestResponseConfig,
 };
 use libp2p::swarm::NetworkBehaviourEventProcess;
-use libp2p::NetworkBehaviour;
+use libp2p::{Multiaddr, NetworkBehaviour};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::io;
 use std::pin::Pin;
@@ -174,6 +174,15 @@ impl Behaviour {
 
     pub fn secrets(&self) -> &Secrets {
         &self.secrets
+    }
+
+    pub fn add_address(&mut self, peer: &PeerId, addr: Multiaddr) {
+        self.req.add_address(&peer.to_libp2p().into_peer_id(), addr);
+    }
+
+    pub fn remove_address(&mut self, peer: &PeerId, addr: &Multiaddr) {
+        self.req
+            .remove_address(&peer.to_libp2p().into_peer_id(), addr);
     }
 
     pub fn request_lenses(&mut self, peer_id: &libp2p::PeerId, hash: Hash) -> RequestId {

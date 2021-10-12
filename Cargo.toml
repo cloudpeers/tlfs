@@ -42,3 +42,6 @@ features = [
 [patch.crates-io]
 libp2p = { git = "https://github.com/wngr/rust-libp2p", branch = "ow/wasm" }
 instant = { git = "https://github.com/wngr/instant", branch = "systemtime" }
+
+[dev-dependencies]
+async-std = { version = "1.10.0", features = ["attributes"] }
