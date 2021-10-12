@@ -3504,14 +3504,19 @@ name = "tlfs"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-global-executor",
  "async-trait",
  "bytecheck",
  "ed25519-dalek",
  "futures",
  "libp2p 0.39.1",
+ "log-panics",
  "rkyv",
  "sled",
  "tlfs-crdt",
+ "tracing",
+ "tracing-log",
+ "tracing-subscriber",
 ]
 
 [[package]]

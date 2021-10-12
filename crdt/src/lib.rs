@@ -20,7 +20,7 @@ pub use crate::crypto::{
     ArchivedEncrypted, ArchivedSigned, Encrypted, Key, KeyNonce, Keypair, Signed,
 };
 pub use crate::cursor::Cursor;
-pub use crate::doc::{Backend, Doc, Docs, Writer};
+pub use crate::doc::{Backend, Doc, Docs, Frontend, Writer};
 pub use crate::id::{DocId, PeerId};
 pub use crate::lens::{ArchivedKind, ArchivedLens, ArchivedLenses, Kind, Lens, LensRef, Lenses};
 pub use crate::registry::{Hash, Registry, EMPTY_HASH, EMPTY_LENSES, EMPTY_SCHEMA};

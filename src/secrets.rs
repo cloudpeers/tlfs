@@ -49,6 +49,7 @@ impl AsRef<[u8]> for Metadata {
     }
 }
 
+#[derive(Clone)]
 pub struct Secrets(sled::Tree);
 
 impl Secrets {

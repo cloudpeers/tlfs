@@ -15,6 +15,8 @@ use libp2p::swarm::NetworkBehaviourEventProcess;
 use libp2p::NetworkBehaviour;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::io;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use tlfs_crdt::{
     Backend, Causal, CausalContext, DocId, Hash, Key, Keypair, PeerId, Permission, Ref, Signed,
 };
@@ -140,9 +142,6 @@ pub struct Behaviour {
 
 impl Behaviour {
     pub fn new(backend: Backend, secrets: Secrets) -> Result<Self> {
-        if secrets.keypair(Metadata::new())?.is_none() {
-            secrets.generate_keypair(Metadata::new())?;
-        }
         let peer_id = secrets
             .keypair(Metadata::new())?
             .unwrap()
@@ -167,6 +166,10 @@ impl Behaviour {
 
     pub fn backend(&self) -> &Backend {
         &self.backend
+    }
+
+    pub fn poll_backend(&mut self, cx: &mut Context) -> Poll<Result<()>> {
+        Pin::new(&mut self.backend).poll(cx)
     }
 
     pub fn secrets(&self) -> &Secrets {
@@ -243,10 +246,8 @@ impl NetworkBehaviourEventProcess<GossipsubEvent> for Behaviour {
                             if let Ok(true) =
                                 self.backend.registry().contains(&causal.ctx().schema())
                             {
-                                if let Ok(doc) = self.backend.doc(doc) {
-                                    doc.join(&peer_id, causal).ok();
-                                    // TODO: detect missing updates and request unjoin
-                                }
+                                self.backend.join(&peer_id, causal).ok();
+                                // TODO: detect missing updates and request unjoin
                             } else {
                                 // TODO: request lenses
                             }
@@ -309,12 +310,10 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
                             }
                             Unjoin(ctx) => {
                                 if let Ok(peer) = libp2p_peer_id(&peer) {
-                                    if let Ok(doc) = self.backend.doc(*ctx.doc()) {
-                                        if let Ok(causal) = doc.unjoin(&peer, ctx) {
-                                            let resp = SyncResponse::Unjoin(causal);
-                                            let resp = Ref::archive(&resp);
-                                            self.req.send_response(channel, resp).ok();
-                                        }
+                                    if let Ok(causal) = self.backend.unjoin(&peer, ctx) {
+                                        let resp = SyncResponse::Unjoin(causal);
+                                        let resp = Ref::archive(&resp);
+                                        self.req.send_response(channel, resp).ok();
                                     }
                                 }
                             }
@@ -342,13 +341,11 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
                                     if let Ok(true) =
                                         self.backend.registry().contains(&causal.ctx().schema())
                                     {
-                                        if let Ok(doc) = self.backend.doc(*causal.ctx().doc()) {
-                                            // TODO: don't deserialize
-                                            if let Ok(causal) =
-                                                causal.deserialize(&mut rkyv::Infallible)
-                                            {
-                                                doc.join(&peer, causal).ok();
-                                            }
+                                        // TODO: don't deserialize
+                                        if let Ok(causal) =
+                                            causal.deserialize(&mut rkyv::Infallible)
+                                        {
+                                            self.backend.join(&peer, causal).ok();
                                         }
                                     } else {
                                         // TODO: request lenses
