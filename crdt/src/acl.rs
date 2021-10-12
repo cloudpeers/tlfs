@@ -311,19 +311,15 @@ impl Engine {
         let dot = path.dot();
         let id = PolicyId::new(path.root().unwrap(), dot.id, dot.counter());
         let path = path.parent().unwrap();
-        let policies = Ref::<BTreeSet<Policy>>::new(value).to_owned().unwrap();
-        for policy in policies {
-            let says = match policy {
-                Policy::Can(actor, perm) => Says::Can(id, Can::new(actor, perm, path.to_owned())),
-                Policy::CanIf(actor, perm, cond) => {
-                    Says::CanIf(id, Can::new(actor, perm, path.to_owned()), cond)
-                }
-                Policy::Revokes(dot) => {
-                    Says::Revokes(id, PolicyId::new(id.doc, dot.id, dot.counter()))
-                }
-            };
-            self.policy.insert(says);
-        }
+        let policy = Ref::<Policy>::new(value).to_owned().unwrap();
+        let says = match policy {
+            Policy::Can(actor, perm) => Says::Can(id, Can::new(actor, perm, path.to_owned())),
+            Policy::CanIf(actor, perm, cond) => {
+                Says::CanIf(id, Can::new(actor, perm, path.to_owned()), cond)
+            }
+            Policy::Revokes(dot) => Says::Revokes(id, PolicyId::new(id.doc, dot.id, dot.counter())),
+        };
+        self.policy.insert(says);
     }
 
     fn update_rules(&self) -> Result<()> {
