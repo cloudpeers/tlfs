@@ -47,7 +47,8 @@ impl ArchivedSchema {
 
     fn validate0(&self, v: &DotStore) -> bool {
         match (self, v) {
-            (Self::Null, DotStore::Null) => true,
+            (Self::Null, _) => true,
+            (_, DotStore::Null) => true,
             (Self::Flag, DotStore::DotSet(_)) => true,
             (Self::Reg(kind), DotStore::DotFun(fun)) => {
                 for v in fun.values() {
