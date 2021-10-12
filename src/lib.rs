@@ -98,7 +98,7 @@ impl Sdk {
                         swarm.behaviour_mut().send_delta(&causal).ok();
                     }
                     Command::Subscribe(id) => {
-                        swarm.behaviour_mut().subscribe_doc(&id).ok();
+                        swarm.behaviour_mut().subscribe_doc(id).ok();
                     }
                 };
             }
@@ -193,6 +193,7 @@ enum Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[async_std::test]
     #[ignore]
@@ -218,10 +219,13 @@ mod tests {
                 .lens_map_value()
                 .lens_in("todos"),
         ];
-        let hash = migrate.register(lenses)?;
+        let hash = migrate.register(lenses.clone())?;
 
         let sdk = migrate.finish().await?;
         let doc = sdk.create_doc(&hash)?;
+
+        // TODO: subscription api
+        async_std::task::sleep(Duration::from_millis(100)).await;
         assert!(doc.cursor().can(&sdk.peer_id()?, Permission::Write)?);
 
         let title = "something that needs to be done";
@@ -231,6 +235,7 @@ mod tests {
             .key(&0u64.into())?
             .field("title")?
             .assign(title)?;
+
         sdk.apply(delta)?;
 
         let value = doc
@@ -243,7 +248,10 @@ mod tests {
             .unwrap()?;
         assert_eq!(value, title);
 
-        let sdk2 = Migrate::memory()?.finish().await?;
+        let sdk2 = Migrate::memory()?;
+        // TODO: get lenses from peer
+        sdk2.register(lenses)?;
+        let sdk2 = sdk2.finish().await?;
         let op = doc
             .cursor()
             .say_can(Some(sdk2.peer_id()?), Permission::Write)?;
@@ -253,8 +261,10 @@ mod tests {
             sdk2.add_address(sdk.peer_id()?, addr);
         }
         let doc2 = sdk2.add_doc(*doc.id(), &hash)?;
-        // TODO: wait for unjoin
 
+        // TODO: subscription api
+        async_std::task::sleep(Duration::from_millis(1000)).await;
+        // TODO: get keys from peer
         let value = doc2
             .cursor()
             .field("todos")?

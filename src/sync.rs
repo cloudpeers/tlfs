@@ -5,7 +5,8 @@ use bytecheck::CheckBytes;
 use futures::io::{AsyncRead, AsyncWrite};
 use futures::prelude::*;
 use libp2p::gossipsub::{
-    Gossipsub, GossipsubConfig, GossipsubEvent, IdentTopic, MessageAuthenticity,
+    Gossipsub, GossipsubConfigBuilder, GossipsubEvent, IdentTopic, MessageAuthenticity,
+    ValidationMode,
 };
 use libp2p::request_response::{
     self, ProtocolName, ProtocolSupport, RequestId, RequestResponse, RequestResponseCodec,
@@ -129,7 +130,6 @@ impl From<RequestResponseEvent> for Event {
 }
 
 #[derive(NetworkBehaviour)]
-#[behaviour(poll_method = "poll")]
 #[behaviour(out_event = "Event")]
 pub struct Behaviour {
     #[behaviour(ignore)]
@@ -158,7 +158,10 @@ impl Behaviour {
             ),
             gossip: Gossipsub::new(
                 MessageAuthenticity::Author(peer_id),
-                GossipsubConfig::default(),
+                GossipsubConfigBuilder::default()
+                    .validation_mode(ValidationMode::None)
+                    .build()
+                    .unwrap(),
             )
             .unwrap(),
         })
@@ -201,8 +204,13 @@ impl Behaviour {
         Ok(self.req.send_request(peer_id, Ref::archive(&req)))
     }
 
-    pub fn subscribe_doc(&mut self, doc: &DocId) -> Result<()> {
-        let topic = IdentTopic::new(doc.to_string());
+    pub fn subscribe_doc(&mut self, id: DocId) -> Result<()> {
+        let doc = self.backend.doc(id)?;
+        let metadata = Metadata::new().doc(id).peer(*doc.peer_id());
+        if self.secrets.key(metadata)?.is_none() {
+            self.rotate_key(id)?;
+        }
+        let topic = IdentTopic::new(id.to_string());
         self.gossip
             .subscribe(&topic)
             .map_err(|err| anyhow!("{:?}", err))?;
@@ -211,11 +219,7 @@ impl Behaviour {
 
     pub fn send_delta(&mut self, causal: &Causal) -> Result<()> {
         let doc = self.backend.doc(*causal.ctx().doc())?;
-        let signed = self
-            .secrets
-            .keypair(Metadata::new().doc(*causal.ctx().doc()))?
-            .unwrap()
-            .sign(causal);
+        let signed = self.secrets.keypair(Metadata::new())?.unwrap().sign(causal);
         let metadata = Metadata::new().doc(*doc.id()).peer(*doc.peer_id());
         let encrypted = self.secrets.key_nonce(metadata)?.unwrap().encrypt(&signed);
         let msg = Ref::archive(&encrypted);
