@@ -1026,18 +1026,17 @@ mod tests {
 
     #[async_std::test]
     async fn test_ewflag() -> Result<()> {
-        let sdk = Backend::memory()?;
+        let mut sdk = Backend::memory()?;
         let peer = PeerId::new([0; 32]);
-        let mut doc = sdk.create_doc(peer)?;
         let hash = sdk.register(vec![Lens::Make(Kind::Flag)])?;
-        doc.transform(hash)?;
-        sdk.await?;
+        let doc = sdk.frontend().create_doc(peer, &hash)?;
+        Pin::new(&mut sdk).await?;
         let op = doc.cursor().enable()?;
         assert!(!doc.cursor().enabled()?);
-        doc.join(&peer, op)?;
+        sdk.join(&peer, op)?;
         assert!(doc.cursor().enabled()?);
         let op = doc.cursor().disable()?;
-        doc.join(&peer, op)?;
+        sdk.join(&peer, op)?;
         assert!(!doc.cursor().enabled()?);
         Ok(())
     }
@@ -1045,19 +1044,18 @@ mod tests {
     #[async_std::test]
     async fn test_mvreg() -> Result<()> {
         let mut sdk = Backend::memory()?;
-        let peer1 = PeerId::new([1; 32]);
-        let mut doc = sdk.create_doc(peer1)?;
         let hash = sdk.register(vec![Lens::Make(Kind::Reg(PrimitiveKind::U64))])?;
-        doc.transform(hash)?;
+        let peer1 = PeerId::new([1; 32]);
+        let doc = sdk.frontend().create_doc(peer1, &hash)?;
         Pin::new(&mut sdk).await?;
 
         let peer2 = PeerId::new([2; 32]);
         let op = doc.cursor().say_can(Some(peer2), Permission::Write)?;
-        doc.join(&peer1, op)?;
+        sdk.join(&peer1, op)?;
         Pin::new(&mut sdk).await?;
 
         let op1 = doc.cursor().assign(Primitive::U64(42))?;
-        doc.join(&peer1, op1)?;
+        sdk.join(&peer1, op1)?;
 
         //TODO
         //let op2 = crdt.assign(path.as_path(), &peer2, Primitive::U64(43))?;
@@ -1069,7 +1067,7 @@ mod tests {
         //assert!(values.contains(&43));
 
         let op = doc.cursor().assign(Primitive::U64(99))?;
-        doc.join(&peer1, op)?;
+        sdk.join(&peer1, op)?;
 
         let values = doc.cursor().u64s()?.collect::<Result<BTreeSet<u64>>>()?;
         assert_eq!(values.len(), 1);
@@ -1082,8 +1080,6 @@ mod tests {
     async fn test_ormap() -> Result<()> {
         let mut sdk = Backend::memory()?;
         let peer = PeerId::new([1; 32]);
-        let mut doc = sdk.create_doc(peer)?;
-
         let hash = sdk.register(vec![
             Lens::Make(Kind::Table(PrimitiveKind::Str)),
             Lens::LensMapValue(Box::new(Lens::Make(Kind::Table(PrimitiveKind::Str)))),
@@ -1091,14 +1087,14 @@ mod tests {
                 Kind::Reg(PrimitiveKind::U64),
             ))))),
         ])?;
-        doc.transform(hash)?;
+        let doc = sdk.frontend().create_doc(peer, &hash)?;
         Pin::new(&mut sdk).await?;
 
         let a = Primitive::Str("a".into());
         let b = Primitive::Str("b".into());
         let cur = doc.cursor().key(&a)?.key(&b)?;
         let op = cur.assign(Primitive::U64(42))?;
-        doc.join(&peer, op)?;
+        sdk.join(&peer, op)?;
 
         let values = cur.u64s()?.collect::<Result<BTreeSet<u64>>>()?;
         assert_eq!(values.len(), 1);
@@ -1106,7 +1102,7 @@ mod tests {
 
         let cur = doc.cursor().key(&a)?;
         let op = cur.remove(b.clone())?;
-        doc.join(&peer, op)?;
+        sdk.join(&peer, op)?;
 
         let values = cur.key(&b)?.u64s()?.collect::<Result<BTreeSet<u64>>>()?;
         assert!(values.is_empty());

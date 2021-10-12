@@ -109,7 +109,7 @@ impl Backend {
             .unwrap_or_else(|| Ref::new(EMPTY_LENSES.as_ref().into()));
         let lenses = self
             .registry
-            .lenses(&schema_id)?
+            .lenses(schema_id)?
             .ok_or_else(|| anyhow!("missing lenses with hash {}", &schema_id))?;
         self.crdt
             .transform(&id, schema_id, doc_lenses.as_ref(), lenses.as_ref())?;
@@ -403,12 +403,6 @@ mod tests {
     #[ignore]
     async fn test_api() -> Result<()> {
         let mut sdk = Backend::memory()?;
-
-        let peer = PeerId::new([0; 32]);
-        let mut doc = sdk.create_doc(peer)?;
-        Pin::new(&mut sdk).await?;
-        assert!(doc.cursor().can(&peer, Permission::Write)?);
-
         let lenses = vec![
             Lens::Make(Kind::Struct),
             Lens::AddProperty("todos".into()),
@@ -430,7 +424,11 @@ mod tests {
                 .lens_in("todos"),
         ];
         let hash = sdk.register(lenses)?;
-        doc.transform(hash)?;
+
+        let peer = PeerId::new([0; 32]);
+        let doc = sdk.frontend().create_doc(peer, &hash)?;
+        Pin::new(&mut sdk).await?;
+        assert!(doc.cursor().can(&peer, Permission::Write)?);
 
         let title = "something that needs to be done";
         let delta = doc
@@ -439,7 +437,7 @@ mod tests {
             .key(&0u64.into())?
             .field("title")?
             .assign(title)?;
-        doc.join(&peer, delta)?;
+        sdk.join(&peer, delta)?;
 
         let value = doc
             .cursor()
@@ -454,12 +452,13 @@ mod tests {
         let sdk2 = Backend::memory()?;
         let peer2 = PeerId::new([1; 32]);
         let op = doc.cursor().say_can(Some(peer2), Permission::Write)?;
-        doc.join(&peer, op)?;
+        sdk.join(&peer, op)?;
         Pin::new(&mut sdk).await?;
 
-        let doc2 = sdk2.open_doc(*doc.id(), peer2)?;
-        let delta = doc.unjoin(&peer2, doc2.ctx()?.as_ref())?;
-        doc2.join(&peer, delta)?;
+        let doc2 = sdk2.frontend().add_doc(*doc.id(), &peer2, &hash)?;
+        let ctx = Ref::archive(&doc.ctx()?);
+        let delta = sdk.unjoin(&peer2, ctx.as_ref())?;
+        sdk2.join(&peer, delta)?;
 
         let value = doc2
             .cursor()

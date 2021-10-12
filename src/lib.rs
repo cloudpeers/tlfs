@@ -102,8 +102,8 @@ impl Sdk {
                     }
                 };
             }
-            while let Poll::Ready(_) = swarm.behaviour_mut().poll_backend(cx) {}
-            while let Poll::Ready(_) = Pin::new(&mut swarm).poll_next(cx) {}
+            while swarm.behaviour_mut().poll_backend(cx).is_ready() {}
+            while Pin::new(&mut swarm).poll_next(cx).is_ready() {}
             Poll::Pending
         }))
         .detach();
