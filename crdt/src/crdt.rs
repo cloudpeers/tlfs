@@ -900,50 +900,45 @@ mod tests {
     async fn test_ewflag_unjoin() -> Result<()> {
         let peer1 = PeerId::new([0; 32]);
 
-        let sdk1 = Backend::memory()?;
+        let mut sdk1 = Backend::memory()?;
         let hash1 = sdk1.register(vec![Lens::Make(Kind::Flag)])?;
-        let mut doc1 = sdk1.create_doc(peer1)?;
-        doc1.transform(hash1)?;
-        sdk1.await?;
+        let doc1 = sdk1.frontend().create_doc(peer1, &hash1)?;
+        Pin::new(&mut sdk1).await?;
 
-        let sdk2 = Backend::memory()?;
-        let mut doc2 = sdk2.create_doc(peer1)?;
+        let mut sdk2 = Backend::memory()?;
         let hash2 = sdk2.register(vec![Lens::Make(Kind::Flag)])?;
-        doc2.transform(hash2)?;
-        sdk2.await?;
-        assert!(hash1 == hash2);
+        let doc2 = sdk2.frontend().create_doc(peer1, &hash2)?;
+        Pin::new(&mut sdk2).await?;
+        assert_eq!(hash1, hash2);
 
         let mut op = doc1.cursor().enable()?;
-        doc1.join(&peer1, op.clone())?;
+        sdk1.join(&peer1, op.clone())?;
         op.ctx.doc = *doc2.id();
-        doc2.join(&peer1, op)?;
+        sdk2.join(&peer1, op)?;
 
         assert!(doc1.cursor().enabled()?);
         assert!(doc2.cursor().enabled()?);
 
         let ctx_after_enable = doc1.ctx()?;
         let mut op = doc1.cursor().disable()?;
-        doc1.join(&peer1, op.clone())?;
+        sdk1.join(&peer1, op.clone())?;
         let ctx_after_disable = doc1.ctx()?;
         if false {
             // apply the op
             op.ctx.doc = *doc2.id();
-            doc2.join(&peer1, op)?;
+            sdk2.join(&peer1, op)?;
         } else {
             // compute the delta using unjoin, and apply that
-            let mut delta = doc1.unjoin(&peer1, ctx_after_enable.as_ref())?;
-            let diff = ctx_after_disable
-                .to_owned()?
-                .dots
-                .difference(&ctx_after_enable.to_owned()?.dots);
+            let mut delta = sdk1.unjoin(&peer1, Ref::archive(&ctx_after_enable).as_ref())?;
+            let diff = ctx_after_disable.dots.difference(&ctx_after_enable.dots);
             println!("op {:?}", op);
-            println!("ctx after enable {:?}", ctx_after_enable.to_owned()?.dots);
-            println!("ctx after disable {:?}", ctx_after_disable.to_owned()?.dots);
+            println!("ctx after enable {:?}", ctx_after_enable.dots);
+            println!("ctx after disable {:?}", ctx_after_disable.dots);
             println!("difference {:?}", diff);
             println!("delta {:?}", delta);
             delta.ctx.doc = *doc2.id();
             println!("{:?}", delta.store());
-            doc2.join(&peer1, delta)?;
+            sdk2.join(&peer1, delta)?;
         }
         assert!(!doc1.cursor().enabled()?);
         assert!(!doc2.cursor().enabled()?);
