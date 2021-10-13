@@ -213,7 +213,7 @@ impl<I: ReplicaId> AbstractDotSet<I> for ArchivedDotSet<I> {
 /// Supports membership tests as well as the typical set operations union, intersection, difference.
 /// For the purpose of testing, also supports enumerating all elements.
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
-#[archive_attr(derive(CheckBytes))]
+#[archive_attr(derive(Debug, CheckBytes))]
 #[repr(C)]
 pub struct DotSet<I>(BTreeMap<I, RangeSet2<u64>>);
 

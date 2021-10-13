@@ -51,7 +51,7 @@ impl From<&str> for Primitive {
 }
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize, Default)]
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
-#[archive_attr(derive(CheckBytes))]
+#[archive_attr(derive(Debug, CheckBytes))]
 #[archive_attr(check_bytes(
     bound = "__C: rkyv::validation::ArchiveContext, <__C as rkyv::Fallible>::Error: std::error::Error"
 ))]
@@ -278,7 +278,7 @@ impl DotStoreType {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
-#[archive_attr(derive(CheckBytes))]
+#[archive_attr(derive(Debug, CheckBytes))]
 #[repr(C)]
 pub struct CausalContext {
     pub(crate) doc: DocId,
@@ -323,7 +323,7 @@ impl ArchivedCausalContext {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
-#[archive_attr(derive(CheckBytes))]
+#[archive_attr(derive(Debug, CheckBytes))]
 #[repr(C)]
 pub struct Causal {
     pub(crate) ctx: CausalContext,

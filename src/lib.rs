@@ -257,7 +257,6 @@ mod tests {
         assert_eq!(value, title);
 
         let sdk2 = Migrate::memory()?;
-        // TODO: get lenses from peer
         sdk2.register(lenses)?;
         let sdk2 = sdk2.finish().await?;
         let op = doc
@@ -275,7 +274,7 @@ mod tests {
 
         // TODO: subscription api
         async_std::task::sleep(Duration::from_millis(1000)).await;
-        // TODO: get keys from peer
+
         let value = doc2
             .cursor()
             .field("todos")?

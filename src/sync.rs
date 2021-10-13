@@ -46,7 +46,7 @@ impl ProtocolName for SyncProtocol {
 }
 
 #[derive(Debug, Archive, Deserialize, Serialize)]
-#[archive_attr(derive(CheckBytes))]
+#[archive_attr(derive(Debug, CheckBytes))]
 #[repr(C)]
 pub enum SyncRequest {
     Lenses([u8; 32]),
@@ -55,7 +55,7 @@ pub enum SyncRequest {
 }
 
 #[derive(Debug, Archive, Deserialize, Serialize)]
-#[archive_attr(derive(CheckBytes))]
+#[archive_attr(derive(Debug, CheckBytes))]
 #[repr(C)]
 pub enum SyncResponse {
     Lenses(Vec<u8>),
@@ -323,7 +323,7 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
                         request,
                         channel,
                     } => {
-                        tracing::debug!("{:?}", request);
+                        tracing::debug!("{:?}", request.as_ref());
                         use ArchivedSyncRequest::*;
                         match request.as_ref() {
                             Lenses(hash) => {
@@ -362,7 +362,7 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
                         request_id,
                         response,
                     } => {
-                        tracing::debug!("{:?}", response);
+                        tracing::debug!("{:?}", response.as_ref());
                         use ArchivedSyncResponse::*;
                         match response.as_ref() {
                             Lenses(lenses) => {
