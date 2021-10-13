@@ -346,27 +346,15 @@ fn iter<'a>(
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
-#[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
-#[archive_attr(derive(CheckBytes))]
-#[archive_attr(check_bytes(
-    bound = "__C: rkyv::validation::ArchiveContext, <__C as rkyv::Fallible>::Error: std::error::Error"
-))]
+/// A hierarchical dot store. This is just temporary until we got the schema transform to work on the flat one.
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[repr(C)]
 pub enum HDotStore {
     Null,
     DotSet(DotSet),
     DotFun(BTreeMap<Dot, Primitive>),
-    DotMap(
-        #[omit_bounds]
-        #[archive_attr(omit_bounds)]
-        BTreeMap<Primitive, HDotStore>,
-    ),
-    Struct(
-        #[omit_bounds]
-        #[archive_attr(omit_bounds)]
-        BTreeMap<String, HDotStore>,
-    ),
+    DotMap(BTreeMap<Primitive, HDotStore>),
+    Struct(BTreeMap<String, HDotStore>),
     Policy(BTreeMap<Dot, Policy>),
 }
 
