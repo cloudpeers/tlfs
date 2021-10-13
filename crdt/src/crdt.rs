@@ -1228,11 +1228,11 @@ impl Crdt {
     fn join_flat_store(
         &self,
         doc: DocId,
-        peer_id: PeerId,
+        peer_id: &PeerId,
         that: &FlatDotStore,
         that_ctx: &DotSet,
     ) -> Result<()> {
-        // todo: permissions!
+        // TODO: permissions!
         let path = PathBuf::new(doc);
         let mut common = BTreeSet::new();
         for item in self.state.scan_prefix(path) {
@@ -1263,9 +1263,7 @@ impl Crdt {
     }
 
     pub fn join(&self, peer_id: &PeerId, causal: &Causal) -> Result<()> {
-        let mut path = PathBuf::new(causal.ctx.doc);
-        let causal_store = causal.store.to_dot_store().unwrap();
-        self.join_store(&mut path, peer_id, &causal_store, &causal.ctx.dots)?;
+        self.join_flat_store(causal.ctx.doc, peer_id, &causal.store, &causal.ctx.dots)?;
         for peer_id in causal.ctx.dots.peers() {
             self.docs
                 .extend_present(&causal.ctx.doc, peer_id, causal.ctx.dots.max(peer_id))?;
