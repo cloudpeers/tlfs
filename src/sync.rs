@@ -15,7 +15,7 @@ use libp2p::request_response::{
 };
 use libp2p::swarm::NetworkBehaviourEventProcess;
 use libp2p::{Multiaddr, NetworkBehaviour};
-use rkyv::{Archive, Deserialize, Serialize};
+use rkyv::{Archive, Archived, Deserialize, Serialize};
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -45,7 +45,7 @@ impl ProtocolName for SyncProtocol {
     }
 }
 
-#[derive(Archive, Deserialize, Serialize)]
+#[derive(Debug, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(CheckBytes))]
 #[repr(C)]
 pub enum SyncRequest {
@@ -54,7 +54,7 @@ pub enum SyncRequest {
     Unjoin(CausalContext),
 }
 
-#[derive(Archive, Deserialize, Serialize)]
+#[derive(Debug, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(CheckBytes))]
 #[repr(C)]
 pub enum SyncResponse {
@@ -80,8 +80,10 @@ impl RequestResponseCodec for SyncCodec {
     {
         self.buffer.clear();
         io.read_to_end(&mut self.buffer).await?;
-        Ref::checked(&self.buffer)
-            .map_err(|err| io::Error::new(io::ErrorKind::Other, format!("{}", err)))
+        // TODO: doesn't work
+        //Ref::checked(&self.buffer)
+        //    .map_err(|err| io::Error::new(io::ErrorKind::Other, format!("{}", err)))
+        Ok(Ref::new(self.buffer.clone().into()))
     }
 
     async fn read_response<T>(&mut self, _: &SyncProtocol, io: &mut T) -> io::Result<Self::Response>
@@ -90,8 +92,10 @@ impl RequestResponseCodec for SyncCodec {
     {
         self.buffer.clear();
         io.read_to_end(&mut self.buffer).await?;
-        Ref::checked(&self.buffer)
-            .map_err(|err| io::Error::new(io::ErrorKind::Other, format!("{}", err)))
+        // TODO: doesn't work
+        //Ref::checked(&self.buffer)
+        //    .map_err(|err| io::Error::new(io::ErrorKind::Other, format!("{}", err)))
+        Ok(Ref::new(self.buffer.clone().into()))
     }
 
     async fn write_request<T>(
@@ -217,7 +221,6 @@ impl Behaviour {
         id
     }
 
-    #[allow(unused)]
     pub fn request_unjoin(&mut self, peer_id: &PeerId, doc: DocId) -> Result<RequestId> {
         tracing::debug!("request_unjoin {} {}", peer_id, doc);
         let peer_id = peer_id.to_libp2p().into_peer_id();
@@ -258,6 +261,19 @@ impl Behaviour {
             .generate_key(Metadata::new().doc(doc).peer(peer_id))?;
         Ok(())
     }
+
+    fn inject_signed(&mut self, signed: &Archived<Signed>) {
+        let (peer, causal) = unwrap!(signed.verify::<Causal>());
+        let causal: Causal = unwrap!(causal.deserialize(&mut rkyv::Infallible));
+        let lenses = causal.ctx().schema();
+        if unwrap!(self.backend.registry().contains(&lenses)) {
+            self.backend.join(&peer, causal).ok();
+            // TODO: detect missing updates and request unjoin
+        } else {
+            self.buffer.push((peer, causal));
+            self.request_lenses(&peer, lenses);
+        }
+    }
 }
 
 impl NetworkBehaviourEventProcess<GossipsubEvent> for Behaviour {
@@ -272,27 +288,16 @@ impl NetworkBehaviourEventProcess<GossipsubEvent> for Behaviour {
                 let doc = unwrap!(message.topic.as_str().parse());
                 let peer = unwrap!(libp2p_peer_id(&message.source.unwrap()));
                 let meta = Metadata::new().doc(doc).peer(peer);
+                let encrypted = unwrap!(Ref::checked(&message.data));
                 let signed = match unwrap!(self.secrets.key(meta)) {
                     Some(key) => key.decrypt::<Signed>(&mut message.data).ok(),
                     None => None,
                 };
-                let signed = if let Some(signed) = signed {
-                    signed
+                if let Some(signed) = signed {
+                    self.inject_signed(signed);
                 } else {
-                    self.encrypted
-                        .push((doc, peer, Ref::new(message.data.into())));
+                    self.encrypted.push((doc, peer, encrypted));
                     self.request_key(&peer, doc);
-                    return;
-                };
-                let (peer, causal) = unwrap!(signed.verify::<Causal>());
-                let causal: Causal = unwrap!(causal.deserialize(&mut rkyv::Infallible));
-                let lenses = causal.ctx().schema();
-                if unwrap!(self.backend.registry().contains(&lenses)) {
-                    self.backend.join(&peer, causal).ok();
-                    // TODO: detect missing updates and request unjoin
-                } else {
-                    self.buffer.push((peer, causal));
-                    self.request_lenses(&peer, lenses);
                 }
             }
             Subscribed {
@@ -318,6 +323,7 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
                         request,
                         channel,
                     } => {
+                        tracing::debug!("{:?}", request);
                         use ArchivedSyncRequest::*;
                         match request.as_ref() {
                             Lenses(hash) => {
@@ -356,11 +362,17 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
                         request_id,
                         response,
                     } => {
+                        tracing::debug!("{:?}", response);
                         use ArchivedSyncResponse::*;
                         match response.as_ref() {
                             Lenses(lenses) => {
-                                unwrap!(self.backend.registry().register(lenses));
-                                // TODO: check buffer
+                                let schema = unwrap!(self.backend.registry().register(lenses));
+                                for i in 0..self.buffer.len() {
+                                    if self.buffer[i].1.ctx().schema() == schema {
+                                        let (peer, causal) = self.buffer.remove(i);
+                                        unwrap!(self.backend.join(&peer, causal));
+                                    }
+                                }
                             }
                             Key(key) => {
                                 let doc = if let Some(doc) = self.key_req.remove(&request_id) {
@@ -372,7 +384,14 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
                                 unwrap!(self
                                     .secrets
                                     .add_key(Metadata::new().doc(doc).peer(peer), *key));
-                                // TODO: check encrypted
+                                for i in 0..self.encrypted.len() {
+                                    if self.encrypted[i].0 == doc && self.encrypted[i].1 == peer {
+                                        let mut encrypted: Vec<u8> =
+                                            self.encrypted.remove(i).2.into();
+                                        let signed = unwrap!(key.decrypt::<Signed>(&mut encrypted));
+                                        self.inject_signed(signed);
+                                    }
+                                }
                             }
                             Unjoin(causal) => {
                                 let peer = unwrap!(libp2p_peer_id(&peer));

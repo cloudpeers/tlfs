@@ -100,6 +100,9 @@ impl Sdk {
                     Command::Subscribe(id) => {
                         swarm.behaviour_mut().subscribe_doc(id).ok();
                     }
+                    Command::Unjoin(doc, peer) => {
+                        swarm.behaviour_mut().request_unjoin(&peer, doc).ok();
+                    }
                 };
             }
             while swarm.behaviour_mut().poll_backend(cx).is_ready() {}
@@ -180,6 +183,10 @@ impl Sdk {
         self.swarm.unbounded_send(Command::Publish(causal)).ok();
         Ok(())
     }
+
+    pub fn unjoin(&self, doc: DocId, peer: PeerId) {
+        self.swarm.unbounded_send(Command::Unjoin(doc, peer)).ok();
+    }
 }
 
 enum Command {
@@ -188,6 +195,7 @@ enum Command {
     Addresses(oneshot::Sender<Vec<Multiaddr>>),
     Publish(Causal),
     Subscribe(DocId),
+    Unjoin(DocId, PeerId),
 }
 
 #[cfg(test)]
@@ -261,6 +269,9 @@ mod tests {
             sdk2.add_address(sdk.peer_id()?, addr);
         }
         let doc2 = sdk2.add_doc(*doc.id(), &hash)?;
+
+        async_std::task::sleep(Duration::from_millis(100)).await;
+        sdk2.unjoin(*doc.id(), sdk.peer_id()?);
 
         // TODO: subscription api
         async_std::task::sleep(Duration::from_millis(1000)).await;

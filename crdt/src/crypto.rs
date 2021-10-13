@@ -82,7 +82,7 @@ impl ArchivedSigned {
     }
 }
 
-#[derive(Clone, Copy, Archive, CheckBytes, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Archive, CheckBytes, Serialize, Deserialize)]
 #[archive(as = "Key")]
 #[repr(C)]
 pub struct Key([u8; 32]);
