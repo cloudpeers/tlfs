@@ -1,7 +1,7 @@
 use crate::crdt::DotStore;
 use crate::{
-    AbstractDotSet, Causal, CausalContext, Crdt, DocId, Dot, DotSet, Kind, Lens, Lenses, PeerId,
-    Primitive, PrimitiveKind, Prop, Ref, Schema,
+    AbstractDotSet, Causal, CausalContext, Crdt, DocId, Dot, DotSet, Kind, Lens, Lenses, PathBuf,
+    PeerId, Primitive, PrimitiveKind, Prop, Ref, Schema,
 };
 use proptest::collection::SizeRange;
 use proptest::prelude::*;
@@ -144,13 +144,14 @@ pub fn arb_causal(
             }
         }
         let dots = DotSet::from_map(present);
+        let doc = DocId::new([0; 32]);
         Causal {
             ctx: CausalContext {
-                doc: DocId::new([0; 32]),
+                doc,
                 schema: [0; 32],
                 dots,
             },
-            store,
+            store: store.prefix(PathBuf::new(doc).as_path()),
         }
     })
 }
@@ -366,5 +367,7 @@ pub fn crdt_to_causal(crdt: &Crdt, ctx: &CausalContext) -> Causal {
     let other = CausalContext::new(*ctx.doc(), ctx.schema());
     let peer_id = (*ctx.doc()).into();
     let other = Ref::archive(&other);
-    crdt.unjoin(&peer_id, other.as_ref()).unwrap()
+    let mut causal = crdt.unjoin(&peer_id, other.as_ref()).unwrap();
+    causal.ctx.schema = [0; 32];
+    causal
 }

@@ -204,7 +204,6 @@ mod tests {
     use std::time::Duration;
 
     #[async_std::test]
-    #[ignore]
     async fn test_api() -> Result<()> {
         let migrate = Migrate::memory()?;
         let lenses = vec![
