@@ -400,7 +400,6 @@ mod tests {
     use crate::{Kind, Lens, Permission, PrimitiveKind};
 
     #[async_std::test]
-    #[ignore]
     async fn test_api() -> Result<()> {
         let mut sdk = Backend::memory()?;
         let lenses = vec![
@@ -423,7 +422,7 @@ mod tests {
                 .lens_map_value()
                 .lens_in("todos"),
         ];
-        let hash = sdk.register(lenses)?;
+        let hash = sdk.register(lenses.clone())?;
 
         let peer = PeerId::new([0; 32]);
         let doc = sdk.frontend().create_doc(peer, &hash)?;
@@ -450,13 +449,14 @@ mod tests {
         assert_eq!(value, title);
 
         let sdk2 = Backend::memory()?;
+        sdk2.register(lenses)?;
         let peer2 = PeerId::new([1; 32]);
         let op = doc.cursor().say_can(Some(peer2), Permission::Write)?;
         sdk.join(&peer, op)?;
         Pin::new(&mut sdk).await?;
 
         let doc2 = sdk2.frontend().add_doc(*doc.id(), &peer2, &hash)?;
-        let ctx = Ref::archive(&doc.ctx()?);
+        let ctx = Ref::archive(&doc2.ctx()?);
         let delta = sdk.unjoin(&peer2, ctx.as_ref())?;
         sdk2.join(&peer, delta)?;
 
