@@ -101,25 +101,25 @@ impl<K, V> InPlaceRelationalOps<K, V> for BTreeMap<K, V> {
 }
 
 impl DotStore {
-    pub fn policy(args: BTreeMap<Dot, Policy>) -> Self {
+    pub fn policy(args: impl IntoIterator<Item = (Dot, Policy)>) -> Self {
         Self(
-            args.iter()
+            args.into_iter()
                 .map(|(dot, policy)| {
                     let mut path = Path::empty().to_owned();
-                    path.policy(dot);
-                    (path, archive(policy))
+                    path.policy(&dot);
+                    (path, archive(&policy))
                 })
                 .collect(),
         )
     }
 
-    pub fn dotfun(args: BTreeMap<Dot, Primitive>) -> Self {
+    pub fn dotfun(args: impl IntoIterator<Item = (Dot, Primitive)>) -> Self {
         Self(
-            args.iter()
+            args.into_iter()
                 .map(|(dot, primitive)| {
                     let mut path = Path::empty().to_owned();
-                    path.dotfun(dot);
-                    (path, archive(primitive))
+                    path.dotfun(&dot);
+                    (path, archive(&primitive))
                 })
                 .collect(),
         )
@@ -137,7 +137,7 @@ impl DotStore {
         )
     }
 
-    pub fn dotmap(args: BTreeMap<Primitive, Self>) -> Self {
+    pub fn dotmap(args: impl IntoIterator<Item = (Primitive, Self)>) -> Self {
         let entries = args.into_iter().flat_map(move |(key, store)| {
             store.0.into_iter().map(move |(k, v)| (key.clone(), k, v))
         });
@@ -153,7 +153,7 @@ impl DotStore {
         )
     }
 
-    pub fn r#struct(args: BTreeMap<String, Self>) -> Self {
+    pub fn r#struct(args: impl IntoIterator<Item = (String, Self)>) -> Self {
         let entries = args.into_iter().flat_map(move |(field, store)| {
             store.0.into_iter().map(move |(k, v)| (field.clone(), k, v))
         });
@@ -169,6 +169,7 @@ impl DotStore {
         )
     }
 
+    /// prefix the entire dot store with a path
     pub fn prefix(&self, path: Path) -> Self {
         Self(
             self.0

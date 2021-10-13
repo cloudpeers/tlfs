@@ -183,7 +183,7 @@ pub fn arb_dotstore_for_schema(s: Schema) -> BoxedStrategy<DotStore> {
             .into_iter()
             .map(|(k, s)| arb_dotstore_for_schema(s).prop_map(move |v| (k.clone(), v)))
             .collect::<Vec<_>>()
-            .prop_map(|v| DotStore::r#struct(v.into_iter().collect()))
+            .prop_map(DotStore::r#struct)
             .boxed(),
     }
 }
