@@ -1,4 +1,4 @@
-use crate::{crdt::FlatDotStore, DotStore, Primitive};
+use crate::{crdt::DotStore, HDotStore, Primitive};
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Serialize};
 use std::collections::BTreeMap;
@@ -40,17 +40,17 @@ pub enum Schema {
 }
 
 impl ArchivedSchema {
-    pub fn validate(&self, v: &FlatDotStore) -> bool {
+    pub fn validate(&self, v: &DotStore) -> bool {
         let store = v.to_dot_store().unwrap();
         self.validate0(&store)
     }
 
-    fn validate0(&self, v: &DotStore) -> bool {
+    fn validate0(&self, v: &HDotStore) -> bool {
         match (self, v) {
             (Self::Null, _) => true,
-            (_, DotStore::Null) => true,
-            (Self::Flag, DotStore::DotSet(_)) => true,
-            (Self::Reg(kind), DotStore::DotFun(fun)) => {
+            (_, HDotStore::Null) => true,
+            (Self::Flag, HDotStore::DotSet(_)) => true,
+            (Self::Reg(kind), HDotStore::DotFun(fun)) => {
                 for v in fun.values() {
                     if !kind.validate(v) {
                         return false;
@@ -58,7 +58,7 @@ impl ArchivedSchema {
                 }
                 true
             }
-            (Self::Table(kind, schema), DotStore::DotMap(map)) => {
+            (Self::Table(kind, schema), HDotStore::DotMap(map)) => {
                 for (key, crdt) in map.iter() {
                     if !kind.validate(key) {
                         return false;
@@ -69,7 +69,7 @@ impl ArchivedSchema {
                 }
                 true
             }
-            (Self::Struct(schema), DotStore::Struct(fields)) => {
+            (Self::Struct(schema), HDotStore::Struct(fields)) => {
                 /*for prop in schema.keys() {
                     if !map.contains_key(prop.as_str()) {
                         return false;
@@ -86,18 +86,18 @@ impl ArchivedSchema {
                 }
                 true
             }
-            (_, DotStore::Policy(_)) => true,
+            (_, HDotStore::Policy(_)) => true,
             _ => false,
         }
     }
 
-    pub fn default(&self) -> DotStore {
+    pub fn default(&self) -> HDotStore {
         match self {
-            Self::Null => DotStore::Null,
-            Self::Flag => DotStore::DotSet(Default::default()),
-            Self::Reg(_) => DotStore::DotFun(Default::default()),
-            Self::Table(_, _) => DotStore::DotMap(Default::default()),
-            Self::Struct(_) => DotStore::Struct(Default::default()),
+            Self::Null => HDotStore::Null,
+            Self::Flag => HDotStore::DotSet(Default::default()),
+            Self::Reg(_) => HDotStore::DotFun(Default::default()),
+            Self::Table(_, _) => HDotStore::DotMap(Default::default()),
+            Self::Struct(_) => HDotStore::Struct(Default::default()),
         }
     }
 }

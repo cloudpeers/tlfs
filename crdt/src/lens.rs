@@ -1,5 +1,5 @@
-use crate::crdt::FlatDotStore;
-use crate::{Crdt, DocId, DotStore, Path, PrimitiveKind, Prop, Schema};
+use crate::crdt::DotStore;
+use crate::{Crdt, DocId, HDotStore, Path, PrimitiveKind, Prop, Schema};
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
 use rkyv::ser::serializers::AllocSerializer;
@@ -221,59 +221,59 @@ impl<'a> LensRef<'a> {
         Ok(())
     }
 
-    pub fn transform_dotstore(&self, store: &mut FlatDotStore) {
+    pub fn transform_dotstore(&self, store: &mut DotStore) {
         let mut store1 = store.to_dot_store().unwrap();
         self.transform_dotstore0(&mut store1);
-        *store = FlatDotStore::from_dot_store(&store1, Path::empty().to_owned());
+        *store = DotStore::from_dot_store(&store1, Path::empty().to_owned());
     }
 
-    fn transform_dotstore0(&self, store: &mut DotStore) {
+    fn transform_dotstore0(&self, store: &mut HDotStore) {
         match (self, store) {
             (Self::Make(k), v) => {
                 *v = match k {
-                    ArchivedKind::Null => DotStore::Null,
-                    ArchivedKind::Flag => DotStore::DotSet(Default::default()),
-                    ArchivedKind::Reg(_) => DotStore::DotFun(Default::default()),
-                    ArchivedKind::Table(_) => DotStore::DotMap(Default::default()),
-                    ArchivedKind::Struct => DotStore::Struct(Default::default()),
+                    ArchivedKind::Null => HDotStore::Null,
+                    ArchivedKind::Flag => HDotStore::DotSet(Default::default()),
+                    ArchivedKind::Reg(_) => HDotStore::DotFun(Default::default()),
+                    ArchivedKind::Table(_) => HDotStore::DotMap(Default::default()),
+                    ArchivedKind::Struct => HDotStore::Struct(Default::default()),
                 };
             }
             (Self::Destroy(_), v) => {
-                *v = DotStore::Null;
+                *v = HDotStore::Null;
             }
-            (Self::AddProperty(key), DotStore::Struct(m)) => {
-                m.insert(key.to_string(), DotStore::Null);
+            (Self::AddProperty(key), HDotStore::Struct(m)) => {
+                m.insert(key.to_string(), HDotStore::Null);
             }
-            (Self::RemoveProperty(key), DotStore::Struct(m)) => {
+            (Self::RemoveProperty(key), HDotStore::Struct(m)) => {
                 m.remove(key.as_str());
             }
-            (Self::RenameProperty(from, to), DotStore::Struct(m)) => {
+            (Self::RenameProperty(from, to), HDotStore::Struct(m)) => {
                 if let Some(v) = m.remove(from.as_str()) {
                     m.insert(to.to_string(), v);
                 }
             }
-            (Self::HoistProperty(host, target), DotStore::Struct(m)) => {
-                if let Some(DotStore::Struct(host)) = m.get_mut(host.as_str()) {
+            (Self::HoistProperty(host, target), HDotStore::Struct(m)) => {
+                if let Some(HDotStore::Struct(host)) = m.get_mut(host.as_str()) {
                     if let Some(v) = host.remove(target.as_str()) {
                         m.insert(target.to_string(), v);
                     }
                 }
             }
-            (Self::PlungeProperty(host, target), DotStore::Struct(m)) => {
+            (Self::PlungeProperty(host, target), HDotStore::Struct(m)) => {
                 if let Some(v) = m.remove(target.as_str()) {
-                    if let Some(DotStore::Struct(host)) = m.get_mut(host.as_str()) {
+                    if let Some(HDotStore::Struct(host)) = m.get_mut(host.as_str()) {
                         host.insert(target.to_string(), v);
                     } else {
                         m.insert(target.to_string(), v);
                     }
                 }
             }
-            (Self::LensIn(rev, key, lens), DotStore::Struct(m)) => {
+            (Self::LensIn(rev, key, lens), HDotStore::Struct(m)) => {
                 if let Some(v) = m.get_mut(key.as_str()) {
                     lens.to_ref().maybe_reverse(*rev).transform_dotstore0(v);
                 }
             }
-            (Self::LensMapValue(rev, lens), DotStore::DotMap(vs)) => {
+            (Self::LensMapValue(rev, lens), HDotStore::DotMap(vs)) => {
                 for v in vs.values_mut() {
                     lens.to_ref().maybe_reverse(*rev).transform_dotstore0(v);
                 }
@@ -336,7 +336,7 @@ impl ArchivedLenses {
         c
     }
 
-    pub fn transform_dotstore(&self, store: &mut FlatDotStore, target: &ArchivedLenses) {
+    pub fn transform_dotstore(&self, store: &mut DotStore, target: &ArchivedLenses) {
         for lens in self.transform(target) {
             tracing::info!("{:?}", lens);
             lens.transform_dotstore(store);

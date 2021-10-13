@@ -14,7 +14,7 @@ mod util;
 
 pub use crate::acl::{Acl, Actor, Can, Engine, Permission, Policy};
 pub use crate::crdt::{
-    Causal, CausalContext, Crdt, DotStore, DotStoreType, Path, PathBuf, Primitive,
+    Causal, CausalContext, Crdt, HDotStore, DotStoreType, Path, PathBuf, Primitive,
 };
 pub use crate::crypto::{
     ArchivedEncrypted, ArchivedSigned, Encrypted, Key, KeyNonce, Keypair, Signed,
