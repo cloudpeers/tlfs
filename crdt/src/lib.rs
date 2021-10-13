@@ -19,12 +19,9 @@ pub use crate::crypto::{
 };
 pub use crate::cursor::Cursor;
 pub use crate::doc::{Backend, Doc, Docs, Frontend, Writer};
+pub use crate::dotset::{AbstractDotSet, Dot, DotSet};
 pub use crate::id::{DocId, PeerId};
 pub use crate::lens::{ArchivedKind, ArchivedLens, ArchivedLenses, Kind, Lens, LensRef, Lenses};
 pub use crate::registry::{Hash, Registry, EMPTY_HASH, EMPTY_LENSES, EMPTY_SCHEMA};
 pub use crate::schema::{ArchivedSchema, PrimitiveKind, Prop, Schema};
 pub use crate::util::Ref;
-
-pub type Dot = crate::dotset::Dot<PeerId>;
-pub type DotSet = crate::dotset::DotSet<PeerId>;
-use crate::dotset::AbstractDotSet;

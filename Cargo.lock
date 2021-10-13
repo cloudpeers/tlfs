@@ -61,9 +61,9 @@ dependencies = [
 
 [[package]]
 name = "ahash"
-version = "0.7.4"
+version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43bb833f0bf979d8475d38fbf09ed3b8a55e1885fe93ad3f93239fc6a4f17b98"
+checksum = "991984e3fd003e7ba02eb724f87a0f997b78677c46c0e91f8424ad7394c9886a"
 dependencies = [
  "getrandom 0.2.3",
  "once_cell",
@@ -108,9 +108,9 @@ checksum = "be4dc07131ffa69b8072d35f5007352af944213cde02545e2103680baed38fcd"
 
 [[package]]
 name = "asn1_der"
-version = "0.7.4"
+version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d6e24d2cce90c53b948c46271bfb053e4bdc2db9b5d3f65e20f8cf28a1b7fc3"
+checksum = "e22d1f4b888c298a027c99dc9048015fac177587de20fc30232a057dfbe24a21"
 
 [[package]]
 name = "async-attributes"
@@ -482,9 +482,9 @@ checksum = "631ae5198c9be5e753e5cc215e1bd73c2b466a3565173db433f52bb9d3e66dba"
 
 [[package]]
 name = "cc"
-version = "1.0.70"
+version = "1.0.71"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d26a6ce4b6a484fa3edb70f7efa6fc430fd2b87285fe8b84304fd0936faa0dc0"
+checksum = "79c2681d6594606957bbb8631c4b90a7fcaaa72cdb714743a437b156d6a7eedd"
 
 [[package]]
 name = "cfg-if"
@@ -1319,7 +1319,7 @@ dependencies = [
 [[package]]
 name = "instant"
 version = "0.1.11"
-source = "git+https://github.com/wngr/instant?branch=systemtime#c59ec9068d7484a07967980e2a4c3aa2fece9674"
+source = "git+https://github.com/wngr/instant?branch=systemtime#7b058d469f2b5416ccd32efa573c1fa912b50a58"
 dependencies = [
  "cfg-if",
 ]
@@ -1389,9 +1389,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.102"
+version = "0.2.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2a5ac8f984bfcf3a823267e5fde638acc3325f6496633a5da6bb6eb2171e103"
+checksum = "dd8f7255a17a627354f321ef0055d63b898c6fb27eff628af4d1b66b7331edf6"
 
 [[package]]
 name = "libp2p"
@@ -1424,7 +1424,7 @@ dependencies = [
 [[package]]
 name = "libp2p"
 version = "0.40.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "atomic",
  "bytes 1.1.0",
@@ -1491,7 +1491,7 @@ dependencies = [
 [[package]]
 name = "libp2p-core"
 version = "0.30.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "asn1_der",
  "bs58",
@@ -1539,7 +1539,7 @@ dependencies = [
 [[package]]
 name = "libp2p-dns"
 version = "0.30.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "futures",
  "libp2p-core 0.30.0",
@@ -1577,7 +1577,7 @@ dependencies = [
 [[package]]
 name = "libp2p-identify"
 version = "0.31.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "futures",
  "futures-timer",
@@ -1592,7 +1592,7 @@ dependencies = [
 [[package]]
 name = "libp2p-metrics"
 version = "0.1.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "libp2p-core 0.30.0",
  "libp2p-identify",
@@ -1621,7 +1621,7 @@ dependencies = [
 [[package]]
 name = "libp2p-mplex"
 version = "0.30.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "asynchronous-codec",
  "bytes 1.1.0",
@@ -1660,7 +1660,7 @@ dependencies = [
 [[package]]
 name = "libp2p-noise"
 version = "0.33.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "bytes 1.1.0",
  "curve25519-dalek",
@@ -1681,7 +1681,7 @@ dependencies = [
 [[package]]
 name = "libp2p-pnet"
 version = "0.22.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "futures",
  "log",
@@ -1694,7 +1694,7 @@ dependencies = [
 [[package]]
 name = "libp2p-relay"
 version = "0.4.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "asynchronous-codec",
  "bytes 1.1.0",
@@ -1715,7 +1715,7 @@ dependencies = [
 [[package]]
 name = "libp2p-rendezvous"
 version = "0.1.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "asynchronous-codec",
  "bimap",
@@ -1772,7 +1772,7 @@ dependencies = [
 [[package]]
 name = "libp2p-swarm"
 version = "0.31.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "either",
  "futures",
@@ -1797,7 +1797,7 @@ dependencies = [
 [[package]]
 name = "libp2p-swarm-derive"
 version = "0.25.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "quote",
  "syn",
@@ -1823,7 +1823,7 @@ dependencies = [
 [[package]]
 name = "libp2p-tcp"
 version = "0.30.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "futures",
  "futures-timer",
@@ -1857,7 +1857,7 @@ dependencies = [
 [[package]]
 name = "libp2p-websocket"
 version = "0.31.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "either",
  "futures",
@@ -1887,7 +1887,7 @@ dependencies = [
 [[package]]
 name = "libp2p-yamux"
 version = "0.34.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "futures",
  "libp2p-core 0.30.0",
@@ -2207,7 +2207,7 @@ dependencies = [
 [[package]]
 name = "multistream-select"
 version = "0.11.0"
-source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#68e822d683f40ddd30ccc32b4e6abf3735e7635c"
+source = "git+https://github.com/wngr/rust-libp2p?branch=ow/wasm#30294a845a5fbd43e79eea1585ab3a29cf8e1625"
 dependencies = [
  "bytes 1.1.0",
  "futures",
@@ -2549,9 +2549,9 @@ checksum = "bc881b2c22681370c6a780e47af9840ef841837bc98118431d4e1868bd0c1086"
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.29"
+version = "1.0.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9f5105d4fdaab20335ca9565e106a5d9b82b6219b5ba735731124ac6711d23d"
+checksum = "edc3358ebc67bc8b7fa0c007f945b0b18226f78437d61bec735a9eb96b61ee70"
 dependencies = [
  "unicode-xid",
 ]
@@ -2691,9 +2691,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.9"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3d0b9745dc2debf507c8422de05d7226cc1f0644216dfdfead988f9b1ab32a7"
+checksum = "38bc8cc6a5f2e3655e0899c1b848643b2562f853f114bfec7be120678e3ace05"
 dependencies = [
  "proc-macro2",
 ]
@@ -2799,9 +2799,9 @@ dependencies = [
 
 [[package]]
 name = "range-collections"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "63ee870f39fc8f68f791721db4e194460d16ef879f01b89e20e5ccd27c4eceb7"
+checksum = "bef22bc685aa1b446b468c8827183449ebfa7bcc089242597efaf4e59c6b2719"
 dependencies = [
  "bytecheck",
  "rkyv",
@@ -2904,9 +2904,9 @@ dependencies = [
 
 [[package]]
 name = "rkyv"
-version = "0.7.18"
+version = "0.7.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f371763528cb5a45ff01879d08355c39d49b849e2e6e665989abe3262997bde0"
+checksum = "d1dc21ea9c98042443aaf7a19c341d98d814cd106582d2dd9fbe5da8e14774dd"
 dependencies = [
  "bytecheck",
  "hashbrown",
@@ -2918,9 +2918,9 @@ dependencies = [
 
 [[package]]
 name = "rkyv_derive"
-version = "0.7.18"
+version = "0.7.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97fc962ad6ffbcc218212c465318c7c151221474350b281b4912f4890ea590b5"
+checksum = "c73b640a4016b265097672e8200cb8bc876beb3a0cdb7b76efd515f1cfbf15b3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3152,9 +3152,9 @@ dependencies = [
 
 [[package]]
 name = "sharded-slab"
-version = "0.1.3"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "740223c51853f3145fe7c90360d2d4232f2b62e3449489c207eccde818979982"
+checksum = "900fba806f70c630b0a382d0d825e17a0f19fcd059a2ade1ff237bcddf446b31"
 dependencies = [
  "lazy_static",
 ]
@@ -3186,9 +3186,9 @@ dependencies = [
 
 [[package]]
 name = "slab"
-version = "0.4.4"
+version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c307a32c1c5c437f38c7fd45d753050587732ba8628319fbdf12a7e289ccc590"
+checksum = "9def91fd1e018fe007022791f865d0ccc9b3a0d5001e01aabb8b40e46000afb5"
 
 [[package]]
 name = "sled"
@@ -3354,9 +3354,9 @@ checksum = "6bdef32e8150c2a081110b42772ffe7d7c9032b606bc226c8260fd97e0976601"
 
 [[package]]
 name = "syn"
-version = "1.0.77"
+version = "1.0.80"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5239bc68e0fef57495900cfea4e8dc75596d9a319d7e16b1e0a440d24e6fe0a0"
+checksum = "d010a1623fbd906d51d650a9916aaefc05ffa0e4053ff7fe601167f3e715d194"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3365,9 +3365,9 @@ dependencies = [
 
 [[package]]
 name = "synstructure"
-version = "0.12.5"
+version = "0.12.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "474aaa926faa1603c40b7885a9eaea29b444d1cb2850cb7c0e37bb1a4182f4fa"
+checksum = "f36bdaa60a83aca3921b5259d5400cbf5e90fc51931376a9bd4a0eb79aa7210f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3409,18 +3409,18 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "1.0.29"
+version = "1.0.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "602eca064b2d83369e2b2f34b09c70b605402801927c65c11071ac911d299b88"
+checksum = "854babe52e4df1653706b98fcfc05843010039b406875930a70e4d9644e5c417"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.29"
+version = "1.0.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bad553cc2c78e8de258400763a647e80e6d1b31ee237275d756f6836d204494c"
+checksum = "aa32fd3f627f367fe16f893e2597ae3c05020f8bba2666a4e6ea73d377e5714b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3807,9 +3807,9 @@ dependencies = [
 
 [[package]]
 name = "unicode-bidi"
-version = "0.3.6"
+version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "246f4c42e67e7a4e3c6106ff716a5d067d4132a642840b242e357e468a2a0085"
+checksum = "1a01404663e3db436ed2746d9fefef640d868edae3cceb81c3b8d5732fda678f"
 
 [[package]]
 name = "unicode-normalization"

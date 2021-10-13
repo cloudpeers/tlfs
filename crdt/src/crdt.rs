@@ -199,12 +199,7 @@ impl DotStore {
         self.0.keys().map(|x| x.as_path().dot())
     }
 
-    pub fn join(
-        &mut self,
-        ctx: &impl AbstractDotSet<PeerId>,
-        that: &Self,
-        that_ctx: &impl AbstractDotSet<PeerId>,
-    ) {
+    pub fn join(&mut self, ctx: &impl AbstractDotSet, that: &Self, that_ctx: &impl AbstractDotSet) {
         self.0.outer_join_with(
             &that.0,
             |k, v, w| {
