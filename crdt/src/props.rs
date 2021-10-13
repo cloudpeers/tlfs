@@ -104,13 +104,6 @@ fn arb_hdotmap(
         .prop_map(|map| map.into_iter().filter(|(_, v)| !v.is_empty()).collect())
 }
 
-fn arb_hstruct(
-    inner: impl Strategy<Value = HDotStore>,
-    size: impl Into<SizeRange>,
-) -> impl Strategy<Value = BTreeMap<String, HDotStore>> {
-    prop::collection::btree_map(arb_prop(), inner, size)
-}
-
 pub fn arb_flatdotstore() -> impl Strategy<Value = DotStore> {
     let leaf = prop_oneof![
         arb_dotset(0..10).prop_map(|x| DotStore::dotset(Path::empty(), &x)),

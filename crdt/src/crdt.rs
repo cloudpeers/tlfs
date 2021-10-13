@@ -300,7 +300,7 @@ fn pair_to_dot_store(mut path: Path<'_>, value: &[u8]) -> anyhow::Result<HDotSto
                 store = HDotStore::Struct(res);
             }
             Some(DotStoreType::Root) => {
-                let doc = parent.doc();
+                let _doc = parent.doc();
             }
             None => {}
             x => {
@@ -334,7 +334,7 @@ fn iter<'a>(
         })),
         HDotStore::Struct(s) => Box::new(s.iter().flat_map(move |(k, v)| {
             let mut path = prefix.clone();
-            path.field(&k);
+            path.field(k);
             iter(v, path)
         })),
         HDotStore::Policy(s) => Box::new(s.iter().flat_map(move |(dot, policies)| {
@@ -395,18 +395,6 @@ impl DotStoreType {
             u if u == Struct as u8 => Some(Struct),
             u if u == Policy as u8 => Some(Policy),
             _ => None,
-        }
-    }
-
-    fn default(&self) -> Option<HDotStore> {
-        use DotStoreType::*;
-        match self {
-            Root => None,
-            Set => Some(HDotStore::DotSet(Default::default())),
-            Fun => Some(HDotStore::DotFun(Default::default())),
-            Map => Some(HDotStore::DotMap(Default::default())),
-            Struct => Some(HDotStore::Struct(Default::default())),
-            Policy => Some(HDotStore::Policy(Default::default())),
         }
     }
 }
@@ -584,12 +572,12 @@ impl HDotStore {
             (Self::DotSet(this), Self::DotSet(that)) => this.union(that),
             (Self::Policy(this), Self::Policy(that)) => {
                 for (k, w) in that {
-                    this.insert(k.clone(), w.clone());
+                    this.insert(*k, w.clone());
                 }
             }
             (Self::DotFun(this), Self::DotFun(that)) => {
                 for (k, w) in that {
-                    this.insert(k.clone(), w.clone());
+                    this.insert(*k, w.clone());
                 }
             }
             (Self::DotMap(this), Self::DotMap(that)) => {
@@ -978,7 +966,7 @@ impl Crdt {
     fn join_store(
         &self,
         doc: DocId,
-        peer_id: &PeerId,
+        _peer_id: &PeerId,
         that: &DotStore,
         that_ctx: &DotSet,
     ) -> Result<()> {
