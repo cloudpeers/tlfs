@@ -1232,50 +1232,31 @@ impl Crdt {
         that: &FlatDotStore,
         that_ctx: &DotSet,
     ) -> Result<()> {
+        // todo: permissions!
         let path = PathBuf::new(doc);
         let mut common = BTreeSet::new();
         for item in self.state.scan_prefix(path) {
             let (k, v) = item?;
             let k = Path::new(&k);
-            assert!(!k.is_empty());
-            let ty = k.ty().unwrap();
             let dot = k.dot();
             match that.get(&k) {
                 Some(w) => {
                     common.insert(k.to_owned());
-                    match k.ty().unwrap() {
-                        DotStoreType::Policy => {
-                            // this is a grow only set, so we just merge them without looking at the contexts at all
-                            let mut v: BTreeSet<Policy> = unarchive(&v)?;
-                            let w: BTreeSet<Policy> = unarchive(&w)?;
-                            v.extend(w);
-                            let v = archive(&v);
-                            self.state.insert(k, v)?;
-                        }
-                        DotStoreType::Set => {
-                            assert!(v.is_empty());
-                            assert!(w.is_empty());
-                            // if we get here, the dot exists on both sides, so we keep it
-                            // (s ∩ s')
-                        }
-                        DotStoreType::Fun => {
-                            // { k -> m(k) ∐ m'(k), k ∈ dom m ∩ dom m' }
-                            // different value for the same dot would be a bug
-                            assert_eq!(v, w);
-                        }
-                        _ => panic!(),
+                    // different value for the same dot would be a bug
+                    assert_eq!(v, w);
+                }
+                None => {
+                    // The type does not even matter.
+                    // If it is in that_ctx but not in that, it needs to go
+                    if that_ctx.contains(&dot) {
+                        self.state.remove(&k)?;
                     }
                 }
-                None => match k.ty().unwrap() {
-                    _ => panic!(),
-                },
             }
         }
         for (k, w) in &that.0 {
             if !common.contains(k) {
-                match k.as_path().ty().unwrap() {
-                    _ => panic!(),
-                }
+                self.state.insert(&k, w.clone())?;
             }
         }
         Ok(())
