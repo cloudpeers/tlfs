@@ -20,8 +20,7 @@ pub struct Backend {
 }
 
 impl Backend {
-    pub fn new(config: sled::Config) -> Result<Self> {
-        let db = config.open()?;
+    pub fn new(db: sled::Db) -> Result<Self> {
         let registry = Registry::new(db.open_tree("lenses")?);
         let docs = Docs::new(db.open_tree("docs")?);
         let acl = Acl::new(db.open_tree("acl")?);
@@ -48,34 +47,16 @@ impl Backend {
             .finish();
         tracing::subscriber::set_global_default(subscriber).ok();
         log_panics::init();
-        Self::new(sled::Config::new().temporary(true))
-    }
-
-    pub fn registry(&self) -> &Registry {
-        &self.registry
+        Self::new(sled::Config::new().temporary(true).open()?)
     }
 
     pub fn register(&self, lenses: Vec<Lens>) -> Result<Hash> {
         self.registry
-            .register(Ref::archive(&Lenses::new(lenses)).into())
+            .register(Ref::archive(&Lenses::new(lenses)).as_bytes())
     }
 
-    pub fn create_doc(&self, owner: PeerId) -> Result<Doc> {
-        let la = Keypair::generate();
-        let id = DocId::new(la.peer_id().into());
-        self.docs.create(id, owner)?;
-        let delta = self.crdt.say(
-            PathBuf::new(id).as_path(),
-            &Writer::new(id.into(), 0),
-            Policy::Can(Actor::Peer(owner), Permission::Own),
-        )?;
-        self.crdt.join(&id.into(), &delta)?;
-        self.doc(id)
-    }
-
-    pub fn open_doc(&self, id: DocId, peer: PeerId) -> Result<Doc> {
-        self.docs.set_peer_id(&id, peer)?;
-        self.doc(id)
+    pub fn registry(&self) -> &Registry {
+        &self.registry
     }
 
     pub fn doc(&self, id: DocId) -> Result<Doc> {
@@ -85,6 +66,58 @@ impl Backend {
             self.docs.clone(),
             self.registry.clone(),
         )
+    }
+
+    pub fn join(&self, peer_id: &PeerId, mut causal: Causal) -> Result<()> {
+        let doc_schema_id = self.docs.schema_id(&causal.ctx.doc)?;
+        let doc_lenses = self
+            .registry
+            .lenses(&doc_schema_id)?
+            .unwrap_or_else(|| Ref::new(EMPTY_LENSES.as_ref().into()));
+        let schema = self.registry.schema(&causal.ctx.schema())?;
+        let lenses = self.registry.lenses(&causal.ctx.schema())?;
+        let (schema, lenses) = match (schema, lenses) {
+            (Some(schema), Some(lenses)) => (schema, lenses),
+            _ => {
+                if causal.ctx.schema == EMPTY_HASH {
+                    (
+                        Ref::new(EMPTY_SCHEMA.to_vec().into()),
+                        Ref::new(EMPTY_LENSES.to_vec().into()),
+                    )
+                } else {
+                    return Err(anyhow!("missing lenses with hash {}", causal.ctx.schema()));
+                }
+            }
+        };
+        if !schema.as_ref().validate(causal.store()) {
+            return Err(anyhow!("crdt failed schema validation"));
+        }
+        causal.transform(doc_lenses.as_ref(), lenses.as_ref());
+        self.crdt.join(peer_id, &causal)?;
+        Ok(())
+    }
+
+    pub fn unjoin(&self, peer_id: &PeerId, ctx: &Archived<CausalContext>) -> Result<Causal> {
+        self.crdt.unjoin(peer_id, ctx)
+    }
+
+    pub fn transform(&mut self, id: DocId, schema_id: &Hash) -> Result<()> {
+        let doc_schema_id = self.docs.schema_id(&id)?;
+        let doc_lenses = self
+            .registry
+            .lenses(&doc_schema_id)?
+            .unwrap_or_else(|| Ref::new(EMPTY_LENSES.as_ref().into()));
+        let lenses = self
+            .registry
+            .lenses(schema_id)?
+            .ok_or_else(|| anyhow!("missing lenses with hash {}", &schema_id))?;
+        self.crdt
+            .transform(&id, schema_id, doc_lenses.as_ref(), lenses.as_ref())?;
+        Ok(())
+    }
+
+    pub fn frontend(&self) -> Frontend {
+        Frontend::new(self.crdt.clone(), self.docs.clone(), self.registry.clone())
     }
 }
 
@@ -97,6 +130,65 @@ impl Future for Backend {
 }
 
 #[derive(Clone)]
+pub struct Frontend {
+    crdt: Crdt,
+    docs: Docs,
+    registry: Registry,
+}
+
+impl Frontend {
+    pub fn new(crdt: Crdt, docs: Docs, registry: Registry) -> Self {
+        Self {
+            crdt,
+            docs,
+            registry,
+        }
+    }
+
+    pub fn docs(&self) -> impl Iterator<Item = Result<DocId>> + '_ {
+        self.docs.docs()
+    }
+
+    pub fn create_doc(&self, owner: PeerId, schema: &Hash) -> Result<Doc> {
+        let la = Keypair::generate();
+        let id = DocId::new(la.peer_id().into());
+        self.docs.create(&id, &owner, schema)?;
+        let delta = self.crdt.say(
+            PathBuf::new(id).as_path(),
+            &Writer::new(id.into(), 0),
+            Policy::Can(Actor::Peer(owner), Permission::Own),
+        )?;
+        self.crdt.join(&id.into(), &delta)?;
+        self.doc(id)
+    }
+
+    pub fn add_doc(&self, id: DocId, peer: &PeerId, schema: &Hash) -> Result<Doc> {
+        self.docs.set_peer_id(&id, peer)?;
+        self.docs.set_schema_id(&id, schema)?;
+        self.doc(id)
+    }
+
+    pub fn remove_doc(&self, _id: DocId) -> Result<()> {
+        todo!()
+    }
+
+    pub fn doc(&self, id: DocId) -> Result<Doc> {
+        Doc::new(
+            id,
+            self.crdt.clone(),
+            self.docs.clone(),
+            self.registry.clone(),
+        )
+    }
+
+    pub fn apply(&self, causal: &Causal) -> Result<()> {
+        let peer_id = self.docs.peer_id(&causal.ctx.doc)?.unwrap();
+        self.crdt.join(&peer_id, causal)?;
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
 pub struct Docs(sled::Tree);
 
 impl Docs {
@@ -104,11 +196,19 @@ impl Docs {
         Self(tree)
     }
 
-    pub fn create(&self, id: DocId, owner: PeerId) -> Result<()> {
+    pub fn docs(&self) -> impl Iterator<Item = Result<DocId>> + '_ {
+        self.0.iter().keys().filter_map(|r| match r {
+            Ok(k) if k[32] == 1 => Some(Ok(DocId::new((&k[..32]).try_into().unwrap()))),
+            Ok(_) => None,
+            Err(err) => Some(Err(err.into())),
+        })
+    }
+
+    pub fn create(&self, id: &DocId, owner: &PeerId, schema: &Hash) -> Result<()> {
         let mut key = [0; 33];
         key[..32].copy_from_slice(id.as_ref());
         key[32] = 0;
-        self.0.insert(key, EMPTY_HASH.as_ref())?;
+        self.0.insert(key, schema.as_bytes())?;
         key[32] = 1;
         self.0.insert(key, owner.as_ref())?;
         Ok(())
@@ -128,12 +228,11 @@ impl Docs {
             .unwrap_or_else(|| EMPTY_HASH.into()))
     }
 
-    pub fn set_schema_id(&self, id: &DocId, hash: Hash) -> Result<()> {
+    pub fn set_schema_id(&self, id: &DocId, hash: &Hash) -> Result<()> {
         let mut key = [0; 33];
         key[..32].copy_from_slice(id.as_ref());
         key[32] = 0;
-        let hash: [u8; 32] = hash.into();
-        self.0.insert(key, &hash)?;
+        self.0.insert(key, hash.as_bytes())?;
         Ok(())
     }
 
@@ -148,7 +247,7 @@ impl Docs {
         Ok(peer)
     }
 
-    pub fn set_peer_id(&self, id: &DocId, peer: PeerId) -> Result<()> {
+    pub fn set_peer_id(&self, id: &DocId, peer: &PeerId) -> Result<()> {
         let mut key = [0; 33];
         key[..32].copy_from_slice(id.as_ref());
         key[32] = 1;
@@ -279,8 +378,8 @@ impl Doc {
         self.writer.peer_id()
     }
 
-    pub fn ctx(&self) -> Result<Ref<CausalContext>> {
-        Ok(Ref::archive(&self.crdt.ctx(*self.id())?))
+    pub fn ctx(&self) -> Result<CausalContext> {
+        self.crdt.ctx(*self.id())
     }
 
     /// Returns a cursor for the document.
@@ -293,48 +392,6 @@ impl Doc {
             &self.crdt,
         )
     }
-
-    pub fn join(&self, peer_id: &PeerId, mut causal: Causal) -> Result<()> {
-        let schema = self.registry.schema(&causal.ctx.schema.into())?;
-        let lenses = self.registry.lenses(&causal.ctx.schema.into())?;
-        let (schema, lenses) = match (schema, lenses) {
-            (Some(schema), Some(lenses)) => (schema, lenses),
-            _ => {
-                if causal.ctx.schema == EMPTY_HASH {
-                    (
-                        Ref::new(EMPTY_SCHEMA.to_vec().into()),
-                        Ref::new(EMPTY_LENSES.to_vec().into()),
-                    )
-                } else {
-                    return Err(anyhow!("missing lenses with hash {}", &self.schema_id));
-                }
-            }
-        };
-        if !schema.as_ref().validate(causal.store()) {
-            return Err(anyhow!("crdt failed schema validation"));
-        }
-        causal.transform(self.lenses(), lenses.as_ref());
-        self.crdt.join(peer_id, &causal)?;
-        Ok(())
-    }
-
-    pub fn unjoin(&self, peer_id: &PeerId, ctx: &Archived<CausalContext>) -> Result<Causal> {
-        self.crdt.unjoin(peer_id, ctx)
-    }
-
-    pub fn transform(&mut self, schema_id: Hash) -> Result<()> {
-        let lenses = self
-            .registry
-            .lenses(&schema_id)?
-            .ok_or_else(|| anyhow!("missing lenses with hash {}", &schema_id))?;
-        let schema = self.registry.schema(&schema_id)?.unwrap();
-        self.crdt
-            .transform(&self.id, schema_id, self.lenses(), lenses.as_ref())?;
-        self.lenses = lenses;
-        self.schema = schema;
-        self.schema_id = schema_id;
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -346,12 +403,6 @@ mod tests {
     #[ignore]
     async fn test_api() -> Result<()> {
         let mut sdk = Backend::memory()?;
-
-        let peer = PeerId::new([0; 32]);
-        let mut doc = sdk.create_doc(peer)?;
-        Pin::new(&mut sdk).await?;
-        assert!(doc.cursor().can(&peer, Permission::Write)?);
-
         let lenses = vec![
             Lens::Make(Kind::Struct),
             Lens::AddProperty("todos".into()),
@@ -373,7 +424,11 @@ mod tests {
                 .lens_in("todos"),
         ];
         let hash = sdk.register(lenses)?;
-        doc.transform(hash)?;
+
+        let peer = PeerId::new([0; 32]);
+        let doc = sdk.frontend().create_doc(peer, &hash)?;
+        Pin::new(&mut sdk).await?;
+        assert!(doc.cursor().can(&peer, Permission::Write)?);
 
         let title = "something that needs to be done";
         let delta = doc
@@ -382,7 +437,7 @@ mod tests {
             .key(&0u64.into())?
             .field("title")?
             .assign(title)?;
-        doc.join(&peer, delta)?;
+        sdk.join(&peer, delta)?;
 
         let value = doc
             .cursor()
@@ -397,12 +452,13 @@ mod tests {
         let sdk2 = Backend::memory()?;
         let peer2 = PeerId::new([1; 32]);
         let op = doc.cursor().say_can(Some(peer2), Permission::Write)?;
-        doc.join(&peer, op)?;
+        sdk.join(&peer, op)?;
         Pin::new(&mut sdk).await?;
 
-        let doc2 = sdk2.open_doc(*doc.id(), peer2)?;
-        let delta = doc.unjoin(&peer2, doc2.ctx()?.as_ref())?;
-        doc2.join(&peer, delta)?;
+        let doc2 = sdk2.frontend().add_doc(*doc.id(), &peer2, &hash)?;
+        let ctx = Ref::archive(&doc.ctx()?);
+        let delta = sdk.unjoin(&peer2, ctx.as_ref())?;
+        sdk2.join(&peer, delta)?;
 
         let value = doc2
             .cursor()

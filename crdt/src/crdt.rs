@@ -51,7 +51,7 @@ impl From<&str> for Primitive {
 }
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize, Default)]
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
-#[archive_attr(derive(CheckBytes))]
+#[archive_attr(derive(Debug, CheckBytes))]
 #[archive_attr(check_bytes(
     bound = "__C: rkyv::validation::ArchiveContext, <__C as rkyv::Fallible>::Error: std::error::Error"
 ))]
@@ -199,12 +199,7 @@ impl DotStore {
         self.0.keys().map(|x| x.as_path().dot())
     }
 
-    pub fn join(
-        &mut self,
-        ctx: &impl AbstractDotSet<PeerId>,
-        that: &Self,
-        that_ctx: &impl AbstractDotSet<PeerId>,
-    ) {
+    pub fn join(&mut self, ctx: &impl AbstractDotSet, that: &Self, that_ctx: &impl AbstractDotSet) {
         self.0.outer_join_with(
             &that.0,
             |k, v, w| {
@@ -278,7 +273,7 @@ impl DotStoreType {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
-#[archive_attr(derive(CheckBytes))]
+#[archive_attr(derive(Debug, CheckBytes))]
 #[repr(C)]
 pub struct CausalContext {
     pub(crate) doc: DocId,
@@ -323,7 +318,7 @@ impl ArchivedCausalContext {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
-#[archive_attr(derive(CheckBytes))]
+#[archive_attr(derive(Debug, CheckBytes))]
 #[repr(C)]
 pub struct Causal {
     pub(crate) ctx: CausalContext,
@@ -363,6 +358,12 @@ impl Causal {
 
     pub fn transform(&mut self, from: &ArchivedLenses, to: &ArchivedLenses) {
         from.transform_dotstore(&mut self.store, to);
+    }
+}
+
+impl ArchivedCausal {
+    pub fn ctx(&self) -> &Archived<CausalContext> {
+        &self.ctx
     }
 }
 
@@ -854,7 +855,7 @@ impl Crdt {
     pub fn transform(
         &self,
         doc: &DocId,
-        schema_id: Hash,
+        schema_id: &Hash,
         from: &ArchivedLenses,
         to: &ArchivedLenses,
     ) -> Result<()> {
@@ -874,20 +875,17 @@ mod tests {
 
     #[async_std::test]
     async fn test_ewflag() -> Result<()> {
-        let sdk = Backend::memory()?;
+        let mut sdk = Backend::memory()?;
         let peer = PeerId::new([0; 32]);
-        let mut doc = sdk.create_doc(peer)?;
         let hash = sdk.register(vec![Lens::Make(Kind::Flag)])?;
-        doc.transform(hash)?;
-        sdk.await?;
+        let doc = sdk.frontend().create_doc(peer, &hash)?;
+        Pin::new(&mut sdk).await?;
         let op = doc.cursor().enable()?;
         assert!(!doc.cursor().enabled()?);
-        doc.join(&peer, op)?;
+        sdk.join(&peer, op)?;
         assert!(doc.cursor().enabled()?);
         let op = doc.cursor().disable()?;
-        println!("created op {:?}", op);
-        doc.join(&peer, op)?;
-        println!("joined op");
+        sdk.join(&peer, op)?;
         assert!(!doc.cursor().enabled()?);
         Ok(())
     }
@@ -897,50 +895,45 @@ mod tests {
     async fn test_ewflag_unjoin() -> Result<()> {
         let peer1 = PeerId::new([0; 32]);
 
-        let sdk1 = Backend::memory()?;
+        let mut sdk1 = Backend::memory()?;
         let hash1 = sdk1.register(vec![Lens::Make(Kind::Flag)])?;
-        let mut doc1 = sdk1.create_doc(peer1)?;
-        doc1.transform(hash1)?;
-        sdk1.await?;
+        let doc1 = sdk1.frontend().create_doc(peer1, &hash1)?;
+        Pin::new(&mut sdk1).await?;
 
-        let sdk2 = Backend::memory()?;
-        let mut doc2 = sdk2.create_doc(peer1)?;
+        let mut sdk2 = Backend::memory()?;
         let hash2 = sdk2.register(vec![Lens::Make(Kind::Flag)])?;
-        doc2.transform(hash2)?;
-        sdk2.await?;
-        assert!(hash1 == hash2);
+        let doc2 = sdk2.frontend().create_doc(peer1, &hash2)?;
+        Pin::new(&mut sdk2).await?;
+        assert_eq!(hash1, hash2);
 
         let mut op = doc1.cursor().enable()?;
-        doc1.join(&peer1, op.clone())?;
+        sdk1.join(&peer1, op.clone())?;
         op.ctx.doc = *doc2.id();
-        doc2.join(&peer1, op)?;
+        sdk2.join(&peer1, op)?;
 
         assert!(doc1.cursor().enabled()?);
         assert!(doc2.cursor().enabled()?);
 
         let ctx_after_enable = doc1.ctx()?;
         let mut op = doc1.cursor().disable()?;
-        doc1.join(&peer1, op.clone())?;
+        sdk1.join(&peer1, op.clone())?;
         let ctx_after_disable = doc1.ctx()?;
         if false {
             // apply the op
             op.ctx.doc = *doc2.id();
-            doc2.join(&peer1, op)?;
+            sdk2.join(&peer1, op)?;
         } else {
             // compute the delta using unjoin, and apply that
-            let mut delta = doc1.unjoin(&peer1, ctx_after_enable.as_ref())?;
-            let diff = ctx_after_disable
-                .to_owned()?
-                .dots
-                .difference(&ctx_after_enable.to_owned()?.dots);
+            let mut delta = sdk1.unjoin(&peer1, Ref::archive(&ctx_after_enable).as_ref())?;
+            let diff = ctx_after_disable.dots.difference(&ctx_after_enable.dots);
             println!("op {:?}", op);
-            println!("ctx after enable {:?}", ctx_after_enable.to_owned()?.dots);
-            println!("ctx after disable {:?}", ctx_after_disable.to_owned()?.dots);
+            println!("ctx after enable {:?}", ctx_after_enable.dots);
+            println!("ctx after disable {:?}", ctx_after_disable.dots);
             println!("difference {:?}", diff);
             println!("delta {:?}", delta);
             delta.ctx.doc = *doc2.id();
             println!("{:?}", delta.store());
-            doc2.join(&peer1, delta)?;
+            sdk2.join(&peer1, delta)?;
         }
         assert!(!doc1.cursor().enabled()?);
         assert!(!doc2.cursor().enabled()?);
@@ -951,19 +944,18 @@ mod tests {
     #[async_std::test]
     async fn test_mvreg() -> Result<()> {
         let mut sdk = Backend::memory()?;
-        let peer1 = PeerId::new([1; 32]);
-        let mut doc = sdk.create_doc(peer1)?;
         let hash = sdk.register(vec![Lens::Make(Kind::Reg(PrimitiveKind::U64))])?;
-        doc.transform(hash)?;
+        let peer1 = PeerId::new([1; 32]);
+        let doc = sdk.frontend().create_doc(peer1, &hash)?;
         Pin::new(&mut sdk).await?;
 
         let peer2 = PeerId::new([2; 32]);
         let op = doc.cursor().say_can(Some(peer2), Permission::Write)?;
-        doc.join(&peer1, op)?;
+        sdk.join(&peer1, op)?;
         Pin::new(&mut sdk).await?;
 
         let op1 = doc.cursor().assign(Primitive::U64(42))?;
-        doc.join(&peer1, op1)?;
+        sdk.join(&peer1, op1)?;
 
         //TODO
         //let op2 = crdt.assign(path.as_path(), &peer2, Primitive::U64(43))?;
@@ -975,7 +967,7 @@ mod tests {
         //assert!(values.contains(&43));
 
         let op = doc.cursor().assign(Primitive::U64(99))?;
-        doc.join(&peer1, op)?;
+        sdk.join(&peer1, op)?;
 
         let values = doc.cursor().u64s()?.collect::<Result<BTreeSet<u64>>>()?;
         assert_eq!(values.len(), 1);
@@ -988,8 +980,6 @@ mod tests {
     async fn test_ormap() -> Result<()> {
         let mut sdk = Backend::memory()?;
         let peer = PeerId::new([1; 32]);
-        let mut doc = sdk.create_doc(peer)?;
-
         let hash = sdk.register(vec![
             Lens::Make(Kind::Table(PrimitiveKind::Str)),
             Lens::LensMapValue(Box::new(Lens::Make(Kind::Table(PrimitiveKind::Str)))),
@@ -997,14 +987,14 @@ mod tests {
                 Kind::Reg(PrimitiveKind::U64),
             ))))),
         ])?;
-        doc.transform(hash)?;
+        let doc = sdk.frontend().create_doc(peer, &hash)?;
         Pin::new(&mut sdk).await?;
 
         let a = Primitive::Str("a".into());
         let b = Primitive::Str("b".into());
         let cur = doc.cursor().key(&a)?.key(&b)?;
         let op = cur.assign(Primitive::U64(42))?;
-        doc.join(&peer, op)?;
+        sdk.join(&peer, op)?;
 
         let values = cur.u64s()?.collect::<Result<BTreeSet<u64>>>()?;
         assert_eq!(values.len(), 1);
@@ -1012,7 +1002,7 @@ mod tests {
 
         let cur = doc.cursor().key(&a)?;
         let op = cur.remove(b.clone())?;
-        doc.join(&peer, op)?;
+        sdk.join(&peer, op)?;
 
         let values = cur.key(&b)?.u64s()?.collect::<Result<BTreeSet<u64>>>()?;
         assert!(values.is_empty());

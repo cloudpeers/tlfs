@@ -10,7 +10,7 @@ use rkyv::validation::validators::{check_archived_root, DefaultValidator};
 use rkyv::{archived_root_mut, Archive, Archived, Deserialize, Serialize};
 use std::pin::Pin;
 
-#[derive(Clone, Copy, Archive, Serialize, Deserialize)]
+#[derive(Clone, Copy, Archive, CheckBytes, Serialize, Deserialize)]
 #[archive(as = "Keypair")]
 #[repr(transparent)]
 pub struct Keypair([u8; 32]);
@@ -50,6 +50,12 @@ impl Keypair {
     }
 }
 
+impl From<Keypair> for [u8; 32] {
+    fn from(keypair: Keypair) -> Self {
+        keypair.0
+    }
+}
+
 #[derive(Clone, Archive, CheckBytes, Serialize, Deserialize)]
 #[archive_attr(derive(CheckBytes))]
 #[repr(C)]
@@ -76,7 +82,7 @@ impl ArchivedSigned {
     }
 }
 
-#[derive(Clone, Copy, Archive, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Archive, CheckBytes, Serialize, Deserialize)]
 #[archive(as = "Key")]
 #[repr(C)]
 pub struct Key([u8; 32]);
@@ -148,7 +154,7 @@ impl Encrypted {
     }
 }
 
-#[derive(Archive, Serialize, Deserialize)]
+#[derive(Archive, CheckBytes, Serialize, Deserialize)]
 #[archive(as = "KeyNonce")]
 #[repr(C)]
 pub struct KeyNonce {

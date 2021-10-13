@@ -49,6 +49,7 @@ impl AsRef<[u8]> for Metadata {
     }
 }
 
+#[derive(Clone)]
 pub struct Secrets(sled::Tree);
 
 impl Secrets {
@@ -106,7 +107,6 @@ impl Secrets {
             metadata.ty(KeyType::Key),
             Ref::archive(&Key::generate()).as_bytes(),
         )?;
-        self.0.insert(metadata.ty(KeyType::Key), [0; 8].as_ref())?;
         Ok(())
     }
 
