@@ -1206,7 +1206,16 @@ impl Crdt {
     ) -> Result<()> {
         use DotStore::*;
         match other {
-            Null => {}
+            Null => {
+                for key in self.state.scan_prefix(path).keys() {
+                    let key = key?;
+                    let key = Path::new(&key);
+                    let dot = key.dot();
+                    if other_ctx.contains(&dot) {
+                        self.state.remove(key)?;
+                    }
+                }
+            }
             DotSet(set) => self.join_dotset(path, peer_id, set, other_ctx)?,
             DotFun(fun) => self.join_dotfun(path, peer_id, fun, other_ctx)?,
             DotMap(map) => self.join_dotmap(path, peer_id, map, other_ctx)?,
@@ -1360,9 +1369,14 @@ impl Crdt {
         if !self.can(writer.peer_id(), Permission::Write, path)? {
             return Err(anyhow!("unauthorized"));
         }
-        let mut ctx = self.ctx(path.root().unwrap())?;
-        let dot = writer.dot();
-        ctx.dots.insert(dot);
+        let mut ctx = self.empty_ctx(path.root().unwrap())?;
+        // add all dots to be tombstoned into the context
+        for i in self.state.scan_prefix(&path).keys() {
+            let i = i?;
+            let path = Path::new(&i);
+            let dot = path.dot();
+            ctx.dots.insert(dot);
+        }
         Ok(Causal {
             store: FlatDotStore::dotset(path, &Default::default()),
             ctx,
@@ -1378,6 +1392,14 @@ impl Crdt {
             return Err(anyhow!("unauthorized"));
         }
         let mut ctx = self.ctx(path.root().unwrap())?;
+        // add all dots to be tombstoned into the context
+        for i in self.state.scan_prefix(&path).keys() {
+            let i = i?;
+            let path = Path::new(&i);
+            let dot = path.dot();
+            ctx.dots.insert(dot);
+        }
+        // add the new value into the context with a new dot
         let dot = writer.dot();
         ctx.dots.insert(dot);
         let mut store = BTreeMap::new();
@@ -1476,7 +1498,9 @@ mod tests {
         doc.join(&peer, op)?;
         assert!(doc.cursor().enabled()?);
         let op = doc.cursor().disable()?;
+        println!("created op {:?}", op);
         doc.join(&peer, op)?;
+        println!("joined op");
         assert!(!doc.cursor().enabled()?);
         Ok(())
     }
