@@ -72,7 +72,7 @@ where
     T: Archive,
     Archived<T>: Deserialize<T, rkyv::Infallible>,
 {
-    let archived = unsafe { archived_root::<T>(&value) };
+    let archived = unsafe { archived_root::<T>(value) };
     Ok(archived.deserialize(&mut rkyv::Infallible)?)
 }
 
@@ -129,7 +129,7 @@ impl DotStore {
             args.iter()
                 .map(|(dot, primitive)| {
                     let mut path = path.to_owned();
-                    path.dotfun(&dot);
+                    path.dotfun(dot);
                     (path, archive(primitive))
                 })
                 .collect(),
@@ -324,12 +324,12 @@ fn iter<'a>(
         })),
         HDotStore::DotFun(s) => Box::new(s.iter().map(move |(dot, value)| {
             let mut path = prefix.clone();
-            path.dotfun(&dot);
+            path.dotfun(dot);
             (path, archive(value))
         })),
         HDotStore::DotMap(s) => Box::new(s.iter().flat_map(move |(k, v)| {
             let mut path = prefix.clone();
-            path.key(&k);
+            path.key(k);
             iter(v, path)
         })),
         HDotStore::Struct(s) => Box::new(s.iter().flat_map(move |(k, v)| {
@@ -966,16 +966,20 @@ impl Crdt {
     fn join_store(
         &self,
         doc: DocId,
-        _peer_id: &PeerId,
+        peer: &PeerId,
         that: &DotStore,
         that_ctx: &DotSet,
     ) -> Result<()> {
         // TODO: permissions!
         let path = PathBuf::new(doc);
         let mut common = BTreeSet::new();
-        for item in self.state.scan_prefix(path) {
+        for item in self.state.scan_prefix(&path) {
             let (k, v) = item?;
             let k = Path::new(&k);
+            if !self.can(peer, Permission::Write, k)? {
+                tracing::info!("skipping {} due to lack of permissions", k);
+                continue;
+            }
             let dot = k.dot();
             match that.get(&k) {
                 Some(w) => {
@@ -993,6 +997,10 @@ impl Crdt {
             }
         }
         for (k, w) in &that.0 {
+            if !self.can(peer, Permission::Write, k.as_path())? {
+                tracing::info!("skipping {} due to lack of permissions", k.as_path());
+                continue;
+            }
             if !common.contains(k) {
                 self.state.insert(&k, w.clone())?;
             }
