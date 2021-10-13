@@ -4,9 +4,7 @@ use crate::{
 };
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
-use rkyv::{
-    archived_root, ser::serializers::AllocSerializer, Archive, Archived, Deserialize, Serialize,
-};
+use rkyv::{ser::serializers::AllocSerializer, Archive, Archived, Deserialize, Serialize};
 use std::{
     borrow::Borrow,
     collections::{BTreeMap, BTreeSet},
@@ -67,15 +65,6 @@ where
     Ref::archive(value).as_bytes().to_owned()
 }
 
-fn unarchive<T>(value: &[u8]) -> anyhow::Result<T>
-where
-    T: Archive,
-    Archived<T>: Deserialize<T, rkyv::Infallible>,
-{
-    let archived = unsafe { archived_root::<T>(value) };
-    Ok(archived.deserialize(&mut rkyv::Infallible)?)
-}
-
 pub trait InPlaceRelationalOps<K, V> {
     fn outer_join_with<W, L, R>(&mut self, that: &BTreeMap<K, W>, l: L, r: R)
     where
@@ -112,11 +101,11 @@ impl<K, V> InPlaceRelationalOps<K, V> for BTreeMap<K, V> {
 }
 
 impl DotStore {
-    pub fn policy(path: Path, args: BTreeMap<Dot, Policy>) -> Self {
+    pub fn policy(args: BTreeMap<Dot, Policy>) -> Self {
         Self(
             args.iter()
                 .map(|(dot, policy)| {
-                    let mut path = path.to_owned();
+                    let mut path = Path::empty().to_owned();
                     path.policy(dot);
                     (path, archive(policy))
                 })
@@ -124,11 +113,11 @@ impl DotStore {
         )
     }
 
-    pub fn dotfun(path: Path, args: BTreeMap<Dot, Primitive>) -> Self {
+    pub fn dotfun(args: BTreeMap<Dot, Primitive>) -> Self {
         Self(
             args.iter()
                 .map(|(dot, primitive)| {
-                    let mut path = path.to_owned();
+                    let mut path = Path::empty().to_owned();
                     path.dotfun(dot);
                     (path, archive(primitive))
                 })
@@ -136,11 +125,11 @@ impl DotStore {
         )
     }
 
-    pub fn dotset(path: Path, args: &DotSet) -> Self {
+    pub fn dotset(args: impl IntoIterator<Item = Dot>) -> Self {
         Self(
-            args.iter()
+            args.into_iter()
                 .map(|dot| {
-                    let mut path = path.to_owned();
+                    let mut path = Path::empty().to_owned();
                     path.dotset(&dot);
                     (path, Vec::new())
                 })
@@ -148,14 +137,14 @@ impl DotStore {
         )
     }
 
-    pub fn dotmap(path: Path, args: BTreeMap<Primitive, Self>) -> Self {
+    pub fn dotmap(args: BTreeMap<Primitive, Self>) -> Self {
         let entries = args.into_iter().flat_map(move |(key, store)| {
             store.0.into_iter().map(move |(k, v)| (key.clone(), k, v))
         });
         Self(
             entries
                 .map(|(key, k, v)| {
-                    let mut path = path.to_owned();
+                    let mut path = Path::empty().to_owned();
                     path.key(&key);
                     path.0.extend(k.0.into_iter());
                     (path, v)
@@ -164,17 +153,30 @@ impl DotStore {
         )
     }
 
-    pub fn strct(path: Path, args: BTreeMap<String, Self>) -> Self {
+    pub fn r#struct(args: BTreeMap<String, Self>) -> Self {
         let entries = args.into_iter().flat_map(move |(field, store)| {
             store.0.into_iter().map(move |(k, v)| (field.clone(), k, v))
         });
         Self(
             entries
                 .map(|(field, k, v)| {
-                    let mut path = path.to_owned();
+                    let mut path = Path::empty().to_owned();
                     path.field(&field);
                     path.0.extend(k.0.into_iter());
                     (path, v)
+                })
+                .collect(),
+        )
+    }
+
+    pub fn prefix(&self, path: Path) -> Self {
+        Self(
+            self.0
+                .iter()
+                .map(|(k, v)| {
+                    let mut k = k.clone();
+                    k.0.splice(0..0, path.0.iter().cloned());
+                    (k, v.clone())
                 })
                 .collect(),
         )
@@ -240,122 +242,9 @@ impl DotStore {
         )
     }
 
-    pub fn from_dot_store(value: &HDotStore, prefix: PathBuf) -> Self {
-        Self(iter(value, prefix).collect())
-    }
-
-    pub fn to_dot_store(&self) -> anyhow::Result<HDotStore> {
-        let atoms: Vec<HDotStore> = self
-            .0
-            .iter()
-            .map(|(path, value)| pair_to_dot_store(path.as_path(), value))
-            .collect::<anyhow::Result<Vec<_>>>()?;
-        Ok(atoms.into_iter().fold(HDotStore::Null, |mut agg, elem| {
-            agg.merge(&elem);
-            agg
-        }))
-    }
-
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
-}
-
-fn pair_to_dot_store(mut path: Path<'_>, value: &[u8]) -> anyhow::Result<HDotStore> {
-    let mut store = match path.ty() {
-        Some(DotStoreType::Policy) => {
-            let key = path.dot();
-            let value = unarchive(value)?;
-            let mut res = BTreeMap::new();
-            res.insert(key, value);
-            HDotStore::Policy(res)
-        }
-        Some(DotStoreType::Fun) => {
-            let key = path.dot();
-            let value = unarchive(value)?;
-            let mut res = BTreeMap::new();
-            res.insert(key, value);
-            HDotStore::DotFun(res)
-        }
-        Some(DotStoreType::Set) => {
-            let key = path.dot();
-            let mut res = DotSet::new();
-            res.insert(key);
-            HDotStore::DotSet(res)
-        }
-        _ => HDotStore::Null,
-    };
-    while let Some(parent) = path.parent() {
-        match parent.ty() {
-            Some(DotStoreType::Map) => {
-                let key = parent.key().to_owned()?;
-                let mut res = BTreeMap::new();
-                res.insert(key, store);
-                store = HDotStore::DotMap(res);
-            }
-            Some(DotStoreType::Struct) => {
-                let key = parent.field();
-                let mut res = BTreeMap::new();
-                res.insert(key.to_owned(), store);
-                store = HDotStore::Struct(res);
-            }
-            Some(DotStoreType::Root) => {
-                let _doc = parent.doc();
-            }
-            None => {}
-            x => {
-                panic!("unexpected parent type {:?} {:?}", x, parent)
-            }
-        }
-        path = parent;
-    }
-    Ok(store)
-}
-
-fn iter<'a>(
-    value: &'a HDotStore,
-    prefix: PathBuf,
-) -> Box<dyn Iterator<Item = (PathBuf, Vec<u8>)> + 'a> {
-    match value {
-        HDotStore::DotSet(s) => Box::new(s.iter().map(move |dot| {
-            let mut path = prefix.clone();
-            path.dotset(&dot);
-            (path, Vec::new())
-        })),
-        HDotStore::DotFun(s) => Box::new(s.iter().map(move |(dot, value)| {
-            let mut path = prefix.clone();
-            path.dotfun(dot);
-            (path, archive(value))
-        })),
-        HDotStore::DotMap(s) => Box::new(s.iter().flat_map(move |(k, v)| {
-            let mut path = prefix.clone();
-            path.key(k);
-            iter(v, path)
-        })),
-        HDotStore::Struct(s) => Box::new(s.iter().flat_map(move |(k, v)| {
-            let mut path = prefix.clone();
-            path.field(k);
-            iter(v, path)
-        })),
-        HDotStore::Policy(s) => Box::new(s.iter().flat_map(move |(dot, policies)| {
-            let mut path = prefix.clone();
-            path.policy(dot);
-            std::iter::once((path, archive(policies)))
-        })),
-        HDotStore::Null => Box::new(std::iter::empty()),
-    }
-}
-
-/// A hierarchical dot store. This is just temporary until we got the schema transform to work on the flat one.
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[repr(C)]
-pub enum HDotStore {
-    Null,
-    DotSet(DotSet),
-    DotFun(BTreeMap<Dot, Primitive>),
-    DotMap(BTreeMap<Primitive, HDotStore>),
-    Struct(BTreeMap<String, HDotStore>),
-    Policy(BTreeMap<Dot, Policy>),
 }
 
 #[derive(
@@ -383,204 +272,6 @@ impl DotStoreType {
             u if u == Struct as u8 => Some(Struct),
             u if u == Policy as u8 => Some(Policy),
             _ => None,
-        }
-    }
-}
-
-impl HDotStore {
-    pub fn is_empty(&self) -> bool {
-        match self {
-            Self::Null => true,
-            Self::DotSet(set) => set.is_empty(),
-            Self::DotFun(fun) => fun.is_empty(),
-            Self::DotMap(map) => map.is_empty(),
-            Self::Struct(fields) => fields.is_empty(),
-            Self::Policy(policy) => policy.is_empty(),
-        }
-    }
-
-    pub fn dots(&self, ctx: &mut DotSet) {
-        match self {
-            Self::Null => {}
-            Self::DotSet(set) => {
-                for dot in set.iter() {
-                    ctx.insert(dot);
-                }
-            }
-            Self::DotFun(fun) => {
-                for dot in fun.keys() {
-                    ctx.insert(*dot);
-                }
-            }
-            Self::DotMap(map) => {
-                for store in map.values() {
-                    store.dots(ctx);
-                }
-            }
-            Self::Struct(fields) => {
-                for store in fields.values() {
-                    store.dots(ctx);
-                }
-            }
-            Self::Policy(policy) => {
-                for dot in policy.keys() {
-                    ctx.insert(*dot);
-                }
-            }
-        }
-    }
-
-    pub fn join(
-        &mut self,
-        ctx: &impl AbstractDotSet<PeerId>,
-        other: &Self,
-        other_ctx: &impl AbstractDotSet<PeerId>,
-    ) {
-        match (self, other) {
-            (me @ Self::Null, other) => *me = other.clone(),
-            (_, Self::Null) => {}
-            (Self::DotSet(set), Self::DotSet(other)) => {
-                // from the paper
-                // (s, c) ∐ (s', c') = ((s ∩ s') ∪ (s \ c') (s' \ c), c ∪ c')
-                // (s \ c')
-                let a = set.difference(other_ctx);
-                // (s' \ c)
-                let b = other.difference(ctx);
-                // ((s ∩ s')
-                *set = set.intersection(other);
-                // (s ∩ s') ∪ (s \ c') ∪ (s' \ c)
-                set.union(&a);
-                set.union(&b);
-            }
-            (Self::DotFun(fun), Self::DotFun(other)) => {
-                // from the paper
-                // (m, c) ∐ (m', c') = ({ k -> m(k) ∐ m'(k), k ∈ dom m ∩ dom m' } ∪
-                //                      {(d, v) ∊ m | d ∉ c'} ∪ {(d, v) ∊ m' | d ∉ c}, c ∪ c')
-                fun.retain(|dot, _v| {
-                    if let Some(_v2) = other.get(dot) {
-                        // join all elements that are in both funs
-                        // { k -> m(k) ∐ m'(k), k ∈ dom m ∩ dom m' }
-                        // this can only occur if a dot was reused
-                        // v.join(v2);
-                        true
-                    } else {
-                        // keep all elements unmodified that are not in the other causal context
-                        // { (d, v) ∊ m | d ∉ c' }
-                        !other_ctx.contains(dot)
-                    }
-                });
-                // copy all elements from the other fun, that are neither in our fun nor in our
-                // causal context
-                // { (d, v) ∊ m' | d ∉ c }
-                for (d, v) in other {
-                    if !fun.contains_key(d) && !ctx.contains(d) {
-                        fun.insert(*d, v.clone());
-                    }
-                }
-            }
-            (Self::DotMap(map), Self::DotMap(other)) => {
-                // from the paper
-                // (m, c) ∐ (m', c') = ({ k -> v(k), k ∈ dom m ∪ dom m' ∧ v(k) ≠ ⊥ }, c ∪ c')
-                //                     where v(k) = fst ((m(k), c) ∐ (m'(k), c'))
-                let mut all = map.keys().cloned().collect::<Vec<_>>();
-                all.extend(other.keys().cloned());
-                for key in all {
-                    let v1 = map.entry(key.clone()).or_insert(HDotStore::Null);
-                    let v2 = other.get(&key).unwrap_or(&HDotStore::Null);
-                    v1.join(ctx, v2, other_ctx);
-                    if v1.is_empty() {
-                        map.remove(&key);
-                    }
-                }
-            }
-            (Self::Struct(fields), Self::Struct(other)) => {
-                for (field, value2) in other {
-                    if let Some(value) = fields.get_mut(field) {
-                        value.join(ctx, value2, other_ctx);
-                    } else {
-                        fields.insert(field.clone(), value2.clone());
-                    }
-                }
-            }
-            (Self::Policy(policy), Self::Policy(other)) => {
-                policy.extend(other.iter().map(|(k, v)| (*k, v.clone())));
-            }
-            (x, y) => panic!("invalid data\n l: {:?}\n r: {:?}", x, y),
-        }
-    }
-
-    pub fn unjoin(&self, diff: &DotSet) -> Self {
-        match self {
-            Self::Null => Self::Null,
-            Self::DotSet(set) => Self::DotSet(set.intersection(diff)),
-            Self::DotFun(fun) => {
-                let mut delta = BTreeMap::new();
-                for (dot, v) in fun {
-                    if diff.contains(dot) {
-                        delta.insert(*dot, v.clone());
-                    }
-                }
-                Self::DotFun(delta)
-            }
-            Self::DotMap(map) => {
-                let mut delta = BTreeMap::new();
-                for (k, v) in map {
-                    let v = v.unjoin(diff);
-                    if !v.is_empty() {
-                        delta.insert(k.clone(), v);
-                    }
-                }
-                Self::DotMap(delta)
-            }
-            Self::Struct(fields) => {
-                let mut delta = BTreeMap::new();
-                for (k, v) in fields {
-                    let v = v.unjoin(diff);
-                    if !v.is_empty() {
-                        delta.insert(k.clone(), v);
-                    }
-                }
-                Self::Struct(delta)
-            }
-            Self::Policy(policy) => {
-                let delta = policy
-                    .iter()
-                    .filter(|(dot, _)| diff.contains(dot))
-                    .map(|(k, v)| (*k, v.clone()))
-                    .collect();
-                Self::Policy(delta)
-            }
-        }
-    }
-
-    pub fn merge(&mut self, that: &Self) {
-        match (self, that) {
-            (me @ Self::Null, that) => *me = that.clone(),
-            (_, Self::Null) => {}
-            (Self::DotSet(this), Self::DotSet(that)) => this.union(that),
-            (Self::Policy(this), Self::Policy(that)) => {
-                for (k, w) in that {
-                    this.insert(*k, w.clone());
-                }
-            }
-            (Self::DotFun(this), Self::DotFun(that)) => {
-                for (k, w) in that {
-                    this.insert(*k, w.clone());
-                }
-            }
-            (Self::DotMap(this), Self::DotMap(that)) => {
-                for (k, w) in that {
-                    let v = this.entry(k.clone()).or_insert(HDotStore::Null);
-                    v.merge(w)
-                }
-            }
-            (Self::Struct(this), Self::Struct(that)) => {
-                for (k, w) in that {
-                    let v = this.entry(k.clone()).or_insert(HDotStore::Null);
-                    v.merge(w)
-                }
-            }
-            (x, y) => panic!("invalid data\n l: {:?}\n r: {:?}", x, y),
         }
     }
 }
@@ -1009,7 +700,7 @@ impl Crdt {
         let prefix = PathBuf::new(other.doc);
         let ctx = self.ctx(other.doc)?;
         let diff = ctx.dots.difference(&other.dots);
-        let mut store = HDotStore::Null;
+        let mut store = DotStore::default();
         for r in self.state.scan_prefix(prefix) {
             let (k, v) = r?;
             let path = Path::new(&k[..]);
@@ -1020,25 +711,7 @@ impl Crdt {
             if !self.can(peer_id, Permission::Read, path)? {
                 continue;
             }
-            let delta = match path.ty() {
-                Some(DotStoreType::Set) => {
-                    let mut dotset = DotSet::new();
-                    dotset.insert(dot);
-                    HDotStore::DotSet(dotset)
-                }
-                Some(DotStoreType::Fun) => {
-                    let mut dotfun = BTreeMap::new();
-                    dotfun.insert(dot, Ref::<Primitive>::new(v).to_owned()?);
-                    HDotStore::DotFun(dotfun)
-                }
-                Some(DotStoreType::Policy) => {
-                    let mut policy = BTreeMap::new();
-                    policy.insert(dot, Ref::<Policy>::new(v).to_owned()?);
-                    HDotStore::Policy(policy)
-                }
-                _ => continue,
-            };
-            store.join(&DotSet::new(), &delta, &DotSet::new());
+            store.0.insert(path.to_owned(), v.to_vec());
         }
         Ok(Causal {
             ctx: CausalContext {
@@ -1073,7 +746,7 @@ impl Crdt {
         let dot = writer.dot();
         ctx.dots.insert(dot);
         Ok(Causal {
-            store: DotStore::dotset(path, &ctx.dots),
+            store: DotStore::dotset(ctx.dots.iter()).prefix(path),
             ctx,
         })
     }
@@ -1091,7 +764,7 @@ impl Crdt {
             ctx.dots.insert(dot);
         }
         Ok(Causal {
-            store: DotStore::dotset(path, &Default::default()),
+            store: DotStore::dotset([]).prefix(path),
             ctx,
         })
     }
@@ -1118,7 +791,7 @@ impl Crdt {
         let mut store = BTreeMap::new();
         store.insert(dot, v);
         Ok(Causal {
-            store: DotStore::dotfun(path, store),
+            store: DotStore::dotfun(store).prefix(path),
             ctx,
         })
     }
@@ -1172,7 +845,7 @@ impl Crdt {
         let mut store = BTreeMap::new();
         store.insert(dot, policy);
         Ok(Causal {
-            store: DotStore::policy(path, store),
+            store: DotStore::policy(store).prefix(path),
             ctx,
         })
     }
