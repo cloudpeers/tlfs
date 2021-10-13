@@ -1,4 +1,4 @@
-use crate::{DotStore, Primitive};
+use crate::{crdt::DotStore, Primitive};
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Serialize};
 use std::collections::BTreeMap;
@@ -40,58 +40,8 @@ pub enum Schema {
 }
 
 impl ArchivedSchema {
-    pub fn validate(&self, v: &DotStore) -> bool {
-        match (self, v) {
-            (Self::Null, DotStore::Null) => true,
-            (Self::Flag, DotStore::DotSet(_)) => true,
-            (Self::Reg(kind), DotStore::DotFun(fun)) => {
-                for v in fun.values() {
-                    if !kind.validate(v) {
-                        return false;
-                    }
-                }
-                true
-            }
-            (Self::Table(kind, schema), DotStore::DotMap(map)) => {
-                for (key, crdt) in map.iter() {
-                    if !kind.validate(key) {
-                        return false;
-                    }
-                    if !schema.validate(crdt) {
-                        return false;
-                    }
-                }
-                true
-            }
-            (Self::Struct(schema), DotStore::Struct(fields)) => {
-                /*for prop in schema.keys() {
-                    if !map.contains_key(prop.as_str()) {
-                        return false;
-                    }
-                }*/
-                for (prop, crdt) in fields {
-                    if let Some(schema) = schema.get(prop.as_str()) {
-                        if !schema.validate(crdt) {
-                            return false;
-                        }
-                    } else {
-                        return false;
-                    }
-                }
-                true
-            }
-            (_, DotStore::Policy(_)) => true,
-            _ => false,
-        }
-    }
-
-    pub fn default(&self) -> DotStore {
-        match self {
-            Self::Null => DotStore::Null,
-            Self::Flag => DotStore::DotSet(Default::default()),
-            Self::Reg(_) => DotStore::DotFun(Default::default()),
-            Self::Table(_, _) => DotStore::DotMap(Default::default()),
-            Self::Struct(_) => DotStore::Struct(Default::default()),
-        }
+    pub fn validate(&self, _v: &DotStore) -> bool {
+        // TODO
+        true
     }
 }
