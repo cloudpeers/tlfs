@@ -1,4 +1,5 @@
-use crate::{Crdt, DocId, DotStore, PrimitiveKind, Prop, Schema};
+use crate::crdt::DotStore;
+use crate::{Crdt, DocId, PrimitiveKind, Prop, Schema};
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
 use rkyv::ser::serializers::AllocSerializer;
@@ -220,59 +221,8 @@ impl<'a> LensRef<'a> {
         Ok(())
     }
 
-    pub fn transform_dotstore(&self, store: &mut DotStore) {
-        match (self, store) {
-            (Self::Make(k), v) => {
-                *v = match k {
-                    ArchivedKind::Null => DotStore::Null,
-                    ArchivedKind::Flag => DotStore::DotSet(Default::default()),
-                    ArchivedKind::Reg(_) => DotStore::DotFun(Default::default()),
-                    ArchivedKind::Table(_) => DotStore::DotMap(Default::default()),
-                    ArchivedKind::Struct => DotStore::Struct(Default::default()),
-                };
-            }
-            (Self::Destroy(_), v) => {
-                *v = DotStore::Null;
-            }
-            (Self::AddProperty(key), DotStore::Struct(m)) => {
-                m.insert(key.to_string(), DotStore::Null);
-            }
-            (Self::RemoveProperty(key), DotStore::Struct(m)) => {
-                m.remove(key.as_str());
-            }
-            (Self::RenameProperty(from, to), DotStore::Struct(m)) => {
-                if let Some(v) = m.remove(from.as_str()) {
-                    m.insert(to.to_string(), v);
-                }
-            }
-            (Self::HoistProperty(host, target), DotStore::Struct(m)) => {
-                if let Some(DotStore::Struct(host)) = m.get_mut(host.as_str()) {
-                    if let Some(v) = host.remove(target.as_str()) {
-                        m.insert(target.to_string(), v);
-                    }
-                }
-            }
-            (Self::PlungeProperty(host, target), DotStore::Struct(m)) => {
-                if let Some(v) = m.remove(target.as_str()) {
-                    if let Some(DotStore::Struct(host)) = m.get_mut(host.as_str()) {
-                        host.insert(target.to_string(), v);
-                    } else {
-                        m.insert(target.to_string(), v);
-                    }
-                }
-            }
-            (Self::LensIn(rev, key, lens), DotStore::Struct(m)) => {
-                if let Some(v) = m.get_mut(key.as_str()) {
-                    lens.to_ref().maybe_reverse(*rev).transform_dotstore(v);
-                }
-            }
-            (Self::LensMapValue(rev, lens), DotStore::DotMap(vs)) => {
-                for v in vs.values_mut() {
-                    lens.to_ref().maybe_reverse(*rev).transform_dotstore(v);
-                }
-            }
-            _ => {}
-        }
+    pub fn transform_dotstore(&self, _store: &mut DotStore) {
+        // TODO
     }
 
     pub fn transform_crdt(&self, _doc: &DocId, _store: &Crdt) -> Result<()> {
