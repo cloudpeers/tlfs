@@ -24,6 +24,7 @@ log-panics = "2.0.0"
 tracing-log = "0.1.2"
 tracing = "0.1.29"
 async-global-executor = "2.0.2"
+fnv = "1.0.7"
 
 [dependencies.libp2p]
 version = "0.39.1"
