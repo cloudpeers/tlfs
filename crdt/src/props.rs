@@ -34,10 +34,13 @@ pub fn arb_ctx() -> impl Strategy<Value = DotSet> {
 }
 
 pub fn arb_causal_ctx() -> impl Strategy<Value = CausalContext> {
-    arb_ctx().prop_map(|dots| CausalContext {
-        doc: DocId::new([0; 32]),
-        schema: [0; 32],
-        dots,
+    arb_ctx().prop_map(|dots| {
+        todo!()
+        // CausalContext {
+        //     doc: DocId::new([0; 32]),
+        //     schema: [0; 32],
+        //     dots,
+        // }
     })
 }
 
@@ -145,14 +148,15 @@ pub fn arb_causal(
         }
         let dots = DotSet::from_map(present);
         let doc = DocId::new([0; 32]);
-        Causal {
-            ctx: CausalContext {
-                doc,
-                schema: [0; 32],
-                dots,
-            },
-            store: store.prefix(PathBuf::new(doc).as_path()),
-        }
+        todo!()
+        // Causal {
+        //     ctx: CausalContext {
+        //         doc,
+        //         schema: [0; 32],
+        //         dots,
+        //     },
+        //     store: store.prefix(PathBuf::new(doc).as_path()),
+        // }
     })
 }
 

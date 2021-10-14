@@ -279,7 +279,7 @@ impl DotStoreType {
 pub struct CausalContext {
     pub(crate) doc: DocId,
     pub(crate) schema: [u8; 32],
-    pub(crate) dots: DotSet,
+    dots: DotSet,
 }
 
 impl CausalContext {
@@ -299,9 +299,9 @@ impl CausalContext {
         self.schema.into()
     }
 
-    pub fn dots(&self) -> &DotSet {
-        &self.dots
-    }
+    // pub fn dots(&self) -> &DotSet {
+    //     &self.dots
+    // }
 }
 
 impl ArchivedCausalContext {
@@ -313,9 +313,9 @@ impl ArchivedCausalContext {
         self.schema.into()
     }
 
-    pub fn dots(&self) -> &Archived<DotSet> {
-        &self.dots
-    }
+    // pub fn dots(&self) -> &Archived<DotSet> {
+    //     &self.dots
+    // }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
@@ -333,6 +333,14 @@ impl Causal {
 
     pub fn store(&self) -> &DotStore {
         &self.store
+    }
+
+    pub fn dots(&self) -> DotSet {
+        self.store.dots().collect::<DotSet>()
+    }
+
+    pub fn expired(&self) -> DotSet {
+        self.ctx.dots.difference(&self.dots())
     }
 
     pub fn join(&mut self, that: &Causal) {
@@ -697,12 +705,12 @@ impl Crdt {
     }
 
     pub fn join(&self, peer_id: &PeerId, causal: &Causal) -> Result<()> {
-        let that_dots = causal.store.dots().collect::<DotSet>();
-        let expired = causal.ctx.dots.difference(&that_dots);
+        let that_dots = causal.dots();
+        let expired = causal.expired();
         self.join_store(causal.ctx.doc, peer_id, &causal.store, &expired)?;
-        for peer_id in causal.ctx.dots.peers() {
+        for peer_id in that_dots.peers() {
             self.docs
-                .extend_present(&causal.ctx.doc, peer_id, causal.ctx.dots.max(peer_id))?;
+                .extend_present(&causal.ctx.doc, peer_id, that_dots.max(peer_id))?;
         }
         Ok(())
     }
