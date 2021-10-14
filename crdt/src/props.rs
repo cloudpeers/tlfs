@@ -34,13 +34,11 @@ pub fn arb_ctx() -> impl Strategy<Value = DotSet> {
 }
 
 pub fn arb_causal_ctx() -> impl Strategy<Value = CausalContext> {
-    arb_ctx().prop_map(|dots| {
-        todo!()
-        // CausalContext {
-        //     doc: DocId::new([0; 32]),
-        //     schema: [0; 32],
-        //     dots,
-        // }
+    arb_ctx().prop_map(|dots| CausalContext {
+        doc: DocId::new([0; 32]),
+        schema: [0; 32],
+        dots,
+        expired: Default::default(),
     })
 }
 
@@ -98,7 +96,7 @@ fn arb_struct(
     prop::collection::btree_map(arb_prop(), inner, size)
 }
 
-pub fn arb_flatdotstore() -> impl Strategy<Value = DotStore> {
+pub fn arb_dotstore() -> impl Strategy<Value = DotStore> {
     let leaf = prop_oneof![
         arb_dotset(0..10).prop_map(|x| DotStore::dotset(x.iter())),
         arb_primitive_kind()
@@ -147,16 +145,17 @@ pub fn arb_causal(
             }
         }
         let dots = DotSet::from_map(present);
+        // TODO: compute dots and expired so they don't overlap
         let doc = DocId::new([0; 32]);
-        todo!()
-        // Causal {
-        //     ctx: CausalContext {
-        //         doc,
-        //         schema: [0; 32],
-        //         dots,
-        //     },
-        //     store: store.prefix(PathBuf::new(doc).as_path()),
-        // }
+        Causal {
+            ctx: CausalContext {
+                doc,
+                schema: [0; 32],
+                dots,
+                expired: Default::default(),
+            },
+            store: store.prefix(PathBuf::new(doc).as_path()),
+        }
     })
 }
 

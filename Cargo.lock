@@ -3534,6 +3534,7 @@ dependencies = [
  "crepe",
  "ed25519-dalek",
  "getrandom 0.2.3",
+ "hex",
  "itertools",
  "log-panics",
  "proptest",

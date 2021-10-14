@@ -279,7 +279,10 @@ impl DotStoreType {
 pub struct CausalContext {
     pub(crate) doc: DocId,
     pub(crate) schema: [u8; 32],
-    dots: DotSet,
+    /// the dots to be considered. These are the dots in the store.
+    pub(crate) dots: DotSet,
+    /// the expired dots. The intersection of this and dots must be empty.
+    pub(crate) expired: DotSet,
 }
 
 impl CausalContext {
@@ -288,6 +291,7 @@ impl CausalContext {
             doc,
             schema: schema.into(),
             dots: Default::default(),
+            expired: Default::default(),
         }
     }
 
@@ -299,9 +303,13 @@ impl CausalContext {
         self.schema.into()
     }
 
-    // pub fn dots(&self) -> &DotSet {
-    //     &self.dots
-    // }
+    pub fn dots(&self) -> &DotSet {
+        &self.dots
+    }
+
+    pub fn expired(&self) -> &DotSet {
+        &self.expired
+    }
 }
 
 impl ArchivedCausalContext {
@@ -313,9 +321,13 @@ impl ArchivedCausalContext {
         self.schema.into()
     }
 
-    // pub fn dots(&self) -> &Archived<DotSet> {
-    //     &self.dots
-    // }
+    pub fn dots(&self) -> &Archived<DotSet> {
+        &self.dots
+    }
+
+    pub fn expired(&self) -> &Archived<DotSet> {
+        &self.expired
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
@@ -335,32 +347,33 @@ impl Causal {
         &self.store
     }
 
-    pub fn dots(&self) -> DotSet {
-        self.store.dots().collect::<DotSet>()
+    pub fn dots(&self) -> &DotSet {
+        self.ctx.dots()
     }
 
-    pub fn expired(&self) -> DotSet {
-        self.ctx.dots.difference(&self.dots())
+    pub fn expired(&self) -> &DotSet {
+        self.ctx.expired()
     }
 
     pub fn join(&mut self, that: &Causal) {
         assert_eq!(self.ctx().doc(), &that.ctx.doc);
         assert_eq!(&self.ctx().schema, &that.ctx.schema);
 
-        let that_dots = that.store.dots().collect::<DotSet>();
-        let expired = that.ctx.dots.difference(&that_dots);
-        self.store.join(&that.store, &expired);
+        self.store.join(&that.store, that.expired());
         self.ctx.dots.union(&that.ctx.dots);
+        self.ctx.expired.union(&that.ctx.expired);
     }
 
     pub fn unjoin(&self, ctx: &CausalContext) -> Self {
-        let dots = self.ctx.dots.difference(&ctx.dots);
+        let dots = self.ctx.dots().difference(ctx.dots());
+        let expired = self.ctx.expired().difference(ctx.expired());
         let store = self.store.unjoin(&dots);
         Self {
             ctx: CausalContext {
                 doc: self.ctx.doc,
                 schema: self.ctx.schema,
                 dots,
+                expired,
             },
             store,
         }
@@ -573,21 +586,58 @@ impl<'a> AsRef<[u8]> for Path<'a> {
 #[derive(Clone)]
 pub struct Crdt {
     state: sled::Tree,
+    expired: sled::Tree,
     acl: Acl,
     docs: Docs,
 }
 
+impl std::fmt::Debug for Crdt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Crdt")
+            .field("state", &StateDebug(&self.state))
+            .finish_non_exhaustive()
+    }
+}
+
+pub struct HexDebug<'a>(pub &'a [u8]);
+
+impl<'a> std::fmt::Debug for HexDebug<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{}]", hex::encode(self.0))
+    }
+}
+
+struct StateDebug<'a>(&'a sled::Tree);
+
+impl<'a> std::fmt::Debug for StateDebug<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut m = f.debug_map();
+        for e in self.0.iter() {
+            let (k, v) = e.map_err(|_| std::fmt::Error::default())?;
+            let path = Path::new(&k);
+            m.entry(&path.to_string(), &HexDebug(&v));
+        }
+        m.finish()
+    }
+}
+
 impl Crdt {
-    pub fn new(state: sled::Tree, acl: Acl, docs: Docs) -> Self {
-        Self { state, acl, docs }
+    pub fn new(state: sled::Tree, expired: sled::Tree, acl: Acl, docs: Docs) -> Self {
+        Self {
+            state,
+            expired,
+            acl,
+            docs,
+        }
     }
 
     pub fn memory() -> Result<(Self, Engine)> {
         let db = sled::Config::new().temporary(true).open()?;
         let state = db.open_tree("state")?;
+        let expired = db.open_tree("expired")?;
         let acl = Acl::new(db.open_tree("acl")?);
         let docs = Docs::new(db.open_tree("docs")?);
-        let me = Self::new(state, acl.clone(), docs);
+        let me = Self::new(state, expired, acl.clone(), docs);
         let engine = Engine::new(me.clone(), acl)?;
         Ok((me, engine))
     }
@@ -707,7 +757,14 @@ impl Crdt {
     pub fn join(&self, peer_id: &PeerId, causal: &Causal) -> Result<()> {
         let that_dots = causal.dots();
         let expired = causal.expired();
+        let doc = causal.ctx.doc;
         self.join_store(causal.ctx.doc, peer_id, &causal.store, &expired)?;
+        for dot in causal.expired().iter() {
+            let key = (doc, dot);
+            println!("inserting expired key {:?}", Ref::archive(&key));
+            println!("inserting expired doc {:?}", Ref::archive(&doc));
+            self.expired.insert(Ref::archive(&key).as_bytes(), &[])?;
+        }
         for peer_id in that_dots.peers() {
             self.docs
                 .extend_present(&causal.ctx.doc, peer_id, that_dots.max(peer_id))?;
@@ -718,13 +775,14 @@ impl Crdt {
     pub fn unjoin(&self, peer_id: &PeerId, other: &Archived<CausalContext>) -> Result<Causal> {
         let prefix = PathBuf::new(other.doc);
         let ctx = self.ctx(other.doc)?;
-        let diff = ctx.dots.difference(&other.dots);
+        let dots = ctx.dots.difference(&other.dots);
+        let expired = ctx.expired.difference(&other.expired);
         let mut store = DotStore::default();
         for r in self.state.scan_prefix(prefix) {
             let (k, v) = r?;
             let path = Path::new(&k[..]);
             let dot = path.dot();
-            if !diff.contains(&dot) {
+            if !dots.contains(&dot) {
                 continue;
             }
             if !self.can(peer_id, Permission::Read, path)? {
@@ -737,7 +795,8 @@ impl Crdt {
             ctx: CausalContext {
                 doc: ctx.doc,
                 schema: ctx.schema,
-                dots: diff,
+                dots,
+                expired,
             },
             store,
         })
@@ -749,12 +808,31 @@ impl Crdt {
             doc,
             schema: schema.into(),
             dots: Default::default(),
+            expired: Default::default(),
         })
+    }
+
+    // reads all dots for a docid.
+    fn dots(&self, doc: DocId) -> impl Iterator<Item = sled::Result<Dot>> {
+        let path = PathBuf::new(doc);
+        self.state
+            .scan_prefix(path.as_path())
+            .keys()
+            .map(move |i| i.map(|key| Path::new(&key).dot()))
     }
 
     pub fn ctx(&self, doc: DocId) -> Result<CausalContext> {
         let mut ctx = self.empty_ctx(doc)?;
-        ctx.dots = DotSet::from_map(self.docs.present(&doc).collect::<Result<_>>()?);
+        for dot in self.dots(doc) {
+            ctx.dots.insert(dot?);
+        }
+        let prefix = Ref::archive(&doc);
+        println!("looking for expired!");
+        for key in self.expired.scan_prefix(prefix.as_bytes()).keys() {
+            let (_, dot) = Ref::<(DocId, Dot)>::new(key?).to_owned()?;
+            println!("..found {}", dot);
+            ctx.expired.insert(dot);
+        }
         Ok(ctx)
     }
 
@@ -766,7 +844,7 @@ impl Crdt {
         let dot = writer.dot();
         ctx.dots.insert(dot);
         Ok(Causal {
-            store: DotStore::dotset(ctx.dots.iter()).prefix(path),
+            store: DotStore::dotset(std::iter::once(dot)).prefix(path),
             ctx,
         })
     }
@@ -781,7 +859,7 @@ impl Crdt {
             let i = i?;
             let path = Path::new(&i);
             let dot = path.dot();
-            ctx.dots.insert(dot);
+            ctx.expired.insert(dot);
         }
         Ok(Causal {
             store: DotStore::dotset([]).prefix(path),
@@ -803,15 +881,12 @@ impl Crdt {
             let i = i?;
             let path = Path::new(&i);
             let dot = path.dot();
-            ctx.dots.insert(dot);
+            ctx.expired.insert(dot);
         }
         // add the new value into the context with a new dot
         let dot = writer.dot();
-        ctx.dots.insert(dot);
-        let mut store = BTreeMap::new();
-        store.insert(dot, v);
         Ok(Causal {
-            store: DotStore::dotfun(store).prefix(path),
+            store: DotStore::dotfun(std::iter::once((dot, v))).prefix(path),
             ctx,
         })
     }
@@ -829,7 +904,7 @@ impl Crdt {
         }
         let mut ctx = self.empty_ctx(path.root().unwrap())?;
         let dot = writer.dot();
-        ctx.dots.insert(dot);
+        ctx.expired.insert(dot);
         for res in self.state.scan_prefix(path).keys() {
             let key = res?;
             let key = Path::new(&key[..]);
@@ -838,7 +913,7 @@ impl Crdt {
                 continue;
             }
             let dot = key.dot();
-            ctx.dots.insert(dot);
+            ctx.expired.insert(dot);
         }
         Ok(Causal {
             store: DotStore::default(),
@@ -862,10 +937,8 @@ impl Crdt {
         let mut ctx = self.empty_ctx(path.root().unwrap())?;
         let dot = writer.dot();
         ctx.dots.insert(dot);
-        let mut store = BTreeMap::new();
-        store.insert(dot, policy);
         Ok(Causal {
-            store: DotStore::policy(store).prefix(path),
+            store: DotStore::policy(std::iter::once((dot, policy))).prefix(path),
             ctx,
         })
     }
@@ -886,7 +959,7 @@ impl Crdt {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::props::*;
+    use crate::{props::*, Keypair};
     use crate::{Backend, Kind, Lens, PrimitiveKind};
     use proptest::prelude::*;
     use std::pin::Pin;
@@ -909,26 +982,33 @@ mod tests {
     }
 
     #[async_std::test]
-    #[ignore]
     async fn test_ewflag_unjoin() -> Result<()> {
         let peer1 = PeerId::new([0; 32]);
+        let la = Keypair::generate();
 
         let mut sdk1 = Backend::memory()?;
         let hash1 = sdk1.register(vec![Lens::Make(Kind::Flag)])?;
-        let doc1 = sdk1.frontend().create_doc(peer1, &hash1)?;
+        let doc1 = sdk1
+            .frontend()
+            .create_doc_deterministic(peer1, &hash1, la)?;
         Pin::new(&mut sdk1).await?;
 
         let mut sdk2 = Backend::memory()?;
         let hash2 = sdk2.register(vec![Lens::Make(Kind::Flag)])?;
-        let doc2 = sdk2.frontend().create_doc(peer1, &hash2)?;
+        let doc2 = sdk2
+            .frontend()
+            .create_doc_deterministic(peer1, &hash2, la)?;
         Pin::new(&mut sdk2).await?;
         assert_eq!(hash1, hash2);
 
         let mut op = doc1.cursor().enable()?;
+        println!("{:?}", op);
         sdk1.join(&peer1, op.clone())?;
         op.ctx.doc = *doc2.id();
         sdk2.join(&peer1, op)?;
 
+        println!("{:#?}", doc1);
+        println!("{:#?}", doc2);
         assert!(doc1.cursor().enabled()?);
         assert!(doc2.cursor().enabled()?);
 
@@ -943,10 +1023,12 @@ mod tests {
         } else {
             // compute the delta using unjoin, and apply that
             let mut delta = sdk1.unjoin(&peer1, Ref::archive(&ctx_after_enable).as_ref())?;
-            let diff = ctx_after_disable.dots.difference(&ctx_after_enable.dots);
+            let diff = ctx_after_disable
+                .expired
+                .difference(&ctx_after_enable.expired);
             println!("op {:?}", op);
-            println!("ctx after enable {:?}", ctx_after_enable.dots);
-            println!("ctx after disable {:?}", ctx_after_disable.dots);
+            println!("expired after enable {:?}", ctx_after_enable.expired);
+            println!("expired after disable {:?}", ctx_after_disable.expired);
             println!("difference {:?}", diff);
             println!("delta {:?}", delta);
             delta.ctx.doc = *doc2.id();
@@ -1030,25 +1112,33 @@ mod tests {
 
     proptest! {
         #[test]
-        fn causal_unjoin(a in arb_causal(arb_flatdotstore()), b in arb_causal_ctx()) {
+        fn causal_unjoin(a in arb_causal(arb_dotstore()), b in arb_causal_ctx()) {
             let b = a.unjoin(&b);
             prop_assert_eq!(join(&a, &b), a);
         }
 
         #[test]
-        fn causal_join_idempotent(a in arb_causal(arb_flatdotstore())) {
+        fn causal_join_idempotent(a in arb_causal(arb_dotstore())) {
             prop_assert_eq!(join(&a, &a), a);
         }
 
         #[test]
-        fn causal_join_commutative(dots in arb_causal(arb_flatdotstore()), a in arb_causal_ctx(), b in arb_causal_ctx()) {
+        fn causal_join_commutative(dots in arb_causal(arb_dotstore()), a in arb_causal_ctx(), b in arb_causal_ctx()) {
             let a = dots.unjoin(&a);
             let b = dots.unjoin(&b);
-            prop_assert_eq!(join(&a, &b), join(&b, &a));
+            let ab = join(&a, &b);
+            let ba = join(&b, &a);
+            if ab != ba {
+                println!("ab {:?}\nba {:?}", ab.dots(), ba.dots());
+                println!("ab {:?}\nba {:?}", ab.expired(), ba.expired());
+                println!("ab {:?}\nba {:?}", ab.store(), ba.store());
+                println!();
+                prop_assert_eq!(ab, ba);
+            }
         }
 
         #[test]
-        fn causal_join_associative(dots in arb_causal(arb_flatdotstore()), a in arb_causal_ctx(), b in arb_causal_ctx(), c in arb_causal_ctx()) {
+        fn causal_join_associative(dots in arb_causal(arb_dotstore()), a in arb_causal_ctx(), b in arb_causal_ctx(), c in arb_causal_ctx()) {
             let a = dots.unjoin(&a);
             let b = dots.unjoin(&b);
             let c = dots.unjoin(&c);
@@ -1056,7 +1146,7 @@ mod tests {
         }
 
         #[test]
-        fn crdt_join(dots in arb_causal(arb_flatdotstore()), a in arb_causal_ctx(), b in arb_causal_ctx()) {
+        fn crdt_join(dots in arb_causal(arb_dotstore()), a in arb_causal_ctx(), b in arb_causal_ctx()) {
             let a = dots.unjoin(&a);
             let b = dots.unjoin(&b);
             let crdt = causal_to_crdt(&a);
@@ -1068,7 +1158,7 @@ mod tests {
         }
 
         #[test]
-        fn crdt_unjoin(causal in arb_causal(arb_flatdotstore()), ctx in arb_causal_ctx()) {
+        fn crdt_unjoin(causal in arb_causal(arb_dotstore()), ctx in arb_causal_ctx()) {
             let crdt = causal_to_crdt(&causal);
             let c = causal.unjoin(&ctx);
             let actx = Ref::archive(&ctx);

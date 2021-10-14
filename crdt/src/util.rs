@@ -6,6 +6,8 @@ use rkyv::validation::validators::DefaultValidator;
 use rkyv::{archived_root, check_archived_root, Archive, Archived, Deserialize, Serialize};
 use std::marker::PhantomData;
 
+use crate::crdt::HexDebug;
+
 fn archive<T>(t: &T) -> Vec<u8>
 where
     T: Serialize<AllocSerializer<256>>,
@@ -15,10 +17,16 @@ where
     ser.into_serializer().into_inner().to_vec()
 }
 
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Ref<T> {
     marker: PhantomData<T>,
     bytes: sled::IVec,
+}
+
+impl<T> std::fmt::Debug for Ref<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Ref").field(&HexDebug(&self.bytes)).finish()
+    }
 }
 
 impl<T: Archive> Ref<T> {
