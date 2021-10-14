@@ -1,9 +1,11 @@
 use crate::{
-    Acl, Actor, Causal, CausalContext, Crdt, Cursor, DocId, Dot, Engine, Hash, Keypair, Lens,
-    Lenses, PathBuf, PeerId, Permission, Policy, Ref, Registry, Schema, EMPTY_HASH, EMPTY_LENSES,
-    EMPTY_SCHEMA,
+    Acl, Actor, Causal, CausalContext, Crdt, Cursor, DocId, Dot, DotStoreType, Engine, Hash,
+    Keypair, Lens, Lenses, Path, PathBuf, PeerId, Permission, Policy, Ref, Registry, Schema,
+    EMPTY_HASH, EMPTY_LENSES, EMPTY_SCHEMA,
 };
 use anyhow::{anyhow, Result};
+use futures::channel::mpsc;
+use futures::prelude::*;
 use rkyv::Archived;
 use std::convert::TryInto;
 use std::future::Future;
@@ -17,6 +19,8 @@ pub struct Backend {
     crdt: Crdt,
     docs: Docs,
     engine: Engine,
+    tx: mpsc::Sender<()>,
+    rx: mpsc::Receiver<()>,
 }
 
 impl Backend {
@@ -30,13 +34,18 @@ impl Backend {
             acl.clone(),
             docs.clone(),
         );
-        let engine = Engine::new(crdt.clone(), acl)?;
-        Ok(Self {
+        let engine = Engine::new(acl)?;
+        let (tx, rx) = mpsc::channel(1);
+        let mut me = Self {
             registry,
             crdt,
             docs,
             engine,
-        })
+            tx,
+            rx,
+        };
+        me.update_acl()?;
+        Ok(me)
     }
 
     #[cfg(test)]
@@ -73,7 +82,20 @@ impl Backend {
         )
     }
 
-    pub fn join(&self, peer_id: &PeerId, mut causal: Causal) -> Result<()> {
+    fn update_acl(&mut self) -> Result<()> {
+        for res in self.crdt.iter() {
+            let (key, value) = res?;
+            let path = Path::new(&key[..]);
+            if path.ty() != Some(DotStoreType::Policy) {
+                continue;
+            }
+            let policy = Ref::<Policy>::new(value).to_owned()?;
+            self.engine.add_policy(path, policy);
+        }
+        self.engine.update_acl()
+    }
+
+    pub fn join(&mut self, peer_id: &PeerId, mut causal: Causal) -> Result<()> {
         let doc_schema_id = self.docs.schema_id(&causal.doc)?;
         let doc_lenses = self
             .registry
@@ -98,6 +120,8 @@ impl Backend {
             return Err(anyhow!("crdt failed schema validation"));
         }
         causal.transform(doc_lenses.as_ref(), lenses.as_ref());
+        self.crdt.join_policy(&causal)?;
+        self.update_acl()?;
         self.crdt.join(peer_id, &causal)?;
         Ok(())
     }
@@ -122,7 +146,12 @@ impl Backend {
     }
 
     pub fn frontend(&self) -> Frontend {
-        Frontend::new(self.crdt.clone(), self.docs.clone(), self.registry.clone())
+        Frontend::new(
+            self.crdt.clone(),
+            self.docs.clone(),
+            self.registry.clone(),
+            self.tx.clone(),
+        )
     }
 }
 
@@ -130,7 +159,11 @@ impl Future for Backend {
     type Output = Result<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        Pin::new(&mut self.engine).poll(cx)
+        if Pin::new(&mut self.rx).poll_next(cx).is_ready() {
+            Poll::Ready(self.update_acl())
+        } else {
+            Poll::Pending
+        }
     }
 }
 
@@ -139,14 +172,16 @@ pub struct Frontend {
     crdt: Crdt,
     docs: Docs,
     registry: Registry,
+    tx: mpsc::Sender<()>,
 }
 
 impl Frontend {
-    pub fn new(crdt: Crdt, docs: Docs, registry: Registry) -> Self {
+    pub fn new(crdt: Crdt, docs: Docs, registry: Registry, tx: mpsc::Sender<()>) -> Self {
         Self {
             crdt,
             docs,
             registry,
+            tx,
         }
     }
 
@@ -154,12 +189,12 @@ impl Frontend {
         self.docs.docs()
     }
 
-    pub fn create_doc(&self, owner: PeerId, schema: &Hash) -> Result<Doc> {
+    pub fn create_doc(&mut self, owner: PeerId, schema: &Hash) -> Result<Doc> {
         self.create_doc_deterministic(owner, schema, Keypair::generate())
     }
 
     pub fn create_doc_deterministic(
-        &self,
+        &mut self,
         owner: PeerId,
         schema: &Hash,
         la: Keypair,
@@ -172,6 +207,7 @@ impl Frontend {
             Policy::Can(Actor::Peer(owner), Permission::Own),
         )?;
         self.crdt.join(&id.into(), &delta)?;
+        self.tx.send(()).now_or_never();
         self.doc(id)
     }
 
@@ -194,9 +230,10 @@ impl Frontend {
         )
     }
 
-    pub fn apply(&self, causal: &Causal) -> Result<()> {
+    pub fn apply(&mut self, causal: &Causal) -> Result<()> {
         let peer_id = self.docs.peer_id(&causal.doc)?.unwrap();
         self.crdt.join(&peer_id, causal)?;
+        self.tx.send(()).now_or_never();
         Ok(())
     }
 }
@@ -446,16 +483,16 @@ mod tests {
             .unwrap()?;
         assert_eq!(value, title);
 
-        let sdk2 = Backend::memory()?;
+        let mut sdk2 = Backend::memory()?;
         sdk2.register(lenses)?;
         let peer2 = PeerId::new([1; 32]);
         let op = doc.cursor().say_can(Some(peer2), Permission::Write)?;
         sdk.join(&peer, op)?;
-        Pin::new(&mut sdk).await?;
 
         let doc2 = sdk2.frontend().add_doc(*doc.id(), &peer2, &hash)?;
         let ctx = Ref::archive(&doc2.ctx()?);
         let delta = sdk.unjoin(&peer2, ctx.as_ref())?;
+        println!("{:?}", delta);
         sdk2.join(&peer, delta)?;
 
         let value = doc2

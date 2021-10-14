@@ -1,12 +1,9 @@
-use crate::{Crdt, DocId, Dot, DotStoreType, Path, PathBuf, PeerId, Ref};
+use crate::{DocId, Dot, Path, PathBuf, PeerId, Ref};
 use anyhow::Result;
 use bytecheck::CheckBytes;
 use crepe::crepe;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::BTreeSet;
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 
 #[derive(
     Clone,
@@ -283,35 +280,21 @@ crepe! {
 
 pub struct Engine {
     policy: BTreeSet<Says>,
-    subscriber: sled::Subscriber,
     acl: Acl,
 }
 
 impl Engine {
-    pub fn new(crdt: Crdt, acl: Acl) -> Result<Self> {
-        let subscriber = crdt.watch_path(Path::new(&[]));
-        let mut me = Self {
+    pub fn new(acl: Acl) -> Result<Self> {
+        Ok(Self {
             policy: Default::default(),
-            subscriber,
             acl,
-        };
-        for r in crdt.iter() {
-            let (k, v) = r?;
-            me.add_kv(&k, v);
-        }
-        me.update_rules()?;
-        Ok(me)
+        })
     }
 
-    fn add_kv(&mut self, key: &sled::IVec, value: sled::IVec) {
-        let path = Path::new(&key[..]);
-        if path.ty() != Some(DotStoreType::Policy) {
-            return;
-        }
+    pub fn add_policy(&mut self, path: Path, policy: Policy) {
         let dot = path.dot();
         let id = PolicyId::new(path.root().unwrap(), dot.id, dot.counter());
         let path = path.parent().unwrap();
-        let policy = Ref::<Policy>::new(value).to_owned().unwrap();
         let says = match policy {
             Policy::Can(actor, perm) => Says::Can(id, Can::new(actor, perm, path.to_owned())),
             Policy::CanIf(actor, perm, cond) => {
@@ -322,7 +305,7 @@ impl Engine {
         self.policy.insert(says);
     }
 
-    fn update_rules(&self) -> Result<()> {
+    pub fn update_acl(&self) -> Result<()> {
         let mut runtime = Crepe::new();
         runtime.extend(self.policy.iter().map(Input));
         let (authorized, revoked) = runtime.run();
@@ -334,28 +317,6 @@ impl Engine {
         }
         self.acl.revoke_rules(revoked)?;
         Ok(())
-    }
-}
-
-impl Future for Engine {
-    type Output = Result<()>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        let mut change = false;
-        while let Poll::Ready(Some(ev)) = Pin::new(&mut self.subscriber).poll(cx) {
-            change = true;
-            for (_, k, v) in ev.iter() {
-                if let Some(v) = v {
-                    // TODO: don't clone
-                    self.add_kv(k, v.clone());
-                }
-            }
-        }
-        if change {
-            Poll::Ready(self.update_rules())
-        } else {
-            Poll::Pending
-        }
     }
 }
 
@@ -439,6 +400,7 @@ impl Acl {
 mod tests {
     use super::*;
     use crate::{Backend, EMPTY_HASH};
+    use std::pin::Pin;
     use Permission::*;
 
     fn peer(i: char) -> PeerId {
@@ -473,12 +435,10 @@ mod tests {
             .cursor()
             .say_can_if(Actor::Peer(peer('b')), Write, cond)?;
         sdk.join(&peer('a'), op)?;
-        Pin::new(&mut sdk).await?;
         assert!(!doc2.cursor().can(&peer('b'), Read)?);
 
         let op = doc1.cursor().say_can(Some(peer('b')), Write)?;
         sdk.join(&peer('a'), op)?;
-        Pin::new(&mut sdk).await?;
         assert!(doc2.cursor().can(&peer('b'), Read)?);
 
         Ok(())
@@ -494,12 +454,10 @@ mod tests {
         let cond = doc1.cursor().cond(Actor::Unbound, Read);
         let op = doc2.cursor().say_can_if(Actor::Unbound, Write, cond)?;
         sdk.join(&peer('a'), op)?;
-        Pin::new(&mut sdk).await?;
         assert!(!doc2.cursor().can(&peer('b'), Read)?);
 
         let op = doc1.cursor().say_can(Some(peer('b')), Write)?;
         sdk.join(&peer('a'), op)?;
-        Pin::new(&mut sdk).await?;
         assert!(doc2.cursor().can(&peer('b'), Read)?);
 
         Ok(())
@@ -513,10 +471,10 @@ mod tests {
 
         let op = doc.cursor().say_can(Some(peer('b')), Control)?;
         sdk.join(&peer('a'), op)?;
-        assert!(!doc.cursor().can(&peer('b'), Control)?);
+        assert!(doc.cursor().can(&peer('b'), Control)?);
 
         //let op = doc.cursor().say_can(peer('c'), Control)?;
-        assert!(!doc.cursor().can(&peer('c'), Read)?);
+        //assert!(!doc.cursor().can(&peer('c'), Read)?);
         //let op = doc.cursor().say_can(peer('c'), Read)?;
         //assert!(doc.cursor().can(&peer('c'), Read));
 
@@ -531,7 +489,7 @@ mod tests {
 
         let op = doc.cursor().say_can(None, Read)?;
         sdk.join(&peer('a'), op)?;
-        assert!(!doc.cursor().can(&peer('b'), Read)?);
+        assert!(doc.cursor().can(&peer('b'), Read)?);
         Ok(())
     }
 
@@ -543,12 +501,10 @@ mod tests {
 
         let op = doc.cursor().say_can(Some(peer('b')), Write)?;
         sdk.join(&peer('a'), op)?;
-        Pin::new(&mut sdk).await?;
         assert!(doc.cursor().can(&peer('b'), Write)?);
 
         let op = doc.cursor().revoke(Dot::new(peer('a'), 1))?;
         sdk.join(&peer('a'), op)?;
-        Pin::new(&mut sdk).await?;
         assert!(!doc.cursor().can(&peer('b'), Write)?);
 
         Ok(())
@@ -565,7 +521,6 @@ mod tests {
         let op = crdt.say(root(9).as_path(), &peer('a').into(), can('b', Own))?;
         crdt.join(&doc(9).into(), &op)?;
 
-        Pin::new(&mut engine).await?;
         assert!(crdt.can(&peer('b'), Own, root(9).as_path())?);
 
         let op = crdt.say(
@@ -575,7 +530,6 @@ mod tests {
         )?;
         crdt.join(&doc(9).into(), &op)?;
 
-        Pin::new(&mut engine).await?;
         assert!(!crdt.can(&peer('b'), Own, root(9).as_path())?);*/
 
         Ok(())
@@ -592,7 +546,6 @@ mod tests {
         let op = crdt.say(root(9).as_path(), &peer('a'), can('b', Own))?;
         crdt.join(&doc(9).into(), &op)?;
 
-        Pin::new(&mut engine).await?;
         assert!(crdt.can(&peer('b'), Own, root(9).as_path())?);
 
         let op = crdt.say(
@@ -602,7 +555,6 @@ mod tests {
         )?;
         crdt.join(&doc(9).into(), &op)?;
 
-        Pin::new(&mut engine).await?;
         assert!(crdt.can(&peer('a'), Own, root(9).as_path())?);*/
 
         Ok(())

@@ -1,6 +1,6 @@
 use crate::{
-    AbstractDotSet, Acl, ArchivedLenses, DocId, Docs, Dot, DotSet, Engine, Hash, PeerId,
-    Permission, Policy, Ref, Writer,
+    AbstractDotSet, Acl, ArchivedLenses, DocId, Docs, Dot, DotSet, Hash, PeerId, Permission,
+    Policy, Ref, Writer,
 };
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
@@ -49,7 +49,7 @@ impl From<&str> for Primitive {
         Self::Str(s.to_string())
     }
 }
-#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize, Default)]
+#[derive(Clone, Eq, PartialEq, Archive, Deserialize, Serialize, Default)]
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
 #[archive_attr(derive(Debug, CheckBytes))]
 #[archive_attr(check_bytes(
@@ -57,6 +57,35 @@ impl From<&str> for Primitive {
 ))]
 #[repr(C)]
 pub struct DotStore(BTreeMap<PathBuf, Vec<u8>>);
+
+impl std::fmt::Debug for DotStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{{")?;
+        for (k, v) in &self.0 {
+            write!(f, "{}", k)?;
+            match k.as_path().ty() {
+                Some(DotStoreType::Policy) => {
+                    let policy = Ref::<Policy>::checked(v.as_slice())
+                        .unwrap()
+                        .to_owned()
+                        .unwrap();
+                    write!(f, ": {:?},", policy)?;
+                }
+                Some(DotStoreType::Fun) => {
+                    let primitive = Ref::<Primitive>::checked(v.as_slice())
+                        .unwrap()
+                        .to_owned()
+                        .unwrap();
+                    write!(f, ": {:?},", primitive)?;
+                }
+                _ => {
+                    write!(f, ",")?;
+                }
+            }
+        }
+        write!(f, "}}")
+    }
+}
 
 fn archive<T>(value: &T) -> Vec<u8>
 where
@@ -273,7 +302,7 @@ impl DotStoreType {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[derive(Clone, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(Debug, CheckBytes))]
 #[repr(C)]
 pub struct CausalContext {
@@ -327,6 +356,16 @@ impl ArchivedCausalContext {
 
     pub fn expired(&self) -> &Archived<DotSet> {
         &self.expired
+    }
+}
+
+impl std::fmt::Debug for CausalContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct("CausalContext")
+            .field("doc", &self.doc)
+            .field("schema", &self.schema[0])
+            .field("dots", &self.dots)
+            .finish()
     }
 }
 
@@ -385,7 +424,7 @@ impl Causal {
     pub fn ctx(&self) -> CausalContext {
         CausalContext {
             doc: self.doc,
-            dots: self.dots().clone(),
+            dots: self.dots(),
             expired: self.expired.clone(),
             schema: self.schema,
         }
@@ -413,9 +452,7 @@ impl ArchivedCausal {
     }
 }
 
-#[derive(
-    Clone, Debug, Default, Eq, PartialEq, Hash, Ord, PartialOrd, Archive, Deserialize, Serialize,
-)]
+#[derive(Clone, Default, Eq, PartialEq, Hash, Ord, PartialOrd, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(Debug, Eq, Hash, PartialEq, Ord, PartialOrd, CheckBytes))]
 #[repr(C)]
 pub struct PathBuf(Vec<u8>);
@@ -478,13 +515,25 @@ impl PathBuf {
     }
 }
 
+impl std::fmt::Debug for PathBuf {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.as_path().fmt(f)
+    }
+}
+
+impl std::fmt::Display for PathBuf {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.as_path().fmt(f)
+    }
+}
+
 impl AsRef<[u8]> for PathBuf {
     fn as_ref(&self) -> &[u8] {
         &self.0
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct Path<'a>(&'a [u8]);
 
 impl<'a> Path<'a> {
@@ -580,7 +629,7 @@ impl<'a> Path<'a> {
     }
 }
 
-impl<'a> std::fmt::Display for Path<'a> {
+impl<'a> std::fmt::Debug for Path<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         use DotStoreType::*;
         if let Some(ty) = self.ty() {
@@ -588,15 +637,21 @@ impl<'a> std::fmt::Display for Path<'a> {
                 write!(f, "{}.", self.parent().unwrap())?;
             }
             match ty {
-                Root => write!(f, "{}", self.doc())?,
-                Set => write!(f, "{}", self.dot())?,
-                Fun => write!(f, "{}", self.dot())?,
+                Root => write!(f, "{:?}", self.doc())?,
+                Set => write!(f, "{:?}", self.dot())?,
+                Fun => write!(f, "{:?}", self.dot())?,
                 Map => write!(f, "{:?}", self.key().as_ref())?,
                 Struct => write!(f, "{}", self.field())?,
-                Policy => write!(f, "{}", self.dot())?,
+                Policy => write!(f, "{:?}", self.dot())?,
             }
         }
         Ok(())
+    }
+}
+
+impl<'a> std::fmt::Display for Path<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 
@@ -652,17 +707,6 @@ impl Crdt {
             acl,
             docs,
         }
-    }
-
-    pub fn memory() -> Result<(Self, Engine)> {
-        let db = sled::Config::new().temporary(true).open()?;
-        let state = db.open_tree("state")?;
-        let expired = db.open_tree("expired")?;
-        let acl = Acl::new(db.open_tree("acl")?);
-        let docs = Docs::new(db.open_tree("docs")?);
-        let me = Self::new(state, expired, acl.clone(), docs);
-        let engine = Engine::new(me.clone(), acl)?;
-        Ok((me, engine))
     }
 
     pub fn iter(&self) -> impl Iterator<Item = sled::Result<(sled::IVec, sled::IVec)>> {
@@ -730,20 +774,15 @@ impl Crdt {
     fn join_store(
         &self,
         doc: DocId,
-        _peer: &PeerId,
+        peer: &PeerId,
         that: &DotStore,
         expired: &DotSet,
     ) -> Result<()> {
-        // TODO: permissions!
         let path = PathBuf::new(doc);
         let mut common = BTreeSet::new();
         for item in self.state.scan_prefix(&path) {
             let (k, v) = item?;
             let k = Path::new(&k);
-            /*if !self.can(peer, Permission::Write, k)? {
-                tracing::info!("skipping {} due to lack of permissions", k);
-                continue;
-            }*/
             let dot = k.dot();
             match that.get(&k) {
                 Some(w) => {
@@ -754,6 +793,10 @@ impl Crdt {
                     assert!(!expired.contains(&dot));
                 }
                 None => {
+                    if !self.can(peer, Permission::Write, k)? {
+                        tracing::info!("00: skipping {} due to lack of permissions", k);
+                        continue;
+                    }
                     // The type does not even matter.
                     // If it is in the expired set, it needs go to.
                     if expired.contains(&dot) {
@@ -763,14 +806,25 @@ impl Crdt {
             }
         }
         for (k, w) in &that.0 {
-            /*if !self.can(peer, Permission::Write, k.as_path())? {
-                tracing::info!("skipping {} due to lack of permissions", k.as_path());
-                continue;
-            }*/
             if !common.contains(k) {
                 let dot = k.as_path().dot();
                 // new value should not be in the expired set
                 assert!(!expired.contains(&dot));
+                if self.can(peer, Permission::Write, k.as_path())? {
+                    self.state.insert(&k, w.clone())?;
+                } else {
+                    tracing::info!("11: skipping {} due to lack of permissions", k.as_path());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn join_policy(&self, causal: &Causal) -> Result<()> {
+        for (k, w) in &causal.store.0 {
+            if !self.state.contains_key(k.as_path())?
+                && k.as_path().ty() == Some(DotStoreType::Policy)
+            {
                 self.state.insert(&k, w.clone())?;
             }
         }
@@ -1090,7 +1144,6 @@ mod tests {
         let peer2 = PeerId::new([2; 32]);
         let op = doc.cursor().say_can(Some(peer2), Permission::Write)?;
         sdk.join(&peer1, op)?;
-        Pin::new(&mut sdk).await?;
 
         let op1 = doc.cursor().assign(Primitive::U64(42))?;
         sdk.join(&peer1, op1)?;

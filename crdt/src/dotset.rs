@@ -48,7 +48,7 @@ impl std::fmt::Display for Dot {
 
 impl std::fmt::Debug for Dot {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "({},{})", self.id, self.counter)
+        write!(f, "({:?},{})", self.id, self.counter)
     }
 }
 
