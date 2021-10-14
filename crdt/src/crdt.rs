@@ -755,19 +755,12 @@ impl Crdt {
     }
 
     pub fn join(&self, peer_id: &PeerId, causal: &Causal) -> Result<()> {
-        let that_dots = causal.dots();
-        let expired = causal.expired();
         let doc = causal.ctx.doc;
-        self.join_store(causal.ctx.doc, peer_id, &causal.store, &expired)?;
+        self.join_store(causal.ctx.doc, peer_id, &causal.store, causal.expired())?;
         for dot in causal.expired().iter() {
-            let key = (doc, dot);
-            println!("inserting expired key {:?}", Ref::archive(&key));
-            println!("inserting expired doc {:?}", Ref::archive(&doc));
-            self.expired.insert(Ref::archive(&key).as_bytes(), &[])?;
-        }
-        for peer_id in that_dots.peers() {
-            self.docs
-                .extend_present(&causal.ctx.doc, peer_id, that_dots.max(peer_id))?;
+            let mut path = PathBuf::new(doc);
+            path.dotset(&dot);
+            self.expired.insert(&path, &[])?;
         }
         Ok(())
     }
@@ -821,17 +814,22 @@ impl Crdt {
             .map(move |i| i.map(|key| Path::new(&key).dot()))
     }
 
+    // reads all expired for a docid.
+    fn expired(&self, doc: DocId) -> impl Iterator<Item = sled::Result<Dot>> {
+        let path = PathBuf::new(doc);
+        self.expired
+            .scan_prefix(path.as_path())
+            .keys()
+            .map(move |i| i.map(|key| Path::new(&key).dot()))
+    }
+
     pub fn ctx(&self, doc: DocId) -> Result<CausalContext> {
         let mut ctx = self.empty_ctx(doc)?;
         for dot in self.dots(doc) {
             ctx.dots.insert(dot?);
         }
-        let prefix = Ref::archive(&doc);
-        println!("looking for expired!");
-        for key in self.expired.scan_prefix(prefix.as_bytes()).keys() {
-            let (_, dot) = Ref::<(DocId, Dot)>::new(key?).to_owned()?;
-            println!("..found {}", dot);
-            ctx.expired.insert(dot);
+        for dot in self.expired(doc) {
+            ctx.expired.insert(dot?);
         }
         Ok(ctx)
     }

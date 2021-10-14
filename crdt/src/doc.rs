@@ -284,33 +284,6 @@ impl Docs {
     pub fn contains(&self, id: &DocId, dot: &Dot) -> Result<bool> {
         Ok(self.counter(id, &dot.id)? >= dot.counter)
     }
-
-    pub fn present(&self, id: &DocId) -> impl Iterator<Item = Result<(PeerId, u64)>> + '_ {
-        let mut prefix = [0; 33];
-        prefix[..32].copy_from_slice(id.as_ref());
-        prefix[32] = 2;
-        self.0.scan_prefix(prefix).map(|r| {
-            let (k, v) = r?;
-            Ok((
-                PeerId::new(k[33..].as_ref().try_into().unwrap()),
-                u64::from_le_bytes(v.as_ref().try_into().unwrap()),
-            ))
-        })
-    }
-
-    pub fn extend_present(&self, id: &DocId, peer_id: &PeerId, counter: u64) -> Result<()> {
-        let mut key = [0; 65];
-        key[..32].copy_from_slice(id.as_ref());
-        key[32] = 2;
-        key[33..].copy_from_slice(peer_id.as_ref());
-        self.0.update_and_fetch(key, |v| {
-            let current = v
-                .map(|b| u64::from_le_bytes(b.try_into().unwrap()))
-                .unwrap_or_default();
-            Some(std::cmp::max(counter, current).to_le_bytes().to_vec())
-        })?;
-        Ok(())
-    }
 }
 
 #[derive(Clone)]
