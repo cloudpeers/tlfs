@@ -341,8 +341,7 @@ impl Causal {
 
         let that_dots = that.store.dots().collect::<DotSet>();
         let expired = that.ctx.dots.difference(&that_dots);
-        self.store
-            .join(&that.store, &expired);
+        self.store.join(&that.store, &expired);
         self.ctx.dots.union(&that.ctx.dots);
     }
 
@@ -652,7 +651,7 @@ impl Crdt {
         doc: DocId,
         _peer: &PeerId,
         that: &DotStore,
-        that_ctx: &DotSet,
+        expired: &DotSet,
     ) -> Result<()> {
         // TODO: permissions!
         let path = PathBuf::new(doc);
@@ -670,11 +669,13 @@ impl Crdt {
                     common.insert(k.to_owned());
                     // different value for the same dot would be a bug
                     assert_eq!(v, w);
+                    // new value should not be in the expired set
+                    assert!(!expired.contains(&dot));
                 }
                 None => {
                     // The type does not even matter.
-                    // If it is in that_ctx but not in that, it needs to go
-                    if that_ctx.contains(&dot) {
+                    // If it is in the expired set, it needs go to.
+                    if expired.contains(&dot) {
                         self.state.remove(&k)?;
                     }
                 }
@@ -686,6 +687,9 @@ impl Crdt {
                 continue;
             }*/
             if !common.contains(k) {
+                let dot = k.as_path().dot();
+                // new value should not be in the expired set
+                assert!(!expired.contains(&dot));
                 self.state.insert(&k, w.clone())?;
             }
         }
@@ -693,7 +697,9 @@ impl Crdt {
     }
 
     pub fn join(&self, peer_id: &PeerId, causal: &Causal) -> Result<()> {
-        self.join_store(causal.ctx.doc, peer_id, &causal.store, &causal.ctx.dots)?;
+        let that_dots = causal.store.dots().collect::<DotSet>();
+        let expired = causal.ctx.dots.difference(&that_dots);
+        self.join_store(causal.ctx.doc, peer_id, &causal.store, &expired)?;
         for peer_id in causal.ctx.dots.peers() {
             self.docs
                 .extend_present(&causal.ctx.doc, peer_id, causal.ctx.dots.max(peer_id))?;
