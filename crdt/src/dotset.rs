@@ -1,7 +1,6 @@
 //! This module contains an efficient set of dots for use as both a dot store and a causal context
 use crate::PeerId;
 use bytecheck::CheckBytes;
-use itertools::Itertools;
 use range_collections::{range_set::ArchivedRangeSet, AbstractRangeSet, RangeSet, RangeSet2};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::{
@@ -212,21 +211,11 @@ pub struct DotSet(BTreeMap<PeerId, RangeSet2<u64>>);
 
 impl FromIterator<Dot> for DotSet {
     fn from_iter<T: IntoIterator<Item = Dot>>(iter: T) -> Self {
-        let elems = iter
-            .into_iter()
-            .filter(|dot| dot.counter != 0)
-            .group_by(|x| x.id)
-            .into_iter()
-            .map(|(id, elems)| {
-                let entry: RangeSet2<u64> = elems.fold(RangeSet::empty(), |mut set, dot| {
-                    let c = dot.counter();
-                    set |= RangeSet::from(c..c + 1);
-                    set
-                });
-                (id, entry)
-            })
-            .collect();
-        Self(elems)
+        let mut res = Self::new();
+        for dot in iter.into_iter().filter(|dot| dot.counter != 0) {
+            res.insert(dot);
+        }
+        res
     }
 }
 
