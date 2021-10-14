@@ -199,21 +199,22 @@ impl DotStore {
         self.0.keys().map(|x| x.as_path().dot())
     }
 
-    pub fn join(&mut self, ctx: &impl AbstractDotSet, that: &Self, that_ctx: &impl AbstractDotSet) {
+    pub fn join(&mut self, that: &Self, expired: &impl AbstractDotSet) {
         self.0.outer_join_with(
             &that.0,
             |k, v, w| {
                 let dot = k.as_path().dot();
                 if let Some(w) = w {
                     assert_eq!(v, w);
+                    assert!(!expired.contains(&dot));
                     true
                 } else {
-                    !that_ctx.contains(&dot)
+                    !expired.contains(&dot)
                 }
             },
             |k, w| {
                 let dot = k.as_path().dot();
-                if !ctx.contains(&dot) {
+                if !expired.contains(&dot) {
                     Some(w.clone())
                 } else {
                     None
@@ -334,13 +335,15 @@ impl Causal {
         &self.store
     }
 
-    pub fn join(&mut self, other: &Causal) {
-        assert_eq!(self.ctx().doc(), &other.ctx.doc);
-        assert_eq!(&self.ctx().schema, &other.ctx.schema);
+    pub fn join(&mut self, that: &Causal) {
+        assert_eq!(self.ctx().doc(), &that.ctx.doc);
+        assert_eq!(&self.ctx().schema, &that.ctx.schema);
 
+        let that_dots = that.store.dots().collect::<DotSet>();
+        let expired = that.ctx.dots.difference(&that_dots);
         self.store
-            .join(&self.ctx.dots, &other.store, &other.ctx.dots);
-        self.ctx.dots.union(&other.ctx.dots);
+            .join(&that.store, &expired);
+        self.ctx.dots.union(&that.ctx.dots);
     }
 
     pub fn unjoin(&self, ctx: &CausalContext) -> Self {
