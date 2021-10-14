@@ -325,8 +325,8 @@ mod tests {
             let lens = Ref::archive(&lens);
             prop_assume!(validate(&schema, &causal));
             let crdt = causal_to_crdt(&causal);
-            lens.as_ref().to_ref().transform_crdt(&causal.ctx.doc, &crdt).unwrap();
-            let causal2 = crdt_to_causal(&crdt, &causal.ctx);
+            lens.as_ref().to_ref().transform_crdt(&causal.doc, &crdt).unwrap();
+            let causal2 = crdt_to_causal(&crdt, &causal.ctx());
             lens.as_ref().to_ref().transform_dotstore(&mut causal.store);
             assert_eq!(causal, causal2);
         }

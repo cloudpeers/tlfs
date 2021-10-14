@@ -74,23 +74,23 @@ impl Backend {
     }
 
     pub fn join(&self, peer_id: &PeerId, mut causal: Causal) -> Result<()> {
-        let doc_schema_id = self.docs.schema_id(&causal.ctx.doc)?;
+        let doc_schema_id = self.docs.schema_id(&causal.doc)?;
         let doc_lenses = self
             .registry
             .lenses(&doc_schema_id)?
             .unwrap_or_else(|| Ref::new(EMPTY_LENSES.as_ref().into()));
-        let schema = self.registry.schema(&causal.ctx.schema())?;
-        let lenses = self.registry.lenses(&causal.ctx.schema())?;
+        let schema = self.registry.schema(&causal.schema())?;
+        let lenses = self.registry.lenses(&causal.schema())?;
         let (schema, lenses) = match (schema, lenses) {
             (Some(schema), Some(lenses)) => (schema, lenses),
             _ => {
-                if causal.ctx.schema == EMPTY_HASH {
+                if causal.schema == EMPTY_HASH {
                     (
                         Ref::new(EMPTY_SCHEMA.to_vec().into()),
                         Ref::new(EMPTY_LENSES.to_vec().into()),
                     )
                 } else {
-                    return Err(anyhow!("missing lenses with hash {}", causal.ctx.schema()));
+                    return Err(anyhow!("missing lenses with hash {}", causal.schema()));
                 }
             }
         };
@@ -195,7 +195,7 @@ impl Frontend {
     }
 
     pub fn apply(&self, causal: &Causal) -> Result<()> {
-        let peer_id = self.docs.peer_id(&causal.ctx.doc)?.unwrap();
+        let peer_id = self.docs.peer_id(&causal.doc)?.unwrap();
         self.crdt.join(&peer_id, causal)?;
         Ok(())
     }

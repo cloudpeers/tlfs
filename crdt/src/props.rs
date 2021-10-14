@@ -148,12 +148,9 @@ pub fn arb_causal(
         // TODO: compute dots and expired so they don't overlap
         let doc = DocId::new([0; 32]);
         Causal {
-            ctx: CausalContext {
-                doc,
-                schema: [0; 32],
-                dots,
-                expired: Default::default(),
-            },
+            doc,
+            schema: [0; 32],
+            expired: Default::default(),
             store: store.prefix(PathBuf::new(doc).as_path()),
         }
     })
@@ -371,6 +368,6 @@ pub fn crdt_to_causal(crdt: &Crdt, ctx: &CausalContext) -> Causal {
     let peer_id = (*ctx.doc()).into();
     let other = Ref::archive(&other);
     let mut causal = crdt.unjoin(&peer_id, other.as_ref()).unwrap();
-    causal.ctx.schema = [0; 32];
+    causal.schema = [0; 32];
     causal
 }
