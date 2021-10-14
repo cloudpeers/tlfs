@@ -144,7 +144,6 @@ pub fn arb_causal(
                 present.insert(id, counter);
             }
         }
-        let dots = DotSet::from_map(present);
         // TODO: compute dots and expired so they don't overlap
         let doc = DocId::new([0; 32]);
         Causal {
@@ -358,7 +357,12 @@ pub fn join(c: &Causal, o: &Causal) -> Causal {
 }
 
 pub fn causal_to_crdt(causal: &Causal) -> Crdt {
-    let crdt = Crdt::memory().unwrap().0;
+    let db = sled::Config::new().temporary(true).open().unwrap();
+    let state = db.open_tree("state").unwrap();
+    let expired = db.open_tree("expired").unwrap();
+    let acl = crate::Acl::new(db.open_tree("acl").unwrap());
+    let docs = crate::Docs::new(db.open_tree("docs").unwrap());
+    let crdt = Crdt::new(state, expired, acl, docs);
     crdt.join(&PeerId::new([0; 32]), causal).unwrap();
     crdt
 }

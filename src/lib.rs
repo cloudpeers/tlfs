@@ -148,7 +148,7 @@ impl Sdk {
         self.frontend.docs()
     }
 
-    pub fn create_doc(&self, schema: &Hash) -> Result<Doc> {
+    pub fn create_doc(&mut self, schema: &Hash) -> Result<Doc> {
         let peer_id = self.peer_id()?;
         let doc = self.frontend.create_doc(peer_id, schema)?;
         self.swarm
@@ -178,7 +178,7 @@ impl Sdk {
         self.frontend.remove_doc(id)
     }
 
-    pub fn apply(&self, causal: Causal) -> Result<()> {
+    pub fn apply(&mut self, causal: Causal) -> Result<()> {
         self.frontend.apply(&causal)?;
         self.swarm.unbounded_send(Command::Publish(causal)).ok();
         Ok(())
@@ -228,7 +228,7 @@ mod tests {
         ];
         let hash = migrate.register(lenses.clone())?;
 
-        let sdk = migrate.finish().await?;
+        let mut sdk = migrate.finish().await?;
         let doc = sdk.create_doc(&hash)?;
 
         // TODO: subscription api
