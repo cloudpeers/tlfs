@@ -80,9 +80,7 @@ impl AsRef<[u8; 32]> for PeerId {
 
 impl std::fmt::Debug for PeerId {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let mut peer_id = [0; 44];
-        base64::encode_config_slice(&self.0, base64::URL_SAFE, &mut peer_id);
-        write!(f, "{}", std::str::from_utf8(&peer_id).expect("wtf?"))
+        write!(f, "{}", hex::encode(&self.0[0..4]))
     }
 }
 

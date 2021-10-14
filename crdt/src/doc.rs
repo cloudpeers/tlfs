@@ -24,7 +24,12 @@ impl Backend {
         let registry = Registry::new(db.open_tree("lenses")?);
         let docs = Docs::new(db.open_tree("docs")?);
         let acl = Acl::new(db.open_tree("acl")?);
-        let crdt = Crdt::new(db.open_tree("crdt")?, acl.clone(), docs.clone());
+        let crdt = Crdt::new(
+            db.open_tree("crdt")?,
+            db.open_tree("expired")?,
+            acl.clone(),
+            docs.clone(),
+        );
         let engine = Engine::new(crdt.clone(), acl)?;
         Ok(Self {
             registry,
@@ -150,7 +155,15 @@ impl Frontend {
     }
 
     pub fn create_doc(&self, owner: PeerId, schema: &Hash) -> Result<Doc> {
-        let la = Keypair::generate();
+        self.create_doc_deterministic(owner, schema, Keypair::generate())
+    }
+
+    pub fn create_doc_deterministic(
+        &self,
+        owner: PeerId,
+        schema: &Hash,
+        la: Keypair,
+    ) -> Result<Doc> {
         let id = DocId::new(la.peer_id().into());
         self.docs.create(&id, &owner, schema)?;
         let delta = self.crdt.say(
@@ -333,6 +346,18 @@ pub struct Doc {
     schema: Ref<Schema>,
     crdt: Crdt,
     registry: Registry,
+}
+
+impl std::fmt::Debug for Doc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Doc")
+            .field("id", &self.id)
+            .field("schema_id", &self.schema_id)
+            .field("lenses", &self.lenses)
+            .field("schema", &self.schema)
+            .field("crdt", &self.crdt)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Doc {
