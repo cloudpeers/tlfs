@@ -1,4 +1,4 @@
-use crate::{DocId, Dot, Path, PathBuf, PeerId, Ref};
+use crate::{DocId, Path, PathBuf, PeerId, Ref};
 use anyhow::Result;
 use bytecheck::CheckBytes;
 use crepe::crepe;
@@ -100,7 +100,7 @@ impl Can {
 pub enum Policy {
     Can(Actor, Permission),
     CanIf(Actor, Permission, Can),
-    Revokes(Dot),
+    Revokes([u8; 32]),
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -124,7 +124,7 @@ impl<'a> CanRef<'a> {
     }
 
     fn root(self) -> DocId {
-        self.path().root().unwrap()
+        self.path.child().unwrap().first().unwrap().doc().unwrap()
     }
 
     fn implies(self, other: CanRef<'a>) -> bool {
@@ -158,46 +158,23 @@ impl std::fmt::Display for Can {
     }
 }
 
-#[derive(
-    Clone, Copy, Debug, Eq, Hash, PartialEq, Ord, PartialOrd, Archive, Deserialize, Serialize,
-)]
-#[archive(as = "PolicyId")]
-#[repr(C)]
-struct PolicyId {
-    doc: DocId,
-    peer: PeerId,
-    counter: u64,
-}
-
-impl PolicyId {
-    fn new(doc: DocId, peer: PeerId, counter: u64) -> Self {
-        Self { doc, peer, counter }
-    }
-}
-
-impl std::fmt::Display for PolicyId {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}.{}.{}", self.doc, self.peer, self.counter)
-    }
-}
-
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Ord, PartialOrd, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(Debug, Eq, PartialEq, CheckBytes))]
 #[repr(C)]
 enum Says {
-    Can(PolicyId, Can),
-    CanIf(PolicyId, Can, Can),
-    Revokes(PolicyId, PolicyId),
+    Can([u8; 32], PeerId, Can),
+    CanIf([u8; 32], PeerId, Can, Can),
+    Revokes(PeerId, [u8; 32]),
 }
 
 impl std::fmt::Display for Says {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::Can(id, can) => write!(f, "{}: {} says {}", id, id.peer, can),
-            Self::CanIf(id, can, cond) => {
-                write!(f, "{}: {} says {} if {}", id, id.peer, can, cond)
+            Self::Can(id, peer, can) => write!(f, "{}: {} says {}", hex::encode(&id), peer, can),
+            Self::CanIf(id, peer, can, cond) => {
+                write!(f, "{}: {} says {} if {}", hex::encode(&id), peer, can, cond)
             }
-            Self::Revokes(id, rid) => write!(f, "{}: {} revokes {}", id, id.peer, rid),
+            Self::Revokes(peer, id) => write!(f, "{} revokes {}", peer, hex::encode(&id)),
         }
     }
 }
@@ -206,130 +183,88 @@ crepe! {
     @input
     struct Input<'a>(&'a Says);
 
-    struct DerivedCan<'a>(PolicyId, CanRef<'a>);
+    struct DerivedCan<'a>([u8; 32], PeerId, CanRef<'a>);
 
-    struct DerivedCanIf<'a>(PolicyId, CanRef<'a>, CanRef<'a>);
+    struct DerivedCanIf<'a>([u8; 32], PeerId, CanRef<'a>, CanRef<'a>);
 
-    struct DerivedRevokes<'a>(PolicyId, PolicyId, CanRef<'a>);
+    struct DerivedRevokes<'a>(PeerId, [u8; 32], PeerId, CanRef<'a>);
 
-    struct MaybeRevoked<'a>(PolicyId, CanRef<'a>);
-
-    @output
-    struct Authorized<'a>(PolicyId, CanRef<'a>);
+    struct MaybeRevoked<'a>([u8; 32], PeerId, CanRef<'a>);
 
     @output
-    struct Revoked(PolicyId);
+    struct Authorized<'a>([u8; 32], PeerId, CanRef<'a>);
 
-    DerivedCan(*id, can.as_ref()) <-
-        Input(s),
-        let Says::Can(id, can) = s;
+    @output
+    struct Revoked([u8; 32]);
 
-    DerivedCanIf(*id, can.as_ref(), cond.as_ref()) <-
+    DerivedCan(*id, *peer, can.as_ref()) <-
         Input(s),
-        let Says::CanIf(id, can, cond) = s;
+        let Says::Can(id, peer, can) = s;
 
-    DerivedRevokes(*id, *rid, can) <-
+    DerivedCanIf(*id, *peer, can.as_ref(), cond.as_ref()) <-
         Input(s),
-        let Says::Revokes(id, rid) = s,
-        Authorized(*rid, can);
+        let Says::CanIf(id, peer, can, cond) = s;
+
+    DerivedRevokes(*peer, *id, peer2, can) <-
+        Input(s),
+        let Says::Revokes(peer, id) = s,
+        Authorized(*id, peer2, can);
 
     // resolve conditional
-    DerivedCan(id, can.bind(auth)) <-
-        DerivedCanIf(id, can, cond),
-        Authorized(_, auth),
+    DerivedCan(id, peer, can.bind(auth)) <-
+        DerivedCanIf(id, peer, can, cond),
+        Authorized(_, _, auth),
         (auth.implies(cond));
 
     // local authority
-    Authorized(id, can) <-
-        DerivedCan(id, can),
-        (Actor::Peer(id.peer).is_local_authority(can.root()));
+    Authorized(id, peer, can) <-
+        DerivedCan(id, peer, can),
+        (Actor::Peer(peer).is_local_authority(can.root()));
 
     // ownership
-    Authorized(id, can) <-
-        DerivedCan(id, can),
-        Authorized(_, auth),
-        (Actor::Peer(id.peer) == auth.actor()),
+    Authorized(id, peer, can) <-
+        DerivedCan(id, peer, can),
+        Authorized(_, _, auth),
+        (Actor::Peer(peer) == auth.actor()),
         (Permission::Own == auth.perm()),
         (auth.path().is_ancestor(can.path()));
 
     // control
-    Authorized(id, can) <-
-        DerivedCan(id, can),
-        Authorized(_, auth),
-        (Actor::Peer(id.peer) == auth.actor()),
+    Authorized(id, peer, can) <-
+        DerivedCan(id, peer, can),
+        Authorized(_, _, auth),
+        (Actor::Peer(peer) == auth.actor()),
         (auth.perm() == Permission::Control && can.perm().controllable()),
         (auth.path().is_ancestor(can.path()));
 
     // higher privileges can revoke
-    Revoked(rid) <-
-        DerivedRevokes(id, rid, can),
-        Authorized(_, auth),
+    Revoked(id) <-
+        DerivedRevokes(peer, id, peer2, can),
+        Authorized(_, _, auth),
         (
-            Actor::Peer(id.peer) == auth.actor() && auth.perm() >= Permission::Control ||
-            Actor::Peer(id.peer).is_local_authority(can.root())
+            Actor::Peer(peer) == auth.actor() && auth.perm() >= Permission::Control ||
+            Actor::Peer(peer).is_local_authority(can.root())
         ),
         (
             auth.path().is_ancestor(can.path()) && auth.path() != can.path() && auth.perm() >= can.perm() ||
             auth.path() == can.path() && (
                 auth.perm() > can.perm() ||
-                id.peer == rid.peer ||
-                Actor::Peer(id.peer).is_local_authority(can.root())
+                peer == peer2 ||
+                Actor::Peer(peer).is_local_authority(can.root())
             )
         );
-}
-
-pub struct Engine {
-    policy: BTreeSet<Says>,
-    acl: Acl,
-}
-
-impl Engine {
-    pub fn new(acl: Acl) -> Result<Self> {
-        Ok(Self {
-            policy: Default::default(),
-            acl,
-        })
-    }
-
-    pub fn add_policy(&mut self, path: Path, policy: Policy) {
-        let dot = path.dot();
-        let id = PolicyId::new(path.root().unwrap(), dot.id, dot.counter());
-        let path = path.parent().unwrap();
-        let says = match policy {
-            Policy::Can(actor, perm) => Says::Can(id, Can::new(actor, perm, path.to_owned())),
-            Policy::CanIf(actor, perm, cond) => {
-                Says::CanIf(id, Can::new(actor, perm, path.to_owned()), cond)
-            }
-            Policy::Revokes(dot) => Says::Revokes(id, PolicyId::new(id.doc, dot.id, dot.counter())),
-        };
-        self.policy.insert(says);
-    }
-
-    pub fn update_acl(&self) -> Result<()> {
-        let mut runtime = Crepe::new();
-        runtime.extend(self.policy.iter().map(Input));
-        let (authorized, revoked) = runtime.run();
-        let revoked: BTreeSet<PolicyId> = revoked.into_iter().map(|r| r.0).collect();
-        for Authorized(id, CanRef { actor, perm, path }) in authorized.into_iter() {
-            if !revoked.contains(&id) {
-                self.acl.add_rule(id, actor, perm, path)?;
-            }
-        }
-        self.acl.revoke_rules(revoked)?;
-        Ok(())
-    }
 }
 
 #[derive(Archive, Serialize)]
 #[archive(as = "Rule")]
 #[repr(C)]
 struct Rule {
-    id: PolicyId,
+    id: [u8; 32],
     perm: Permission,
 }
 
 impl Rule {
-    fn new(id: PolicyId, perm: Permission) -> Self {
+    fn new(id: [u8; 32], perm: Permission) -> Self {
         Self { id, perm }
     }
 }
@@ -347,7 +282,7 @@ impl Acl {
         Ok(Self(db.open_tree(name)?))
     }
 
-    fn add_rule(&self, id: PolicyId, actor: Actor, perm: Permission, path: Path) -> Result<()> {
+    fn add_rule(&self, id: [u8; 32], actor: Actor, perm: Permission, path: Path) -> Result<()> {
         let peer = match actor {
             Actor::Peer(peer) => peer,
             _ => PeerId::new([0; 32]),
@@ -359,7 +294,7 @@ impl Acl {
         Ok(())
     }
 
-    fn revoke_rules(&self, revoked: BTreeSet<PolicyId>) -> Result<()> {
+    fn revoke_rules(&self, revoked: BTreeSet<[u8; 32]>) -> Result<()> {
         for r in self.0.iter() {
             let (k, v) = r?;
             if revoked.contains(&Ref::<Rule>::new(v).as_ref().id) {
@@ -380,7 +315,7 @@ impl Acl {
     }
 
     pub fn can(&self, peer: PeerId, perm: Permission, path: Path) -> Result<bool> {
-        if peer == path.root().unwrap().into() {
+        if peer == path.child().unwrap().first().unwrap().doc().unwrap().into() {
             return Ok(true);
         }
         let mut prefix = peer.as_ref().to_vec();
@@ -393,6 +328,61 @@ impl Acl {
             return Ok(true);
         }
         Ok(false)
+    }
+}
+
+pub struct Engine {
+    policy: BTreeSet<Says>,
+    acl: Acl,
+}
+
+impl Engine {
+    pub fn new(acl: Acl) -> Result<Self> {
+        Ok(Self {
+            policy: Default::default(),
+            acl,
+        })
+    }
+
+    fn add_policy(&mut self, path: Path) {
+        self._add_policy(path);
+    }
+
+    fn _add_policy(&mut self, path: Path) -> Option<()> {
+        // schema.doc.(primitive|str)*.peer.policy
+        let doc = path.child()?.first()?.doc()?;
+        let peer = path.parent()?.last()?.peer()?;
+        let policy = path
+            .last()?
+            .policy()?
+            .deserialize(&mut rkyv::Infallible)
+            .unwrap();
+        let hash = blake3::hash(path.as_ref()).into();
+        let says = match policy {
+            Policy::Can(actor, perm) => {
+                Says::Can(hash, peer, Can::new(actor, perm, path.to_owned()))
+            }
+            Policy::CanIf(actor, perm, cond) => {
+                Says::CanIf(hash, peer, Can::new(actor, perm, path.to_owned()), cond)
+            }
+            Policy::Revokes(hash) => Says::Revokes(peer, hash),
+        };
+        self.policy.insert(says);
+        None
+    }
+
+    pub fn update_acl(&self) -> Result<()> {
+        let mut runtime = Crepe::new();
+        runtime.extend(self.policy.iter().map(Input));
+        let (authorized, revoked) = runtime.run();
+        let revoked: BTreeSet<[u8; 32]> = revoked.into_iter().map(|r| r.0).collect();
+        for Authorized(id, _, CanRef { actor, perm, path }) in authorized.into_iter() {
+            if !revoked.contains(&id) {
+                self.acl.add_rule(id, actor, perm, path)?;
+            }
+        }
+        self.acl.revoke_rules(revoked)?;
+        Ok(())
     }
 }
 
