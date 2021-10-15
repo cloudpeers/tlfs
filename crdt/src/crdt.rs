@@ -1,6 +1,6 @@
 use crate::{
     AbstractDotSet, Acl, ArchivedLenses, DocId, Docs, Dot, DotSet, Hash, PeerId, Permission,
-    Policy, Ref, Writer,
+    Policy, Ref, Writer, Primitive, Path, PathBuf,
 };
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
@@ -10,124 +10,14 @@ use std::{
     collections::{BTreeMap, BTreeSet},
 };
 
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Archive, Deserialize, Serialize)]
-#[archive_attr(derive(Debug, Eq, Hash, Ord, PartialEq, PartialOrd, CheckBytes))]
-#[repr(C)]
-pub enum Primitive {
-    Bool(bool),
-    U64(u64),
-    I64(i64),
-    Str(String),
-}
-
-impl From<bool> for Primitive {
-    fn from(b: bool) -> Self {
-        Self::Bool(b)
-    }
-}
-
-impl From<u64> for Primitive {
-    fn from(u: u64) -> Self {
-        Self::U64(u)
-    }
-}
-
-impl From<i64> for Primitive {
-    fn from(i: i64) -> Self {
-        Self::I64(i)
-    }
-}
-
-impl From<String> for Primitive {
-    fn from(s: String) -> Self {
-        Self::Str(s)
-    }
-}
-
-impl From<&str> for Primitive {
-    fn from(s: &str) -> Self {
-        Self::Str(s.to_string())
-    }
-}
-#[derive(Clone, Eq, PartialEq, Archive, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize, Default)]
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
 #[archive_attr(derive(Debug, CheckBytes))]
 #[archive_attr(check_bytes(
     bound = "__C: rkyv::validation::ArchiveContext, <__C as rkyv::Fallible>::Error: std::error::Error"
 ))]
 #[repr(C)]
-pub struct DotStore(BTreeMap<PathBuf, Vec<u8>>);
-
-impl std::fmt::Debug for DotStore {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{{")?;
-        for (k, v) in &self.0 {
-            write!(f, "{}", k)?;
-            match k.as_path().ty() {
-                Some(DotStoreType::Policy) => {
-                    let policy = Ref::<Policy>::checked(v.as_slice())
-                        .unwrap()
-                        .to_owned()
-                        .unwrap();
-                    write!(f, ": {:?},", policy)?;
-                }
-                Some(DotStoreType::Fun) => {
-                    let primitive = Ref::<Primitive>::checked(v.as_slice())
-                        .unwrap()
-                        .to_owned()
-                        .unwrap();
-                    write!(f, ": {:?},", primitive)?;
-                }
-                _ => {
-                    write!(f, ",")?;
-                }
-            }
-        }
-        write!(f, "}}")
-    }
-}
-
-fn archive<T>(value: &T) -> Vec<u8>
-where
-    T: Serialize<AllocSerializer<256>>,
-{
-    Ref::archive(value).as_bytes().to_owned()
-}
-
-pub trait InPlaceRelationalOps<K, V> {
-    fn outer_join_with<W, L, R>(&mut self, that: &BTreeMap<K, W>, l: L, r: R)
-    where
-        K: Ord + Clone,
-        L: Fn(&K, &mut V, Option<&W>) -> bool,
-        R: Fn(&K, &W) -> Option<V>;
-}
-
-impl<K, V> InPlaceRelationalOps<K, V> for BTreeMap<K, V> {
-    fn outer_join_with<W, L, R>(&mut self, that: &BTreeMap<K, W>, l: L, r: R)
-    where
-        K: Ord + Clone,
-        L: Fn(&K, &mut V, Option<&W>) -> bool,
-        R: Fn(&K, &W) -> Option<V>,
-    {
-        // k in that
-        for (k, w) in that.iter() {
-            match self.get_mut(k) {
-                Some(v) => {
-                    if !l(k, v, Some(w)) {
-                        self.remove(k);
-                    }
-                }
-                None => {
-                    if let Some(v) = r(k, w) {
-                        self.insert(k.clone(), v);
-                    }
-                }
-            }
-        }
-        // k not in that
-        self.retain(|k, v| that.get(k).is_some() || l(k, v, None));
-    }
-}
+pub struct DotStore(BTreeSet<PathBuf>);
 
 impl DotStore {
     pub fn policy(args: impl IntoIterator<Item = (Dot, Policy)>) -> Self {
@@ -270,35 +160,6 @@ impl DotStore {
 
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
-    }
-}
-
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Archive, Deserialize, Serialize,
-)]
-#[archive(as = "DotStoreType")]
-#[repr(u8)]
-pub enum DotStoreType {
-    Root,
-    Set,
-    Fun,
-    Map,
-    Struct,
-    Policy,
-}
-
-impl DotStoreType {
-    fn from(u: u8) -> Option<Self> {
-        use DotStoreType::*;
-        match u {
-            u if u == Root as u8 => Some(Root),
-            u if u == Set as u8 => Some(Set),
-            u if u == Fun as u8 => Some(Fun),
-            u if u == Map as u8 => Some(Map),
-            u if u == Struct as u8 => Some(Struct),
-            u if u == Policy as u8 => Some(Policy),
-            _ => None,
-        }
     }
 }
 
@@ -452,215 +313,6 @@ impl ArchivedCausal {
     }
 }
 
-#[derive(Clone, Default, Eq, PartialEq, Hash, Ord, PartialOrd, Archive, Deserialize, Serialize)]
-#[archive_attr(derive(Debug, Eq, Hash, PartialEq, Ord, PartialOrd, CheckBytes))]
-#[repr(C)]
-pub struct PathBuf(Vec<u8>);
-
-impl Borrow<[u8]> for PathBuf {
-    fn borrow(&self) -> &[u8] {
-        self.0.as_ref()
-    }
-}
-
-impl PathBuf {
-    pub fn new(id: DocId) -> Self {
-        let mut path = Self::default();
-        path.extend(DotStoreType::Root, id.as_ref());
-        path
-    }
-
-    fn extend_len(&mut self, len: usize) {
-        assert!(len <= u16::MAX as usize);
-        self.0.extend((len as u16).to_be_bytes());
-    }
-
-    fn extend(&mut self, ty: DotStoreType, bytes: &[u8]) {
-        self.0.extend(&[ty as u8]);
-        self.extend_len(bytes.len());
-        self.0.extend(bytes);
-        self.extend_len(bytes.len());
-        self.0.extend(&[ty as u8]);
-    }
-
-    pub fn key(&mut self, key: &Primitive) {
-        self.extend(DotStoreType::Map, Ref::archive(key).as_bytes());
-    }
-
-    pub fn field(&mut self, field: &str) {
-        self.extend(DotStoreType::Struct, field.as_bytes());
-    }
-
-    pub fn dotset(&mut self, dot: &Dot) {
-        self.extend(DotStoreType::Set, Ref::archive(dot).as_bytes());
-    }
-
-    pub fn dotfun(&mut self, dot: &Dot) {
-        self.extend(DotStoreType::Fun, Ref::archive(dot).as_bytes());
-    }
-
-    pub fn policy(&mut self, dot: &Dot) {
-        self.extend(DotStoreType::Policy, Ref::archive(dot).as_bytes());
-    }
-
-    pub fn pop(&mut self) {
-        if let Some(path) = self.as_path().parent() {
-            let len = path.0.len();
-            self.0.truncate(len);
-        }
-    }
-
-    pub fn as_path(&self) -> Path<'_> {
-        Path(&self.0)
-    }
-}
-
-impl std::fmt::Debug for PathBuf {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        self.as_path().fmt(f)
-    }
-}
-
-impl std::fmt::Display for PathBuf {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        self.as_path().fmt(f)
-    }
-}
-
-impl AsRef<[u8]> for PathBuf {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-#[derive(Clone, Copy, Eq, PartialEq, Hash, Ord, PartialOrd)]
-pub struct Path<'a>(&'a [u8]);
-
-impl<'a> Path<'a> {
-    pub fn new(p: &'a [u8]) -> Self {
-        Self(p)
-    }
-
-    pub fn parent(&self) -> Option<Path<'a>> {
-        if self.0.is_empty() {
-            return None;
-        }
-        let pos = self.0.len() - 3;
-        let mut len = [0; 2];
-        len.copy_from_slice(&self.0[pos..(pos + 2)]);
-        let len = u16::from_be_bytes(len) as usize;
-        let ppos = pos - len - 3;
-        Some(Path(&self.0[..ppos]))
-    }
-
-    fn target(&self) -> &[u8] {
-        let startpos = self.parent().unwrap().0.len() + 3;
-        let endpos = self.0.len() - 3;
-        &self.0[startpos..endpos]
-    }
-
-    fn first(&self) -> Path<'_> {
-        let mut len = [0; 2];
-        len.copy_from_slice(&self.0[1..3]);
-        let len = u16::from_be_bytes(len) as usize;
-        Path::new(&self.0[..(len + 6)])
-    }
-
-    pub fn ty(&self) -> Option<DotStoreType> {
-        DotStoreType::from(*self.0.last()?)
-    }
-
-    pub fn doc(&self) -> DocId {
-        use std::convert::TryInto;
-        debug_assert_eq!(self.ty(), Some(DotStoreType::Root));
-        let doc = self.target();
-        DocId::new(doc.try_into().unwrap())
-    }
-
-    pub fn key(&self) -> Ref<Primitive> {
-        debug_assert_eq!(self.ty(), Some(DotStoreType::Map));
-        let key = self.target();
-        Ref::new(key.into())
-    }
-
-    pub fn field(&self) -> &str {
-        debug_assert_eq!(self.ty(), Some(DotStoreType::Struct));
-        let field = self.target();
-        unsafe { std::str::from_utf8_unchecked(field) }
-    }
-
-    pub fn dot(&self) -> Dot {
-        debug_assert!(
-            self.ty() == Some(DotStoreType::Set)
-                || self.ty() == Some(DotStoreType::Fun)
-                || self.ty() == Some(DotStoreType::Policy)
-        );
-        let bytes = self.target();
-        let mut dot = Dot::new(PeerId::new([0; 32]), 1);
-        unsafe {
-            std::ptr::copy_nonoverlapping(bytes.as_ptr() as *const Dot, &mut dot as *mut _, 1)
-        };
-        dot
-    }
-
-    pub fn root(&self) -> Option<DocId> {
-        let first = self.first();
-        if let Some(DotStoreType::Root) = first.ty() {
-            Some(first.doc())
-        } else {
-            None
-        }
-    }
-
-    pub fn is_ancestor(&self, other: Path) -> bool {
-        other.as_ref().starts_with(self.as_ref())
-    }
-
-    pub fn to_owned(&self) -> PathBuf {
-        PathBuf(self.0.to_vec())
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    pub fn empty() -> Self {
-        Self(&[])
-    }
-}
-
-impl<'a> std::fmt::Debug for Path<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        use DotStoreType::*;
-        if let Some(ty) = self.ty() {
-            if ty != Root {
-                write!(f, "{}.", self.parent().unwrap())?;
-            }
-            match ty {
-                Root => write!(f, "{:?}", self.doc())?,
-                Set => write!(f, "{:?}", self.dot())?,
-                Fun => write!(f, "{:?}", self.dot())?,
-                Map => write!(f, "{:?}", self.key().as_ref())?,
-                Struct => write!(f, "{}", self.field())?,
-                Policy => write!(f, "{:?}", self.dot())?,
-            }
-        }
-        Ok(())
-    }
-}
-
-impl<'a> std::fmt::Display for Path<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl<'a> AsRef<[u8]> for Path<'a> {
-    fn as_ref(&self) -> &[u8] {
-        self.0
-    }
-}
-
 #[derive(Clone)]
 pub struct Crdt {
     state: sled::Tree,
@@ -674,14 +326,6 @@ impl std::fmt::Debug for Crdt {
         f.debug_struct("Crdt")
             .field("state", &StateDebug(&self.state))
             .finish_non_exhaustive()
-    }
-}
-
-pub struct HexDebug<'a>(pub &'a [u8]);
-
-impl<'a> std::fmt::Debug for HexDebug<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{}]", hex::encode(self.0))
     }
 }
 

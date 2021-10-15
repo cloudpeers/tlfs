@@ -4,9 +4,8 @@ use rkyv::ser::serializers::AllocSerializer;
 use rkyv::ser::Serializer;
 use rkyv::validation::validators::DefaultValidator;
 use rkyv::{archived_root, check_archived_root, Archive, Archived, Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::marker::PhantomData;
-
-use crate::crdt::HexDebug;
 
 fn archive<T>(t: &T) -> Vec<u8>
 where
@@ -79,5 +78,48 @@ impl<T> From<Ref<T>> for sled::IVec {
 impl<T> From<Ref<T>> for Vec<u8> {
     fn from(r: Ref<T>) -> Self {
         r.bytes.to_vec()
+    }
+}
+
+pub trait InPlaceRelationalOps<K, V> {
+    fn outer_join_with<W, L, R>(&mut self, that: &BTreeMap<K, W>, l: L, r: R)
+    where
+        K: Ord + Clone,
+        L: Fn(&K, &mut V, Option<&W>) -> bool,
+        R: Fn(&K, &W) -> Option<V>;
+}
+
+impl<K, V> InPlaceRelationalOps<K, V> for BTreeMap<K, V> {
+    fn outer_join_with<W, L, R>(&mut self, that: &BTreeMap<K, W>, l: L, r: R)
+    where
+        K: Ord + Clone,
+        L: Fn(&K, &mut V, Option<&W>) -> bool,
+        R: Fn(&K, &W) -> Option<V>,
+    {
+        // k in that
+        for (k, w) in that.iter() {
+            match self.get_mut(k) {
+                Some(v) => {
+                    if !l(k, v, Some(w)) {
+                        self.remove(k);
+                    }
+                }
+                None => {
+                    if let Some(v) = r(k, w) {
+                        self.insert(k.clone(), v);
+                    }
+                }
+            }
+        }
+        // k not in that
+        self.retain(|k, v| that.get(k).is_some() || l(k, v, None));
+    }
+}
+
+pub struct HexDebug<'a>(pub &'a [u8]);
+
+impl<'a> std::fmt::Debug for HexDebug<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{}]", hex::encode(self.0))
     }
 }
