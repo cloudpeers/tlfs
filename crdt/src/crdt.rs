@@ -7,7 +7,7 @@ use bytecheck::CheckBytes;
 use rkyv::{Archive, Archived, Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
 #[archive_attr(derive(Debug, CheckBytes))]
 #[archive_attr(check_bytes(
@@ -17,6 +17,10 @@ use std::collections::BTreeSet;
 pub struct DotStore(BTreeSet<PathBuf>);
 
 impl DotStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }

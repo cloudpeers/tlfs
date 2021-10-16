@@ -1,7 +1,7 @@
 mod acl;
 mod crdt;
 mod crypto;
-//mod cursor;
+mod cursor;
 //mod doc;
 mod dotset;
 mod id;
@@ -14,11 +14,11 @@ mod schema;
 mod util;
 
 pub use crate::acl::{Acl, Actor, Can, Engine, Permission, Policy};
-pub use crate::crdt::{Causal, CausalContext, Crdt};
+pub use crate::crdt::{Causal, CausalContext, Crdt, DotStore};
 pub use crate::crypto::{
     ArchivedEncrypted, ArchivedSigned, Encrypted, Key, KeyNonce, Keypair, Signed,
 };
-//pub use crate::cursor::Cursor;
+pub use crate::cursor::Cursor;
 //pub use crate::doc::{Backend, Doc, Docs, Frontend, Writer};
 pub use crate::dotset::{AbstractDotSet, Dot, DotSet};
 pub use crate::id::{DocId, PeerId};
