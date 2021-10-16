@@ -1,4 +1,4 @@
-use crate::{DocId, Dot, PeerId, Policy, Primitive, Ref};
+use crate::{DocId, Dot, PeerId, Policy, Ref};
 use blake3::Hash;
 use bytecheck::CheckBytes;
 use rkyv::{archived_root, Archive, Archived, Deserialize, Serialize};
@@ -15,7 +15,9 @@ pub enum SegmentType {
     Doc,
     Peer,
     Nonce,
-    Primitive,
+    Bool,
+    U64,
+    I64,
     Str,
     Policy,
     Dot,
@@ -29,7 +31,9 @@ impl SegmentType {
             u if u == Doc as u8 => Some(Doc),
             u if u == Peer as u8 => Some(Peer),
             u if u == Nonce as u8 => Some(Nonce),
-            u if u == Primitive as u8 => Some(Primitive),
+            u if u == Bool as u8 => Some(Bool),
+            u if u == U64 as u8 => Some(U64),
+            u if u == I64 as u8 => Some(I64),
             u if u == Str as u8 => Some(Str),
             u if u == Policy as u8 => Some(Policy),
             u if u == Dot as u8 => Some(Dot),
@@ -44,7 +48,9 @@ pub enum Segment<'a> {
     Doc(DocId),
     Peer(PeerId),
     Nonce(u64),
-    Primitive(&'a Archived<Primitive>),
+    Bool(bool),
+    U64(u64),
+    I64(i64),
     Str(&'a str),
     Policy(&'a Archived<Policy>),
     Dot(Dot),
@@ -57,7 +63,9 @@ impl<'a> Segment<'a> {
             SegmentType::Doc => Self::Doc(DocId::new(data.try_into().unwrap())),
             SegmentType::Peer => Self::Peer(PeerId::new(data.try_into().unwrap())),
             SegmentType::Nonce => Self::Nonce(u64::from_be_bytes(data.try_into().unwrap())),
-            SegmentType::Primitive => Self::Primitive(unsafe { archived_root::<Primitive>(data) }),
+            SegmentType::Bool => Self::Bool(data[0] > 0),
+            SegmentType::U64 => Self::U64(u64::from_be_bytes(data.try_into().unwrap())),
+            SegmentType::I64 => Self::I64(i64::from_be_bytes(data.try_into().unwrap())),
             SegmentType::Str => Self::Str(unsafe { std::str::from_utf8_unchecked(data) }),
             SegmentType::Policy => Self::Policy(unsafe { archived_root::<Policy>(data) }),
             SegmentType::Dot => Self::Dot(Dot::new(data.try_into().unwrap())),
@@ -96,15 +104,31 @@ impl<'a> Segment<'a> {
         }
     }
 
-    pub fn primitive(self) -> Option<&'a Archived<Primitive>> {
-        if let Segment::Primitive(primitive) = self {
-            Some(primitive)
+    pub fn prim_bool(self) -> Option<bool> {
+        if let Segment::Bool(b) = self {
+            Some(b)
         } else {
             None
         }
     }
 
-    pub fn str(self) -> Option<&'a str> {
+    pub fn prim_u64(self) -> Option<u64> {
+        if let Segment::U64(u) = self {
+            Some(u)
+        } else {
+            None
+        }
+    }
+
+    pub fn prim_i64(self) -> Option<i64> {
+        if let Segment::I64(u) = self {
+            Some(u)
+        } else {
+            None
+        }
+    }
+
+    pub fn prim_str(self) -> Option<&'a str> {
         if let Segment::Str(s) = self {
             Some(s)
         } else {
@@ -166,11 +190,20 @@ impl PathBuf {
         self.push(SegmentType::Nonce, nonce.to_be_bytes().as_ref());
     }
 
-    pub fn primitive(&mut self, primitive: &Primitive) {
-        self.push(SegmentType::Primitive, Ref::archive(primitive).as_bytes());
+    pub fn prim_bool(&mut self, b: bool) {
+        let b = if b { 1 } else { 0 };
+        self.push(SegmentType::Bool, &[b]);
     }
 
-    pub fn str(&mut self, s: &str) {
+    pub fn prim_u64(&mut self, u: u64) {
+        self.push(SegmentType::U64, u.to_be_bytes().as_ref());
+    }
+
+    pub fn prim_i64(&mut self, i: i64) {
+        self.push(SegmentType::I64, i.to_be_bytes().as_ref());
+    }
+
+    pub fn prim_str(&mut self, s: &str) {
         self.push(SegmentType::Str, s.as_bytes());
     }
 
