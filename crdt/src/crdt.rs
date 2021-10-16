@@ -224,8 +224,8 @@ impl Crdt {
         }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = sled::Result<(sled::IVec, sled::IVec)>> {
-        self.state.iter()
+    pub fn iter(&self) -> impl Iterator<Item = sled::Result<sled::IVec>> {
+        self.state.iter().keys()
     }
 
     pub fn scan_prefix(&self, path: Path) -> impl Iterator<Item = Result<sled::IVec>> + '_ {
