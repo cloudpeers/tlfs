@@ -217,3 +217,130 @@ impl<'a> Cursor<'a> {
             .say(self.path.as_path(), self.writer, Policy::Revokes(claim))
     }
 }
+
+    pub fn enable(&self, path: Path, writer: &Writer) -> Result<Causal> {
+        if !self.can(writer.peer_id(), Permission::Write, path)? {
+            return Err(anyhow!("unauthorized"));
+        }
+        let dot = writer.dot();
+        let doc = path.root().unwrap();
+        let schema = self.docs.schema_id(&doc)?;
+        Ok(Causal {
+            store: DotStore::dotset(std::iter::once(dot)).prefix(path),
+            doc,
+            schema: schema.into(),
+            expired: Default::default(),
+        })
+    }
+
+    pub fn disable(&self, path: Path, writer: &Writer) -> Result<Causal> {
+        if !self.can(writer.peer_id(), Permission::Write, path)? {
+            return Err(anyhow!("unauthorized"));
+        }
+        let doc = path.root().unwrap();
+        let schema = self.docs.schema_id(&doc)?;
+        let mut expired = DotSet::default();
+        // add all dots to be tombstoned into the context
+        for i in self.state.scan_prefix(&path).keys() {
+            let i = i?;
+            let path = Path::new(&i);
+            let dot = path.dot();
+            let ty = path.ty();
+            if ty != Some(DotStoreType::Set) && ty != Some(DotStoreType::Fun) {
+                continue;
+            }
+            expired.insert(dot);
+        }
+        Ok(Causal {
+            store: DotStore::dotset([]).prefix(path),
+            doc,
+            expired,
+            schema: schema.into(),
+        })
+    }
+
+    pub fn is_enabled(&self, path: Path<'_>) -> bool {
+        self.state.scan_prefix(path).next().is_some()
+    }
+
+    pub fn assign(&self, path: Path, writer: &Writer, v: Primitive) -> Result<Causal> {
+        if !self.can(writer.peer_id(), Permission::Write, path)? {
+            return Err(anyhow!("unauthorized"));
+        }
+        let doc = path.root().unwrap();
+        let schema = self.docs.schema_id(&doc)?;
+        let mut expired = DotSet::default();
+        // add all dots to be tombstoned into the context
+        for i in self.state.scan_prefix(&path).keys() {
+            let i = i?;
+            let path = Path::new(&i);
+            let dot = path.dot();
+            expired.insert(dot);
+        }
+        // add the new value into the context with a new dot
+        let dot = writer.dot();
+        Ok(Causal {
+            store: DotStore::dotfun(std::iter::once((dot, v))).prefix(path),
+            doc,
+            schema: schema.into(),
+            expired,
+        })
+    }
+
+    pub fn values(&self, path: Path<'_>) -> impl Iterator<Item = sled::Result<Ref<Primitive>>> {
+        self.state
+            .scan_prefix(path)
+            .values()
+            .map(|res| res.map(Ref::new))
+    }
+
+    pub fn remove(&self, path: Path, writer: &Writer) -> Result<Causal> {
+        if !self.can(writer.peer_id(), Permission::Write, path)? {
+            return Err(anyhow!("unauthorized"));
+        }
+        let doc = path.root().unwrap();
+        let schema = self.docs.schema_id(&doc)?;
+        let mut expired = DotSet::default();
+        let dot = writer.dot();
+        expired.insert(dot);
+        for res in self.state.scan_prefix(path).keys() {
+            let key = res?;
+            let key = Path::new(&key[..]);
+            let ty = key.ty();
+            if ty != Some(DotStoreType::Set) && ty != Some(DotStoreType::Fun) {
+                continue;
+            }
+            let dot = key.dot();
+            expired.insert(dot);
+        }
+        Ok(Causal {
+            store: DotStore::default(),
+            doc,
+            expired,
+            schema: schema.into(),
+        })
+    }
+
+    pub fn say(&self, path: Path, writer: &Writer, policy: Policy) -> Result<Causal> {
+        if !match &policy {
+            Policy::Can(_, perm) | Policy::CanIf(_, perm, _) => {
+                if perm.controllable() {
+                    self.can(writer.peer_id(), Permission::Control, path)?
+                } else {
+                    self.can(writer.peer_id(), Permission::Own, path)?
+                }
+            }
+            Policy::Revokes(_) => self.can(writer.peer_id(), Permission::Control, path)?,
+        } {
+            return Err(anyhow!("unauthorized"));
+        }
+        let doc = path.root().unwrap();
+        let schema = self.docs.schema_id(&doc)?;
+        let dot = writer.dot();
+        Ok(Causal {
+            store: DotStore::policy(std::iter::once((dot, policy))).prefix(path),
+            doc,
+            schema: schema.into(),
+            expired: DotSet::default(),
+        })
+    }

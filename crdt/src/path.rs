@@ -1,4 +1,4 @@
-use crate::{DocId, PeerId, Policy, Primitive, Ref};
+use crate::{DocId, Dot, PeerId, Policy, Primitive, Ref};
 use blake3::Hash;
 use bytecheck::CheckBytes;
 use rkyv::{archived_root, Archive, Archived, Deserialize, Serialize};
@@ -18,6 +18,7 @@ pub enum SegmentType {
     Primitive,
     Str,
     Policy,
+    Dot,
 }
 
 impl SegmentType {
@@ -31,6 +32,7 @@ impl SegmentType {
             u if u == Primitive as u8 => Some(Primitive),
             u if u == Str as u8 => Some(Str),
             u if u == Policy as u8 => Some(Policy),
+            u if u == Dot as u8 => Some(Dot),
             _ => None,
         }
     }
@@ -45,6 +47,7 @@ pub enum Segment<'a> {
     Primitive(&'a Archived<Primitive>),
     Str(&'a str),
     Policy(&'a Archived<Policy>),
+    Dot(Dot),
 }
 
 impl<'a> Segment<'a> {
@@ -57,6 +60,7 @@ impl<'a> Segment<'a> {
             SegmentType::Primitive => Self::Primitive(unsafe { archived_root::<Primitive>(data) }),
             SegmentType::Str => Self::Str(unsafe { std::str::from_utf8_unchecked(data) }),
             SegmentType::Policy => Self::Policy(unsafe { archived_root::<Policy>(data) }),
+            SegmentType::Dot => Self::Dot(Dot::new(data.try_into().unwrap())),
         }
     }
 
@@ -133,45 +137,49 @@ impl PathBuf {
         Self::default()
     }
 
-    fn extend_len(&mut self, len: usize) {
+    fn push_len(&mut self, len: usize) {
         assert!(len <= u16::MAX as usize);
         self.0.extend((len as u16).to_be_bytes());
     }
 
-    fn extend(&mut self, ty: SegmentType, bytes: &[u8]) {
+    fn push(&mut self, ty: SegmentType, bytes: &[u8]) {
         self.0.extend(&[ty as u8]);
-        self.extend_len(bytes.len());
+        self.push_len(bytes.len());
         self.0.extend(bytes);
-        self.extend_len(bytes.len());
+        self.push_len(bytes.len());
         self.0.extend(&[ty as u8]);
     }
 
     pub fn schema(&mut self, schema: &Hash) {
-        self.extend(SegmentType::Schema, schema.as_bytes());
+        self.push(SegmentType::Schema, schema.as_bytes());
     }
 
     pub fn doc(&mut self, doc: &DocId) {
-        self.extend(SegmentType::Doc, doc.as_ref());
+        self.push(SegmentType::Doc, doc.as_ref());
     }
 
     pub fn peer(&mut self, peer: &PeerId) {
-        self.extend(SegmentType::Peer, peer.as_ref());
+        self.push(SegmentType::Peer, peer.as_ref());
     }
 
     pub fn nonce(&mut self, nonce: u64) {
-        self.extend(SegmentType::Nonce, nonce.to_be_bytes().as_ref());
+        self.push(SegmentType::Nonce, nonce.to_be_bytes().as_ref());
     }
 
     pub fn primitive(&mut self, primitive: &Primitive) {
-        self.extend(SegmentType::Primitive, Ref::archive(primitive).as_bytes());
+        self.push(SegmentType::Primitive, Ref::archive(primitive).as_bytes());
     }
 
     pub fn str(&mut self, s: &str) {
-        self.extend(SegmentType::Str, s.as_bytes());
+        self.push(SegmentType::Str, s.as_bytes());
     }
 
     pub fn policy(&mut self, policy: &Policy) {
-        self.extend(SegmentType::Policy, Ref::archive(policy).as_bytes());
+        self.push(SegmentType::Policy, Ref::archive(policy).as_bytes());
+    }
+
+    pub fn dot(&mut self, dot: &Dot) {
+        self.push(SegmentType::Dot, dot.as_ref());
     }
 
     pub fn pop(&mut self) {
@@ -183,6 +191,10 @@ impl PathBuf {
 
     pub fn as_path(&self) -> Path<'_> {
         Path(&self.0)
+    }
+
+    pub fn extend(&mut self, path: Path) {
+        self.0.extend_from_slice(path.as_ref());
     }
 }
 
@@ -201,6 +213,12 @@ impl std::fmt::Display for PathBuf {
 impl AsRef<[u8]> for PathBuf {
     fn as_ref(&self) -> &[u8] {
         &self.0
+    }
+}
+
+impl ArchivedPathBuf {
+    pub fn as_path(&self) -> Path<'_> {
+        Path(&self.0)
     }
 }
 
@@ -265,6 +283,10 @@ impl<'a> Path<'a> {
         let len = self.last_len()?;
         let end = self.0.len();
         Some(Path(&self.0[..(end - len - 6)]))
+    }
+
+    pub fn dot(&self) -> Dot {
+        Dot::new(blake3::hash(self.as_ref()).into())
     }
 }
 

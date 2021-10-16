@@ -1,14 +1,12 @@
+use crate::util::HexDebug;
 use crate::{
-    AbstractDotSet, Acl, ArchivedLenses, DocId, Docs, Dot, DotSet, Hash, PeerId, Permission,
-    Policy, Ref, Writer, Primitive, Path, PathBuf,
+    AbstractDotSet, Acl, ArchivedLenses, DocId, Dot, DotSet, Path, PathBuf, PeerId, Permission,
+    Policy, Primitive,
 };
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use bytecheck::CheckBytes;
-use rkyv::{ser::serializers::AllocSerializer, Archive, Archived, Deserialize, Serialize};
-use std::{
-    borrow::Borrow,
-    collections::{BTreeMap, BTreeSet},
-};
+use rkyv::{Archive, Archived, Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize, Default)]
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
@@ -20,69 +18,74 @@ use std::{
 pub struct DotStore(BTreeSet<PathBuf>);
 
 impl DotStore {
-    pub fn policy(args: impl IntoIterator<Item = (Dot, Policy)>) -> Self {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn policy(args: impl IntoIterator<Item = Policy>) -> Self {
         Self(
             args.into_iter()
-                .map(|(dot, policy)| {
-                    let mut path = Path::empty().to_owned();
-                    path.policy(&dot);
-                    (path, archive(&policy))
+                .map(|policy| {
+                    let mut path = PathBuf::new();
+                    path.policy(&policy);
+                    path
                 })
                 .collect(),
         )
     }
 
-    pub fn dotfun(args: impl IntoIterator<Item = (Dot, Primitive)>) -> Self {
+    pub fn dotfun(args: impl IntoIterator<Item = (PeerId, u64, Primitive)>) -> Self {
         Self(
             args.into_iter()
-                .map(|(dot, primitive)| {
-                    let mut path = Path::empty().to_owned();
-                    path.dotfun(&dot);
-                    (path, archive(&primitive))
+                .map(|(peer, nonce, primitive)| {
+                    let mut path = PathBuf::new();
+                    path.peer(&peer);
+                    path.nonce(nonce);
+                    path.primitive(&primitive);
+                    path
                 })
                 .collect(),
         )
     }
 
-    pub fn dotset(args: impl IntoIterator<Item = Dot>) -> Self {
+    pub fn dotset(args: impl IntoIterator<Item = (PeerId, u64)>) -> Self {
         Self(
             args.into_iter()
-                .map(|dot| {
-                    let mut path = Path::empty().to_owned();
-                    path.dotset(&dot);
-                    (path, Vec::new())
+                .map(|(peer, nonce)| {
+                    let mut path = PathBuf::new();
+                    path.peer(&peer);
+                    path.nonce(nonce);
+                    path
                 })
                 .collect(),
         )
     }
 
     pub fn dotmap(args: impl IntoIterator<Item = (Primitive, Self)>) -> Self {
-        let entries = args.into_iter().flat_map(move |(key, store)| {
-            store.0.into_iter().map(move |(k, v)| (key.clone(), k, v))
-        });
         Self(
-            entries
-                .map(|(key, k, v)| {
-                    let mut path = Path::empty().to_owned();
-                    path.key(&key);
-                    path.0.extend(k.0.into_iter());
-                    (path, v)
+            args.into_iter()
+                .flat_map(|(key, store)| {
+                    store.0.into_iter().map(move |p| {
+                        let mut path = PathBuf::new();
+                        path.primitive(&key);
+                        path.extend(p.as_path());
+                        path
+                    })
                 })
                 .collect(),
         )
     }
 
     pub fn r#struct(args: impl IntoIterator<Item = (String, Self)>) -> Self {
-        let entries = args.into_iter().flat_map(move |(field, store)| {
-            store.0.into_iter().map(move |(k, v)| (field.clone(), k, v))
-        });
         Self(
-            entries
-                .map(|(field, k, v)| {
-                    let mut path = Path::empty().to_owned();
-                    path.field(&field);
-                    path.0.extend(k.0.into_iter());
-                    (path, v)
+            args.into_iter()
+                .flat_map(|(field, store)| {
+                    store.0.into_iter().map(move |p| {
+                        let mut path = PathBuf::new();
+                        path.str(&field);
+                        path.extend(p.as_path());
+                        path
+                    })
                 })
                 .collect(),
         )
@@ -93,63 +96,46 @@ impl DotStore {
         Self(
             self.0
                 .iter()
-                .map(|(k, v)| {
-                    let mut k = k.clone();
-                    k.0.splice(0..0, path.0.iter().cloned());
-                    (k, v.clone())
+                .map(|p| {
+                    let mut path = path.to_owned();
+                    path.extend(p.as_path());
+                    path
                 })
                 .collect(),
         )
     }
 
-    fn assert_invariants(&self) {
-        debug_assert!(self.0.keys().all(|x| !x.as_path().is_empty()));
-        debug_assert!(self.0.keys().all(|x| {
-            let t = x.as_path().ty().unwrap();
-            t == DotStoreType::Policy || t == DotStoreType::Set || t == DotStoreType::Fun
-        }));
+    pub fn contains(&self, path: &Path) -> bool {
+        self.0.contains(path.as_ref())
     }
 
-    pub fn get(&self, key: &Path) -> Option<&[u8]> {
-        self.0.get(key.as_ref()).map(|x| x.as_ref())
+    pub fn insert(&mut self, path: PathBuf) {
+        self.0.insert(path);
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = Path<'_>> + '_ {
+        self.0.iter().map(|path| path.as_path())
     }
 
     pub fn dots(&self) -> impl Iterator<Item = Dot> + '_ {
-        self.0.keys().map(|x| x.as_path().dot())
+        self.0.iter().map(|path| path.as_path().dot())
     }
 
-    pub fn join(&mut self, that: &Self, expired: &impl AbstractDotSet) {
-        self.0.outer_join_with(
-            &that.0,
-            |k, v, w| {
-                let dot = k.as_path().dot();
-                if let Some(w) = w {
-                    assert_eq!(v, w);
-                    assert!(!expired.contains(&dot));
-                    true
-                } else {
-                    !expired.contains(&dot)
-                }
-            },
-            |k, w| {
-                let dot = k.as_path().dot();
-                if !expired.contains(&dot) {
-                    Some(w.clone())
-                } else {
-                    None
-                }
-            },
-        );
-        self.assert_invariants();
+    pub fn join(&mut self, other: &Self, expired: &impl AbstractDotSet) {
+        for path in other.0.iter() {
+            self.0.insert(path.clone());
+        }
+        self.0
+            .retain(|path| !expired.contains(&path.as_path().dot()));
     }
 
     pub fn unjoin(&self, diff: &DotSet) -> Self {
         Self(
             self.0
                 .iter()
-                .filter_map(|(k, v)| {
-                    if diff.contains(&k.as_path().dot()) {
-                        Some((k.clone(), v.clone()))
+                .filter_map(|path| {
+                    if diff.contains(&path.as_path().dot()) {
+                        Some(path.clone())
                     } else {
                         None
                     }
@@ -157,18 +143,18 @@ impl DotStore {
                 .collect(),
         )
     }
+}
 
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+impl ArchivedDotStore {
+    pub fn dots(&self) -> impl Iterator<Item = Dot> + '_ {
+        self.0.iter().map(|path| path.as_path().dot())
     }
 }
 
-#[derive(Clone, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[derive(Clone, Default, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(Debug, CheckBytes))]
 #[repr(C)]
 pub struct CausalContext {
-    pub(crate) doc: DocId,
-    pub(crate) schema: [u8; 32],
     /// the dots to be considered. These are the dots in the store.
     pub(crate) dots: DotSet,
     /// the expired dots. The intersection of this and dots must be empty.
@@ -176,21 +162,11 @@ pub struct CausalContext {
 }
 
 impl CausalContext {
-    pub fn new(doc: DocId, schema: Hash) -> Self {
+    pub fn new() -> Self {
         Self {
-            doc,
-            schema: schema.into(),
             dots: Default::default(),
             expired: Default::default(),
         }
-    }
-
-    pub fn doc(&self) -> &DocId {
-        &self.doc
-    }
-
-    pub fn schema(&self) -> Hash {
-        self.schema.into()
     }
 
     pub fn dots(&self) -> &DotSet {
@@ -203,14 +179,6 @@ impl CausalContext {
 }
 
 impl ArchivedCausalContext {
-    pub fn doc(&self) -> &DocId {
-        &self.doc
-    }
-
-    pub fn schema(&self) -> Hash {
-        self.schema.into()
-    }
-
     pub fn dots(&self) -> &Archived<DotSet> {
         &self.dots
     }
@@ -223,9 +191,8 @@ impl ArchivedCausalContext {
 impl std::fmt::Debug for CausalContext {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.debug_struct("CausalContext")
-            .field("doc", &self.doc)
-            .field("schema", &self.schema[0])
             .field("dots", &self.dots)
+            .field("expired", &self.expired)
             .finish()
     }
 }
@@ -234,8 +201,6 @@ impl std::fmt::Debug for CausalContext {
 #[archive_attr(derive(Debug, CheckBytes))]
 #[repr(C)]
 pub struct Causal {
-    pub(crate) doc: DocId,
-    pub(crate) schema: [u8; 32],
     /// the expired dots. The intersection of this and dots must be empty.
     pub(crate) expired: DotSet,
     pub(crate) store: DotStore,
@@ -254,40 +219,22 @@ impl Causal {
         &self.expired
     }
 
-    pub fn doc(&self) -> &DocId {
-        &self.doc
-    }
-
-    pub fn schema(&self) -> Hash {
-        self.schema.into()
-    }
-
     pub fn join(&mut self, that: &Causal) {
-        assert_eq!(self.doc, that.doc);
-        assert_eq!(&self.schema, &that.schema);
-
-        self.store.join(&that.store, that.expired());
         self.expired.union(&that.expired);
+        self.store.join(&that.store, &self.expired);
     }
 
     pub fn unjoin(&self, ctx: &CausalContext) -> Self {
         let diff = self.dots().difference(ctx.dots());
         let expired = self.expired.difference(&ctx.expired);
         let store = self.store.unjoin(&diff);
-        Self {
-            doc: self.doc,
-            schema: self.schema,
-            expired,
-            store,
-        }
+        Self { expired, store }
     }
 
     pub fn ctx(&self) -> CausalContext {
         CausalContext {
-            doc: self.doc,
             dots: self.dots(),
             expired: self.expired.clone(),
-            schema: self.schema,
         }
     }
 
@@ -298,17 +245,9 @@ impl Causal {
 
 impl ArchivedCausal {
     pub fn ctx(&self) -> CausalContext {
-        let dots = self
-            .store
-            .0
-            .keys()
-            .map(|path| Path::new(&path.0).dot())
-            .collect::<DotSet>();
         CausalContext {
-            doc: self.doc,
             expired: self.expired.to_dotset(),
-            schema: self.schema,
-            dots,
+            dots: self.store.dots().collect(),
         }
     }
 }
@@ -318,7 +257,6 @@ pub struct Crdt {
     state: sled::Tree,
     expired: sled::Tree,
     acl: Acl,
-    docs: Docs,
 }
 
 impl std::fmt::Debug for Crdt {
@@ -344,12 +282,11 @@ impl<'a> std::fmt::Debug for StateDebug<'a> {
 }
 
 impl Crdt {
-    pub fn new(state: sled::Tree, expired: sled::Tree, acl: Acl, docs: Docs) -> Self {
+    pub fn new(state: sled::Tree, expired: sled::Tree, acl: Acl) -> Self {
         Self {
             state,
             expired,
             acl,
-            docs,
         }
     }
 
@@ -357,192 +294,43 @@ impl Crdt {
         self.state.iter()
     }
 
-    pub fn dotset(&self, path: Path) -> impl Iterator<Item = Result<Dot>> {
+    pub fn scan_prefix(&self, path: Path) -> impl Iterator<Item = Result<sled::IVec>> + '_ {
         self.state
             .scan_prefix(path)
             .keys()
-            .filter_map(|res| match res {
-                Ok(key) => {
-                    let key = Path::new(&key[..]);
-                    if key.ty() == Some(DotStoreType::Set) {
-                        Some(Ok(key.dot()))
-                    } else {
-                        None
-                    }
-                }
-                Err(err) => Some(Err(err.into())),
-            })
+            .map(|k| k.map_err(Into::into))
     }
 
-    pub fn watch_path(&self, path: Path<'_>) -> sled::Subscriber {
+    pub fn watch_path(&self, path: Path) -> sled::Subscriber {
         self.state.watch_prefix(path)
-    }
-
-    pub fn primitive(&self, path: Path) -> Result<Option<Ref<Primitive>>> {
-        if path.ty() != Some(DotStoreType::Fun) {
-            return Err(anyhow!("is not a primitive path"));
-        }
-        if let Some(bytes) = self.state.get(path.as_ref())? {
-            Ok(Some(Ref::new(bytes)))
-        } else {
-            Ok(None)
-        }
-    }
-
-    pub fn primitives(&self, path: Path) -> impl Iterator<Item = Result<Ref<Primitive>>> + '_ {
-        self.state
-            .scan_prefix(path)
-            .filter(|r| {
-                r.as_ref()
-                    .map(|(k, _)| Path::new(&k[..]).ty() == Some(DotStoreType::Fun))
-                    .unwrap_or(true)
-            })
-            .map(|r| r.map(|(_, v)| Ref::new(v)).map_err(Into::into))
-    }
-
-    pub fn policy(&self, path: Path<'_>) -> Result<Option<Ref<BTreeSet<Policy>>>> {
-        if path.ty() != Some(DotStoreType::Policy) {
-            return Err(anyhow!("is not a policy path"));
-        }
-        if let Some(bytes) = self.state.get(path.as_ref())? {
-            Ok(Some(Ref::new(bytes)))
-        } else {
-            Ok(None)
-        }
     }
 
     pub fn can(&self, peer: &PeerId, perm: Permission, path: Path) -> Result<bool> {
         self.acl.can(*peer, perm, path)
     }
 
-    fn join_store(
-        &self,
-        doc: DocId,
-        peer: &PeerId,
-        that: &DotStore,
-        expired: &DotSet,
-    ) -> Result<()> {
-        let path = PathBuf::new(doc);
-        let mut common = BTreeSet::new();
-        for item in self.state.scan_prefix(&path) {
-            let (k, v) = item?;
-            let k = Path::new(&k);
-            let dot = k.dot();
-            match that.get(&k) {
-                Some(w) => {
-                    common.insert(k.to_owned());
-                    // different value for the same dot would be a bug
-                    assert_eq!(v, w);
-                    // new value should not be in the expired set
-                    assert!(!expired.contains(&dot));
-                }
-                None => {
-                    if !self.can(peer, Permission::Write, k)? {
-                        tracing::info!("00: skipping {} due to lack of permissions", k);
-                        continue;
-                    }
-                    // The type does not even matter.
-                    // If it is in the expired set, it needs go to.
-                    if expired.contains(&dot) {
-                        self.state.remove(&k)?;
-                    }
-                }
-            }
-        }
-        for (k, w) in &that.0 {
-            if !common.contains(k) {
-                let dot = k.as_path().dot();
-                // new value should not be in the expired set
-                assert!(!expired.contains(&dot));
-                if self.can(peer, Permission::Write, k.as_path())? {
-                    self.state.insert(&k, w.clone())?;
-                } else {
-                    tracing::info!("11: skipping {} due to lack of permissions", k.as_path());
-                }
-            }
-        }
-        Ok(())
-    }
-
-    pub fn join_policy(&self, causal: &Causal) -> Result<()> {
-        for (k, w) in &causal.store.0 {
-            if !self.state.contains_key(k.as_path())?
-                && k.as_path().ty() == Some(DotStoreType::Policy)
-            {
-                self.state.insert(&k, w.clone())?;
-            }
-        }
-        Ok(())
-    }
-
-    pub fn join(&self, peer_id: &PeerId, causal: &Causal) -> Result<()> {
-        let doc = causal.doc;
-        self.join_store(causal.doc, peer_id, &causal.store, causal.expired())?;
-        for dot in causal.expired().iter() {
-            let mut path = PathBuf::new(doc);
-            path.dotset(&dot);
-            self.expired.insert(&path, &[])?;
-        }
-        Ok(())
-    }
-
-    pub fn unjoin(&self, peer_id: &PeerId, other: &Archived<CausalContext>) -> Result<Causal> {
-        let prefix = PathBuf::new(other.doc);
-        let ctx = self.ctx(other.doc)?;
-        let dots = ctx.dots.difference(&other.dots);
-        let expired = ctx.expired.difference(&other.expired);
-        let mut store = DotStore::default();
-        for r in self.state.scan_prefix(prefix) {
-            let (k, v) = r?;
-            let path = Path::new(&k[..]);
-            let dot = path.dot();
-            if !dots.contains(&dot) {
-                continue;
-            }
-            if !self.can(peer_id, Permission::Read, path)? {
-                tracing::info!("unjoin: peer is unauthorized to read");
-                continue;
-            }
-            store.0.insert(path.to_owned(), v.to_vec());
-        }
-        Ok(Causal {
-            doc: ctx.doc,
-            schema: ctx.schema,
-            expired,
-            store,
-        })
-    }
-
-    fn empty_ctx(&self, doc: DocId) -> Result<CausalContext> {
-        let schema = self.docs.schema_id(&doc)?;
-        Ok(CausalContext {
-            doc,
-            schema: schema.into(),
-            dots: Default::default(),
-            expired: Default::default(),
-        })
-    }
-
-    // reads all dots for a docid.
-    fn dots(&self, doc: DocId) -> impl Iterator<Item = sled::Result<Dot>> {
-        let path = PathBuf::new(doc);
+    /// reads all dots for a docid.
+    pub fn dots(&self, doc: &DocId) -> impl Iterator<Item = sled::Result<Dot>> {
+        let mut path = PathBuf::new();
+        path.doc(doc);
         self.state
             .scan_prefix(path.as_path())
             .keys()
             .map(move |i| i.map(|key| Path::new(&key).dot()))
     }
 
-    // reads all expired for a docid.
-    fn expired(&self, doc: DocId) -> impl Iterator<Item = sled::Result<Dot>> {
-        let path = PathBuf::new(doc);
+    /// reads all expired for a docid.
+    pub fn expired(&self, doc: &DocId) -> impl Iterator<Item = sled::Result<Dot>> {
+        let mut path = PathBuf::new();
+        path.doc(doc);
         self.expired
             .scan_prefix(path.as_path())
             .keys()
             .map(move |i| i.map(|key| Path::new(&key).dot()))
     }
 
-    pub fn ctx(&self, doc: DocId) -> Result<CausalContext> {
-        let mut ctx = self.empty_ctx(doc)?;
+    pub fn ctx(&self, doc: &DocId) -> Result<CausalContext> {
+        let mut ctx = CausalContext::new();
         for dot in self.dots(doc) {
             ctx.dots.insert(dot?);
         }
@@ -552,142 +340,95 @@ impl Crdt {
         Ok(ctx)
     }
 
-    pub fn enable(&self, path: Path, writer: &Writer) -> Result<Causal> {
-        if !self.can(writer.peer_id(), Permission::Write, path)? {
-            return Err(anyhow!("unauthorized"));
-        }
-        let dot = writer.dot();
-        let doc = path.root().unwrap();
-        let schema = self.docs.schema_id(&doc)?;
-        Ok(Causal {
-            store: DotStore::dotset(std::iter::once(dot)).prefix(path),
-            doc,
-            schema: schema.into(),
-            expired: Default::default(),
-        })
-    }
-
-    pub fn disable(&self, path: Path, writer: &Writer) -> Result<Causal> {
-        if !self.can(writer.peer_id(), Permission::Write, path)? {
-            return Err(anyhow!("unauthorized"));
-        }
-        let doc = path.root().unwrap();
-        let schema = self.docs.schema_id(&doc)?;
-        let mut expired = DotSet::default();
-        // add all dots to be tombstoned into the context
-        for i in self.state.scan_prefix(&path).keys() {
-            let i = i?;
-            let path = Path::new(&i);
-            let dot = path.dot();
-            let ty = path.ty();
-            if ty != Some(DotStoreType::Set) && ty != Some(DotStoreType::Fun) {
-                continue;
-            }
-            expired.insert(dot);
-        }
-        Ok(Causal {
-            store: DotStore::dotset([]).prefix(path),
-            doc,
-            expired,
-            schema: schema.into(),
-        })
-    }
-
-    pub fn is_enabled(&self, path: Path<'_>) -> bool {
-        self.state.scan_prefix(path).next().is_some()
-    }
-
-    pub fn assign(&self, path: Path, writer: &Writer, v: Primitive) -> Result<Causal> {
-        if !self.can(writer.peer_id(), Permission::Write, path)? {
-            return Err(anyhow!("unauthorized"));
-        }
-        let doc = path.root().unwrap();
-        let schema = self.docs.schema_id(&doc)?;
-        let mut expired = DotSet::default();
-        // add all dots to be tombstoned into the context
-        for i in self.state.scan_prefix(&path).keys() {
-            let i = i?;
-            let path = Path::new(&i);
-            let dot = path.dot();
-            expired.insert(dot);
-        }
-        // add the new value into the context with a new dot
-        let dot = writer.dot();
-        Ok(Causal {
-            store: DotStore::dotfun(std::iter::once((dot, v))).prefix(path),
-            doc,
-            schema: schema.into(),
-            expired,
-        })
-    }
-
-    pub fn values(&self, path: Path<'_>) -> impl Iterator<Item = sled::Result<Ref<Primitive>>> {
-        self.state
-            .scan_prefix(path)
-            .values()
-            .map(|res| res.map(Ref::new))
-    }
-
-    pub fn remove(&self, path: Path, writer: &Writer) -> Result<Causal> {
-        if !self.can(writer.peer_id(), Permission::Write, path)? {
-            return Err(anyhow!("unauthorized"));
-        }
-        let doc = path.root().unwrap();
-        let schema = self.docs.schema_id(&doc)?;
-        let mut expired = DotSet::default();
-        let dot = writer.dot();
-        expired.insert(dot);
-        for res in self.state.scan_prefix(path).keys() {
-            let key = res?;
-            let key = Path::new(&key[..]);
-            let ty = key.ty();
-            if ty != Some(DotStoreType::Set) && ty != Some(DotStoreType::Fun) {
-                continue;
-            }
-            let dot = key.dot();
-            expired.insert(dot);
-        }
-        Ok(Causal {
-            store: DotStore::default(),
-            doc,
-            expired,
-            schema: schema.into(),
-        })
-    }
-
-    pub fn say(&self, path: Path, writer: &Writer, policy: Policy) -> Result<Causal> {
-        if !match &policy {
-            Policy::Can(_, perm) | Policy::CanIf(_, perm, _) => {
-                if perm.controllable() {
-                    self.can(writer.peer_id(), Permission::Control, path)?
-                } else {
-                    self.can(writer.peer_id(), Permission::Own, path)?
-                }
-            }
-            Policy::Revokes(_) => self.can(writer.peer_id(), Permission::Control, path)?,
-        } {
-            return Err(anyhow!("unauthorized"));
-        }
-        let doc = path.root().unwrap();
-        let schema = self.docs.schema_id(&doc)?;
-        let dot = writer.dot();
-        Ok(Causal {
-            store: DotStore::policy(std::iter::once((dot, policy))).prefix(path),
-            doc,
-            schema: schema.into(),
-            expired: DotSet::default(),
-        })
-    }
-
-    pub fn transform(
+    fn join_store(
         &self,
         doc: &DocId,
-        schema_id: &Hash,
-        from: &ArchivedLenses,
-        to: &ArchivedLenses,
+        peer: &PeerId,
+        that: &DotStore,
+        expired: &DotSet,
     ) -> Result<()> {
+        let mut path = PathBuf::new();
+        path.doc(doc);
+        let mut common = BTreeSet::new();
+        for r in self.scan_prefix(path.as_path()) {
+            let k = r?;
+            let path = Path::new(&k[..]);
+            let dot = path.dot();
+            if that.contains(&path) && !expired.contains(&dot) {
+                common.insert(path.to_owned());
+            } else if expired.contains(&dot) {
+                if !self.can(peer, Permission::Write, path)? {
+                    tracing::info!("00: skipping {} due to lack of permissions", path);
+                    continue;
+                }
+                self.state.remove(path)?;
+            }
+        }
+        for path in that.iter() {
+            let dot = path.dot();
+            if !common.contains(path.as_ref()) && !expired.contains(&dot) {
+                if !self.can(peer, Permission::Write, path)? {
+                    tracing::info!("11: skipping {} due to lack of permissions", path);
+                    continue;
+                }
+                self.state.insert(path.to_owned(), &[])?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn join_policy(&self, causal: &Causal) -> Result<()> {
+        for path in causal.store.iter() {
+            if !self.state.contains_key(path)? && path.last().unwrap().policy().is_some() {
+                self.state.insert(path, &[])?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn join(&self, peer_id: &PeerId, doc: &DocId, causal: &Causal) -> Result<()> {
+        self.join_store(doc, peer_id, &causal.store, causal.expired())?;
+        for dot in causal.expired().iter() {
+            let mut path = PathBuf::new();
+            path.doc(doc);
+            path.dot(&dot);
+            self.expired.insert(&path, &[])?;
+        }
+        Ok(())
+    }
+
+    pub fn unjoin(
+        &self,
+        peer_id: &PeerId,
+        doc: &DocId,
+        other: &Archived<CausalContext>,
+    ) -> Result<Causal> {
+        let mut path = PathBuf::new();
+        path.doc(doc);
+
+        let ctx = self.ctx(doc)?;
+        let dots = ctx.dots.difference(&other.dots);
+        let expired = ctx.expired.difference(&other.expired);
+
+        let mut store = DotStore::default();
+        for r in self.state.scan_prefix(path).keys() {
+            let k = r?;
+            let path = Path::new(&k[..]);
+            let dot = path.dot();
+            if !dots.contains(&dot) {
+                continue;
+            }
+            if !self.can(peer_id, Permission::Read, path)? {
+                tracing::info!("unjoin: peer is unauthorized to read");
+                continue;
+            }
+            store.insert(path.to_owned());
+        }
+        Ok(Causal { expired, store })
+    }
+
+    pub fn transform(&self, doc: &DocId, from: &ArchivedLenses, to: &ArchivedLenses) -> Result<()> {
         from.transform_crdt(doc, self, to)?;
-        self.docs.set_schema_id(doc, schema_id)?;
         Ok(())
     }
 }
