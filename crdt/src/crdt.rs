@@ -1,7 +1,6 @@
 use crate::util::HexDebug;
 use crate::{
     AbstractDotSet, Acl, ArchivedLenses, DocId, Dot, DotSet, Path, PathBuf, PeerId, Permission,
-    Policy, Primitive,
 };
 use anyhow::Result;
 use bytecheck::CheckBytes;
@@ -20,75 +19,6 @@ pub struct DotStore(BTreeSet<PathBuf>);
 impl DotStore {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
-    }
-
-    pub fn policy(args: impl IntoIterator<Item = Policy>) -> Self {
-        Self(
-            args.into_iter()
-                .map(|policy| {
-                    let mut path = PathBuf::new();
-                    path.policy(&policy);
-                    path
-                })
-                .collect(),
-        )
-    }
-
-    pub fn dotfun(args: impl IntoIterator<Item = (PeerId, u64, Primitive)>) -> Self {
-        Self(
-            args.into_iter()
-                .map(|(peer, nonce, primitive)| {
-                    let mut path = PathBuf::new();
-                    path.peer(&peer);
-                    path.nonce(nonce);
-                    path.primitive(&primitive);
-                    path
-                })
-                .collect(),
-        )
-    }
-
-    pub fn dotset(args: impl IntoIterator<Item = (PeerId, u64)>) -> Self {
-        Self(
-            args.into_iter()
-                .map(|(peer, nonce)| {
-                    let mut path = PathBuf::new();
-                    path.peer(&peer);
-                    path.nonce(nonce);
-                    path
-                })
-                .collect(),
-        )
-    }
-
-    pub fn dotmap(args: impl IntoIterator<Item = (Primitive, Self)>) -> Self {
-        Self(
-            args.into_iter()
-                .flat_map(|(key, store)| {
-                    store.0.into_iter().map(move |p| {
-                        let mut path = PathBuf::new();
-                        path.primitive(&key);
-                        path.extend(p.as_path());
-                        path
-                    })
-                })
-                .collect(),
-        )
-    }
-
-    pub fn r#struct(args: impl IntoIterator<Item = (String, Self)>) -> Self {
-        Self(
-            args.into_iter()
-                .flat_map(|(field, store)| {
-                    store.0.into_iter().map(move |p| {
-                        let mut path = PathBuf::new();
-                        path.str(&field);
-                        path.extend(p.as_path());
-                        path
-                    })
-                })
-                .collect(),
-        )
     }
 
     /// prefix the entire dot store with a path
