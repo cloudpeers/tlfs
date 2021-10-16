@@ -1,12 +1,10 @@
 use crate::crdt::DotStore;
 use crate::{
-    AbstractDotSet, Causal, CausalContext, Crdt, DocId, Dot, DotSet, Kind, Lens, Lenses, PathBuf,
-    PeerId, Primitive, PrimitiveKind, Prop, Ref, Schema,
+    Causal, CausalContext, Crdt, DocId, Kind, Lens, Lenses, PathBuf, PeerId, Primitive,
+    PrimitiveKind, Prop, Ref, Schema,
 };
 use proptest::collection::SizeRange;
 use proptest::prelude::*;
-use std::collections::BTreeMap;
-use std::ops::Range;
 
 pub fn arb_prop() -> impl Strategy<Value = Prop> {
     "[a-z]"
@@ -18,28 +16,6 @@ pub fn arb_peer_id() -> impl Strategy<Value = PeerId> {
 
 pub fn arb_doc_id() -> impl Strategy<Value = DocId> {
     (0u8..5).prop_map(|i| DocId::new([i; 32]))
-}
-
-pub fn arb_dot_in(counter: Range<u64>) -> impl Strategy<Value = Dot> {
-    (arb_peer_id(), counter).prop_map(|(a, c)| Dot::new(a, c))
-}
-
-pub fn arb_dot() -> impl Strategy<Value = Dot> {
-    arb_dot_in(1u64..25)
-}
-
-pub fn arb_ctx() -> impl Strategy<Value = DotSet> {
-    prop::collection::btree_set(arb_dot_in(1u64..5), 0..50)
-        .prop_map(|dots| dots.into_iter().collect())
-}
-
-pub fn arb_causal_ctx() -> impl Strategy<Value = CausalContext> {
-    arb_ctx().prop_map(|dots| CausalContext {
-        doc: DocId::new([0; 32]),
-        schema: [0; 32],
-        dots,
-        expired: Default::default(),
-    })
 }
 
 pub fn arb_primitive() -> impl Strategy<Value = Primitive> {
@@ -69,88 +45,102 @@ pub fn arb_primitive_for_kind(kind: PrimitiveKind) -> BoxedStrategy<Primitive> {
     }
 }
 
-fn arb_dotset(elems: impl Into<SizeRange>) -> impl Strategy<Value = DotSet> {
-    prop::collection::btree_set(arb_dot(), elems).prop_map(DotSet::from_set)
+fn arb_dotset(elems: impl Into<SizeRange>) -> impl Strategy<Value = DotStore> {
+    prop::collection::btree_set((arb_peer_id(), any::<u64>()), elems).prop_map(|set| {
+        let mut store = DotStore::new();
+        for (peer, nonce) in set {
+            let mut path = PathBuf::new();
+            path.peer(&peer);
+            path.nonce(nonce);
+            store.insert(path);
+        }
+        store
+    })
 }
 
-fn arb_dotfun(
-    kind: PrimitiveKind,
-    elems: impl Into<SizeRange>,
-) -> impl Strategy<Value = BTreeMap<Dot, Primitive>> {
-    prop::collection::btree_map(arb_dot(), arb_primitive_for_kind(kind), elems)
+fn arb_dotfun(kind: PrimitiveKind, elems: impl Into<SizeRange>) -> impl Strategy<Value = DotStore> {
+    prop::collection::btree_set(
+        (arb_peer_id(), any::<u64>(), arb_primitive_for_kind(kind)),
+        elems,
+    )
+    .prop_map(|set| {
+        let mut store = DotStore::new();
+        for (peer, nonce, prim) in set {
+            let mut path = PathBuf::new();
+            path.peer(&peer);
+            path.nonce(nonce);
+            match prim {
+                Primitive::Bool(value) => path.prim_bool(value),
+                Primitive::U64(value) => path.prim_u64(value),
+                Primitive::I64(value) => path.prim_i64(value),
+                Primitive::Str(value) => path.prim_str(&value),
+            }
+            store.insert(path);
+        }
+        store
+    })
 }
 
 fn arb_dotmap(
     kind: PrimitiveKind,
     inner: impl Strategy<Value = DotStore>,
     size: impl Into<SizeRange>,
-) -> impl Strategy<Value = BTreeMap<Primitive, DotStore>> {
-    prop::collection::btree_map(arb_primitive_for_kind(kind), inner, size)
-        .prop_map(|map| map.into_iter().filter(|(_, v)| !v.is_empty()).collect())
+) -> impl Strategy<Value = DotStore> {
+    prop::collection::btree_map(arb_primitive_for_kind(kind), inner, size).prop_map(|set| {
+        let mut dotmap = DotStore::new();
+        for (prim, store) in set {
+            let mut path = PathBuf::new();
+            match prim {
+                Primitive::Bool(value) => path.prim_bool(value),
+                Primitive::U64(value) => path.prim_u64(value),
+                Primitive::I64(value) => path.prim_i64(value),
+                Primitive::Str(value) => path.prim_str(&value),
+            }
+            dotmap.union(&store.prefix(path.as_path()));
+        }
+        dotmap
+    })
 }
 
 fn arb_struct(
     inner: impl Strategy<Value = DotStore>,
     size: impl Into<SizeRange>,
-) -> impl Strategy<Value = BTreeMap<String, DotStore>> {
-    prop::collection::btree_map(arb_prop(), inner, size)
+) -> impl Strategy<Value = DotStore> {
+    prop::collection::btree_map(arb_prop(), inner, size).prop_map(|set| {
+        let mut fields = DotStore::new();
+        for (field, store) in set {
+            let mut path = PathBuf::new();
+            path.prim_str(&field);
+            fields.union(&store.prefix(path.as_path()));
+        }
+        fields
+    })
 }
 
 pub fn arb_dotstore() -> impl Strategy<Value = DotStore> {
     let leaf = prop_oneof![
-        arb_dotset(0..10).prop_map(|x| DotStore::dotset(x.iter())),
-        arb_primitive_kind()
-            .prop_flat_map(|kind| arb_dotfun(kind, 0..10).prop_map(DotStore::dotfun)),
+        arb_dotset(0..10),
+        arb_primitive_kind().prop_flat_map(|kind| arb_dotfun(kind, 0..10)),
     ];
     leaf.prop_recursive(8, 256, 10, |inner| {
         let inner2 = inner.clone();
         prop_oneof![
-            arb_primitive_kind().prop_flat_map(
-                move |kind| arb_dotmap(kind, inner2.clone(), 0..10).prop_map(DotStore::dotmap)
-            ),
-            arb_struct(inner, 0..10).prop_map(DotStore::r#struct),
+            arb_primitive_kind().prop_flat_map(move |kind| arb_dotmap(kind, inner2.clone(), 0..10)),
+            arb_struct(inner, 0..10)
         ]
     })
-}
-
-pub fn arb_non_empty_dotstore() -> impl Strategy<Value = DotStore> {
-    let leaf = prop_oneof![
-        arb_dotset(1..10).prop_map(|x| DotStore::dotset(x.iter())),
-        arb_primitive_kind()
-            .prop_flat_map(|kind| arb_dotfun(kind, 1..10).prop_map(DotStore::dotfun)),
-    ];
-    leaf.prop_recursive(8, 256, 10, |inner| {
-        let inner2 = inner.clone();
-        prop_oneof![
-            arb_primitive_kind().prop_flat_map(
-                move |kind| arb_dotmap(kind, inner2.clone(), 1..10).prop_map(DotStore::dotmap)
-            ),
-            arb_struct(inner, 1..10).prop_map(DotStore::r#struct),
-        ]
-    })
-    .prop_filter("non_empty", |x| !x.is_empty())
 }
 
 pub fn arb_causal(
     store: impl Strategy<Value = crate::crdt::DotStore>,
 ) -> impl Strategy<Value = Causal> {
     store.prop_map(|store| {
-        let dots = store.dots().collect::<DotSet>();
-        let mut present = BTreeMap::new();
-        for dot in dots.iter() {
-            let counter = dot.counter();
-            let id = dot.id;
-            if counter > 0 && counter > present.get(&id).copied().unwrap_or_default() {
-                present.insert(id, counter);
-            }
-        }
-        // TODO: compute dots and expired so they don't overlap
         let doc = DocId::new([0; 32]);
+        let mut path = PathBuf::new();
+        path.doc(&doc);
         Causal {
-            doc,
-            schema: [0; 32],
             expired: Default::default(),
-            store: store.prefix(PathBuf::new(doc).as_path()),
+            store: store.prefix(path.as_path()),
         }
     })
 }
@@ -171,20 +161,30 @@ pub fn arb_schema() -> impl Strategy<Value = Schema> {
 
 pub fn arb_dotstore_for_schema(s: Schema) -> BoxedStrategy<DotStore> {
     match s {
-        Schema::Null => Just(DotStore::default()).boxed(),
-        Schema::Flag => arb_dotset(0..10)
-            .prop_map(|x| DotStore::dotset(x.iter()))
-            .boxed(),
-        Schema::Reg(kind) => arb_dotfun(kind, 0..10).prop_map(DotStore::dotfun).boxed(),
-        Schema::Table(kind, schema) => arb_dotmap(kind, arb_dotstore_for_schema(*schema), 0..10)
-            .prop_map(DotStore::dotmap)
-            .boxed(),
+        Schema::Null => Just(DotStore::new()).boxed(),
+        Schema::Flag => arb_dotset(0..10).boxed(),
+        Schema::Reg(kind) => arb_dotfun(kind, 0..10).boxed(),
+        Schema::Table(kind, schema) => {
+            arb_dotmap(kind, arb_dotstore_for_schema(*schema), 0..10).boxed()
+        }
         Schema::Struct(fields) => fields
             .into_iter()
-            .map(|(k, s)| arb_dotstore_for_schema(s).prop_map(move |v| (k.clone(), v)))
-            .collect::<Vec<_>>()
-            .prop_map(DotStore::r#struct)
-            .boxed(),
+            .map(|(field, schema)| {
+                arb_dotstore_for_schema(schema).prop_map(move |store| {
+                    let mut path = PathBuf::new();
+                    path.prim_str(&field);
+                    store.prefix(path.as_path());
+                    store
+                })
+            })
+            .fold(Just(DotStore::new()).boxed(), |store, other| {
+                (store, other)
+                    .prop_map(move |(mut store, other)| {
+                        store.union(&other);
+                        store
+                    })
+                    .boxed()
+            }),
     }
 }
 
@@ -356,22 +356,18 @@ pub fn join(c: &Causal, o: &Causal) -> Causal {
     c
 }
 
-pub fn causal_to_crdt(causal: &Causal) -> Crdt {
+pub fn causal_to_crdt(doc: &DocId, causal: &Causal) -> Crdt {
     let db = sled::Config::new().temporary(true).open().unwrap();
     let state = db.open_tree("state").unwrap();
     let expired = db.open_tree("expired").unwrap();
     let acl = crate::Acl::new(db.open_tree("acl").unwrap());
-    let docs = crate::Docs::new(db.open_tree("docs").unwrap());
-    let crdt = Crdt::new(state, expired, acl, docs);
-    crdt.join(&PeerId::new([0; 32]), causal).unwrap();
+    let crdt = Crdt::new(state, expired, acl);
+    crdt.join(&(*doc).into(), doc, causal).unwrap();
     crdt
 }
 
-pub fn crdt_to_causal(crdt: &Crdt, ctx: &CausalContext) -> Causal {
-    let other = CausalContext::new(*ctx.doc(), ctx.schema());
-    let peer_id = (*ctx.doc()).into();
+pub fn crdt_to_causal(doc: &DocId, crdt: &Crdt) -> Causal {
+    let other = CausalContext::new();
     let other = Ref::archive(&other);
-    let mut causal = crdt.unjoin(&peer_id, other.as_ref()).unwrap();
-    causal.schema = [0; 32];
-    causal
+    crdt.unjoin(&(*doc).into(), doc, other.as_ref()).unwrap()
 }
