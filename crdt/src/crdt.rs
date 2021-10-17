@@ -202,14 +202,29 @@ impl std::fmt::Debug for Crdt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Crdt")
             .field("state", &StateDebug(&self.state))
+            .field("expired", &ExpiredDebug(&self.expired))
             .field("acl", &self.acl)
-            .finish_non_exhaustive()
+            .finish()
     }
 }
 
 struct StateDebug<'a>(&'a sled::Tree);
 
 impl<'a> std::fmt::Debug for StateDebug<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut m = f.debug_map();
+        for e in self.0.iter().keys() {
+            let k = e.map_err(|_| std::fmt::Error::default())?;
+            let path = Path::new(&k);
+            m.entry(&path.dot(), &path);
+        }
+        m.finish()
+    }
+}
+
+struct ExpiredDebug<'a>(&'a sled::Tree);
+
+impl<'a> std::fmt::Debug for ExpiredDebug<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut m = f.debug_set();
         for e in self.0.iter().keys() {
@@ -266,7 +281,7 @@ impl Crdt {
         self.expired
             .scan_prefix(path.as_path())
             .keys()
-            .map(move |i| i.map(|key| Path::new(&key).dot()))
+            .map(move |i| i.map(|key| Path::new(&key).last().unwrap().dot().unwrap()))
     }
 
     pub fn ctx(&self, doc: &DocId) -> Result<CausalContext> {
@@ -331,7 +346,7 @@ impl Crdt {
         for dot in causal.expired().iter() {
             let mut path = PathBuf::new();
             path.doc(doc);
-            path.dot(&dot);
+            path.dot(dot);
             self.expired.insert(&path, &[])?;
         }
         Ok(())
@@ -390,13 +405,17 @@ mod tests {
             .frontend()
             .create_doc(peer, &hash, Keypair::generate())?;
         Pin::new(&mut sdk).await?;
-        let op = doc.cursor().enable()?;
         assert!(!doc.cursor().enabled()?);
+
+        let op = doc.cursor().enable()?;
         doc.apply(&op)?;
+        println!("{:#?}", doc);
         assert!(doc.cursor().enabled()?);
+
         let op = doc.cursor().disable()?;
         doc.apply(&op)?;
         assert!(!doc.cursor().enabled()?);
+
         Ok(())
     }
 
@@ -424,26 +443,17 @@ mod tests {
         assert!(doc1.cursor().enabled()?);
         assert!(doc2.cursor().enabled()?);
 
-        let ctx_after_enable = doc1.ctx()?;
         let op = doc1.cursor().disable()?;
         doc1.apply(&op)?;
-        let ctx_after_disable = doc1.ctx()?;
         if false {
             // apply the op
             doc2.apply(&op)?;
         } else {
             // compute the delta using unjoin, and apply that
-            let delta = sdk1.unjoin(&peer, &doc1.id(), Ref::archive(&ctx_after_enable).as_ref())?;
-            let diff = ctx_after_disable
-                .expired
-                .difference(&ctx_after_enable.expired);
-            println!("op {:?}", op);
-            println!("expired after enable {:?}", ctx_after_enable.expired);
-            println!("expired after disable {:?}", ctx_after_disable.expired);
-            println!("difference {:?}", diff);
-            println!("delta {:?}", delta);
-            println!("{:?}", delta.store());
-            sdk2.join(&peer, &doc1.id(), &hash1, delta)?;
+            let delta = sdk1.unjoin(&peer, doc1.id(), Ref::archive(&doc2.ctx()?).as_ref())?;
+            println!("{:?}", delta);
+            sdk2.join(&peer, doc1.id(), &hash1, delta)?;
+            println!("{:#?}", doc2);
         }
         assert!(!doc1.cursor().enabled()?);
         assert!(!doc2.cursor().enabled()?);

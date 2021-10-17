@@ -4,7 +4,6 @@ use bytecheck::CheckBytes;
 use crepe::crepe;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::BTreeSet;
-use std::convert::TryInto;
 
 #[derive(
     Clone,
@@ -296,10 +295,13 @@ impl Acl {
             Actor::Peer(peer) => peer,
             _ => PeerId::new([0; 32]),
         };
-        let mut key = peer.as_ref().to_vec();
-        key.extend(path.as_ref());
-        self.0
-            .insert(key, Ref::archive(&Rule::new(id, perm)).as_bytes())?;
+        let mut prefix = PathBuf::new();
+        prefix.peer(&peer);
+        prefix.extend(path);
+        self.0.insert(
+            prefix.as_path(),
+            Ref::archive(&Rule::new(id, perm)).as_bytes(),
+        )?;
         Ok(())
     }
 
@@ -313,10 +315,15 @@ impl Acl {
         Ok(())
     }
 
-    fn implies(&self, prefix: &[u8], perm: Permission, path: Path) -> Result<bool> {
+    fn implies(&self, peer: &PeerId, doc: &DocId, perm: Permission, path: Path) -> Result<bool> {
+        let mut prefix = PathBuf::new();
+        prefix.peer(peer);
+        prefix.doc(doc);
         for r in self.0.scan_prefix(prefix) {
             let (k, v) = r?;
-            if Path::new(&k[32..]).is_ancestor(path) && Ref::<Rule>::new(v).as_ref().perm >= perm {
+            let p = Path::new(&k);
+            let rule = Ref::<Rule>::new(v);
+            if p.child().unwrap().is_ancestor(path) && rule.as_ref().perm >= perm {
                 return Ok(true);
             }
         }
@@ -324,16 +331,18 @@ impl Acl {
     }
 
     pub fn can(&self, peer: PeerId, perm: Permission, path: Path) -> Result<bool> {
-        if peer == path.first().unwrap().doc().unwrap().into() {
+        // TODO: more fine grained
+        if path.last().unwrap().policy().is_some() {
             return Ok(true);
         }
-        let mut prefix = peer.as_ref().to_vec();
-        prefix.extend(&path.as_ref()[..38]);
-        if self.implies(&prefix, perm, path)? {
+        let doc = path.first().unwrap().doc().unwrap();
+        if peer == doc.into() {
             return Ok(true);
         }
-        prefix[..32].copy_from_slice(&[0; 32]);
-        if self.implies(&prefix, perm, path)? {
+        if self.implies(&peer, &doc, perm, path)? {
+            return Ok(true);
+        }
+        if self.implies(&PeerId::new([0; 32]), &doc, perm, path)? {
             return Ok(true);
         }
         Ok(false)
@@ -347,10 +356,9 @@ impl<'a> std::fmt::Debug for AclDebug<'a> {
         let mut m = f.debug_map();
         for e in self.0.iter() {
             let (k, v) = e.map_err(|_| std::fmt::Error::default())?;
-            let peer = PeerId::new(k[..32].try_into().unwrap());
-            let path = Path::new(&k[32..]);
+            let path = Path::new(&k);
             let rule = Ref::<Rule>::new(v);
-            m.entry(&(peer, path), rule.as_ref());
+            m.entry(&path, rule.as_ref());
         }
         m.finish()
     }
@@ -383,16 +391,14 @@ impl Engine {
         // schema.doc.(primitive|str)*.peer.policy
         let peer = path.parent()?.last()?.peer()?;
         let policy = path.last()?.policy()?;
+        let acl_path = path.parent()?.parent()?.to_owned();
         let says = match policy {
             Policy::Can(actor, perm) => {
-                Says::Can(path.dot(), peer, Can::new(actor, perm, path.to_owned()))
+                Says::Can(path.dot(), peer, Can::new(actor, perm, acl_path))
             }
-            Policy::CanIf(actor, perm, cond) => Says::CanIf(
-                path.dot(),
-                peer,
-                Can::new(actor, perm, path.to_owned()),
-                cond,
-            ),
+            Policy::CanIf(actor, perm, cond) => {
+                Says::CanIf(path.dot(), peer, Can::new(actor, perm, acl_path), cond)
+            }
             Policy::Revokes(dot) => Says::Revokes(peer, dot),
         };
         self.policy.insert(says);
@@ -400,7 +406,6 @@ impl Engine {
     }
 
     pub fn update_acl(&self) -> Result<()> {
-        tracing::info!("update_acl {}", self.policy.len());
         let mut runtime = Crepe::new();
         runtime.extend(self.policy.iter().map(Input));
         let (authorized, revoked) = runtime.run();
@@ -451,6 +456,7 @@ mod tests {
         let doc1 = sdk
             .frontend()
             .create_doc(peer('a'), &EMPTY_HASH.into(), Keypair::generate())?;
+        Pin::new(&mut sdk).await?;
         let doc2 = sdk
             .frontend()
             .create_doc(peer('a'), &EMPTY_HASH.into(), Keypair::generate())?;
@@ -461,10 +467,14 @@ mod tests {
             .cursor()
             .say_can_if(Actor::Peer(peer('b')), Write, cond)?;
         doc2.apply(&op)?;
+        Pin::new(&mut sdk).await?;
         assert!(!doc2.cursor().can(&peer('b'), Read)?);
 
         let op = doc1.cursor().say_can(Some(peer('b')), Write)?;
         doc1.apply(&op)?;
+        Pin::new(&mut sdk).await?;
+
+        println!("{:#?}", doc2);
         assert!(doc2.cursor().can(&peer('b'), Read)?);
 
         Ok(())
@@ -484,10 +494,12 @@ mod tests {
         let cond = doc1.cursor().cond(Actor::Unbound, Read);
         let op = doc2.cursor().say_can_if(Actor::Unbound, Write, cond)?;
         doc2.apply(&op)?;
+        Pin::new(&mut sdk).await?;
         assert!(!doc2.cursor().can(&peer('b'), Read)?);
 
         let op = doc1.cursor().say_can(Some(peer('b')), Write)?;
         doc1.apply(&op)?;
+        Pin::new(&mut sdk).await?;
         assert!(doc2.cursor().can(&peer('b'), Read)?);
 
         Ok(())
@@ -503,6 +515,7 @@ mod tests {
 
         let op = doc.cursor().say_can(Some(peer('b')), Control)?;
         doc.apply(&op)?;
+        Pin::new(&mut sdk).await?;
         assert!(doc.cursor().can(&peer('b'), Control)?);
 
         //let op = doc.cursor().say_can(peer('c'), Control)?;
@@ -523,6 +536,7 @@ mod tests {
 
         let op = doc.cursor().say_can(None, Read)?;
         doc.apply(&op)?;
+        Pin::new(&mut sdk).await?;
         assert!(doc.cursor().can(&peer('b'), Read)?);
         Ok(())
     }
@@ -537,10 +551,12 @@ mod tests {
 
         let op = doc.cursor().say_can(Some(peer('b')), Write)?;
         doc.apply(&op)?;
+        Pin::new(&mut sdk).await?;
         assert!(doc.cursor().can(&peer('b'), Write)?);
 
         let op = doc.cursor().revoke(op.store.iter().next().unwrap().dot())?;
         doc.apply(&op)?;
+        Pin::new(&mut sdk).await?;
         assert!(!doc.cursor().can(&peer('b'), Write)?);
 
         Ok(())
