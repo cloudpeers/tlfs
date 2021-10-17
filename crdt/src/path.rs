@@ -146,10 +146,11 @@ impl<'a> Segment<'a> {
         }
     }
 
-    pub fn is_prim(self) -> bool {
-        match self {
-            Segment::Bool(_) | Segment::U64(_) | Segment::I64(_) | Segment::Str(_) => true,
-            _ => false,
+    pub fn dot(self) -> Option<Dot> {
+        if let Segment::Dot(dot) = self {
+            Some(dot)
+        } else {
+            None
         }
     }
 }

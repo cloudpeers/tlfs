@@ -229,7 +229,7 @@ impl<'a> Cursor<'a> {
         for r in self.crdt.scan_prefix(self.path.as_path()) {
             let k = r?;
             let path = Path::new(&k);
-            if path.last().unwrap().is_prim() {
+            if path.last().unwrap().policy().is_none() {
                 expired.insert(path.dot());
             }
         }
@@ -277,10 +277,6 @@ impl<'a> Cursor<'a> {
 
     /// Removes a value from a map.
     pub fn remove(&self) -> Result<Causal> {
-        if let ArchivedSchema::Table(PrimitiveKind::Bool, _) = &self.schema {
-        } else {
-            return Err(anyhow!("not a Table<bool, _>"));
-        }
         if !self.can(&self.peer_id, Permission::Write)? {
             return Err(anyhow!("unauthorized"));
         }

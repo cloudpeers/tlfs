@@ -151,8 +151,8 @@ impl Backend {
             .registry
             .lenses(&doc_schema_id)?
             .unwrap_or_else(|| Ref::new(EMPTY_LENSES.as_ref().into()));
-        let schema = self.registry.schema(&causal_schema)?;
-        let lenses = self.registry.lenses(&causal_schema)?;
+        let schema = self.registry.schema(causal_schema)?;
+        let lenses = self.registry.lenses(causal_schema)?;
         let (schema, lenses) = match (schema, lenses) {
             (Some(schema), Some(lenses)) => (schema, lenses),
             _ => {
@@ -252,7 +252,7 @@ impl Frontend {
         let delta = doc.cursor().say_can(Some(owner), Permission::Own)?;
         self.apply(&id, &delta)?;
         self.set_peer_id(&id, &owner)?;
-        Ok(doc)
+        self.doc(id)
     }
 
     pub fn add_doc(&self, id: DocId, peer: &PeerId, schema: &Hash) -> Result<Doc> {
@@ -266,7 +266,7 @@ impl Frontend {
     }
 
     pub fn peer_id(&self, id: &DocId) -> Result<PeerId> {
-        self.docs.peer_id(&id)
+        self.docs.peer_id(id)
     }
 
     pub fn set_peer_id(&self, id: &DocId, peer: &PeerId) -> Result<()> {
