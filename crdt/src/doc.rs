@@ -250,9 +250,8 @@ impl Frontend {
         self.docs.create(&id, schema)?;
         let doc = self.doc(id)?;
         let delta = doc.cursor().say_can(Some(owner), Permission::Own)?;
+        self.apply(&id, &delta)?;
         self.set_peer_id(&id, &owner)?;
-        self.crdt.join(&id.into(), &id, &delta)?;
-        self.tx.clone().send(()).now_or_never();
         Ok(doc)
     }
 
@@ -311,7 +310,15 @@ impl Frontend {
     }
 }
 
-#[derive(Clone)]
+impl std::fmt::Debug for Frontend {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct("Frontend")
+            .field("crdt", &self.crdt)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Doc {
     id: DocId,
     frontend: Frontend,

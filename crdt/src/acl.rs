@@ -4,6 +4,7 @@ use bytecheck::CheckBytes;
 use crepe::crepe;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::BTreeSet;
+use std::convert::TryInto;
 
 #[derive(
     Clone,
@@ -40,9 +41,7 @@ impl Permission {
     }
 }
 
-#[derive(
-    Clone, Copy, Debug, Eq, Hash, PartialEq, Ord, PartialOrd, Archive, Deserialize, Serialize,
-)]
+#[derive(Clone, Copy, Eq, Hash, PartialEq, Ord, PartialOrd, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Ord, PartialOrd, CheckBytes))]
 #[repr(C)]
 pub enum Actor {
@@ -66,6 +65,16 @@ impl From<Option<PeerId>> for Actor {
         match actor {
             Some(peer) => Actor::Peer(peer),
             None => Actor::Anonymous,
+        }
+    }
+}
+
+impl std::fmt::Debug for Actor {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Self::Peer(p) => write!(f, "{:?}", p),
+            Self::Anonymous => write!(f, "Anonymous"),
+            Self::Unbound => write!(f, "Unbound"),
         }
     }
 }
@@ -124,7 +133,7 @@ impl<'a> CanRef<'a> {
     }
 
     fn root(self) -> DocId {
-        self.path.child().unwrap().first().unwrap().doc().unwrap()
+        self.path.first().unwrap().doc().unwrap()
     }
 
     fn implies(self, other: CanRef<'a>) -> bool {
@@ -255,7 +264,7 @@ crepe! {
         );
 }
 
-#[derive(Archive, Serialize)]
+#[derive(Debug, Archive, Serialize)]
 #[archive(as = "Rule")]
 #[repr(C)]
 struct Rule {
@@ -315,7 +324,7 @@ impl Acl {
     }
 
     pub fn can(&self, peer: PeerId, perm: Permission, path: Path) -> Result<bool> {
-        if peer == path.child().unwrap().first().unwrap().doc().unwrap().into() {
+        if peer == path.first().unwrap().doc().unwrap().into() {
             return Ok(true);
         }
         let mut prefix = peer.as_ref().to_vec();
@@ -328,6 +337,28 @@ impl Acl {
             return Ok(true);
         }
         Ok(false)
+    }
+}
+
+struct AclDebug<'a>(&'a sled::Tree);
+
+impl<'a> std::fmt::Debug for AclDebug<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut m = f.debug_map();
+        for e in self.0.iter() {
+            let (k, v) = e.map_err(|_| std::fmt::Error::default())?;
+            let peer = PeerId::new(k[..32].try_into().unwrap());
+            let path = Path::new(&k[32..]);
+            let rule = Ref::<Rule>::new(v);
+            m.entry(&(peer, path), rule.as_ref());
+        }
+        m.finish()
+    }
+}
+
+impl std::fmt::Debug for Acl {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        AclDebug(&self.0).fmt(f)
     }
 }
 
@@ -351,11 +382,7 @@ impl Engine {
     fn _add_policy(&mut self, path: Path) -> Option<()> {
         // schema.doc.(primitive|str)*.peer.policy
         let peer = path.parent()?.last()?.peer()?;
-        let policy = path
-            .last()?
-            .policy()?
-            .deserialize(&mut rkyv::Infallible)
-            .unwrap();
+        let policy = path.last()?.policy()?;
         let says = match policy {
             Policy::Can(actor, perm) => {
                 Says::Can(path.dot(), peer, Can::new(actor, perm, path.to_owned()))
@@ -373,6 +400,7 @@ impl Engine {
     }
 
     pub fn update_acl(&self) -> Result<()> {
+        tracing::info!("update_acl {}", self.policy.len());
         let mut runtime = Crepe::new();
         runtime.extend(self.policy.iter().map(Input));
         let (authorized, revoked) = runtime.run();
@@ -405,6 +433,7 @@ mod tests {
             .frontend()
             .create_doc(peer('a'), &EMPTY_HASH.into(), Keypair::generate())?;
         Pin::new(&mut sdk).await?;
+        println!("{:#?}", doc);
 
         assert!(!doc.cursor().can(&peer('b'), Read)?);
 

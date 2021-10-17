@@ -1,4 +1,3 @@
-use crate::util::HexDebug;
 use crate::{
     AbstractDotSet, Acl, ArchivedLenses, DocId, Dot, DotSet, Path, PathBuf, PeerId, Permission,
 };
@@ -203,6 +202,7 @@ impl std::fmt::Debug for Crdt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Crdt")
             .field("state", &StateDebug(&self.state))
+            .field("acl", &self.acl)
             .finish_non_exhaustive()
     }
 }
@@ -211,11 +211,11 @@ struct StateDebug<'a>(&'a sled::Tree);
 
 impl<'a> std::fmt::Debug for StateDebug<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut m = f.debug_map();
-        for e in self.0.iter() {
-            let (k, v) = e.map_err(|_| std::fmt::Error::default())?;
+        let mut m = f.debug_set();
+        for e in self.0.iter().keys() {
+            let k = e.map_err(|_| std::fmt::Error::default())?;
             let path = Path::new(&k);
-            m.entry(&path.to_string(), &HexDebug(&v));
+            m.entry(&path);
         }
         m.finish()
     }

@@ -31,7 +31,7 @@ impl AsRef<[u8; 32]> for Dot {
 
 impl std::fmt::Debug for Dot {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", hex::encode(&self.0[0..2]))
+        write!(f, "Dot({})", hex::encode(&self.0[0..2]))
     }
 }
 
