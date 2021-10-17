@@ -1,7 +1,7 @@
 use crate::{DocId, Dot, PeerId, Policy, Ref};
 use blake3::Hash;
 use bytecheck::CheckBytes;
-use rkyv::{archived_root, Archive, Archived, Deserialize, Serialize};
+use rkyv::{Archive, Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::convert::{TryFrom, TryInto};
 
@@ -42,7 +42,6 @@ impl SegmentType {
     }
 }
 
-#[derive(Debug)]
 pub enum Segment<'a> {
     Schema(Hash),
     Doc(DocId),
@@ -52,7 +51,7 @@ pub enum Segment<'a> {
     U64(u64),
     I64(i64),
     Str(&'a str),
-    Policy(&'a Archived<Policy>),
+    Policy(Policy),
     Dot(Dot),
 }
 
@@ -67,7 +66,10 @@ impl<'a> Segment<'a> {
             SegmentType::U64 => Self::U64(u64::from_be_bytes(data.try_into().unwrap())),
             SegmentType::I64 => Self::I64(i64::from_be_bytes(data.try_into().unwrap())),
             SegmentType::Str => Self::Str(unsafe { std::str::from_utf8_unchecked(data) }),
-            SegmentType::Policy => Self::Policy(unsafe { archived_root::<Policy>(data) }),
+            SegmentType::Policy => {
+                let policy = Ref::<Policy>::new(data.into());
+                Self::Policy(policy.to_owned().unwrap())
+            }
             SegmentType::Dot => Self::Dot(Dot::new(data.try_into().unwrap())),
         }
     }
@@ -136,7 +138,7 @@ impl<'a> Segment<'a> {
         }
     }
 
-    pub fn policy(self) -> Option<&'a Archived<Policy>> {
+    pub fn policy(self) -> Option<Policy> {
         if let Segment::Policy(policy) = self {
             Some(policy)
         } else {
@@ -148,6 +150,23 @@ impl<'a> Segment<'a> {
         match self {
             Segment::Bool(_) | Segment::U64(_) | Segment::I64(_) | Segment::Str(_) => true,
             _ => false,
+        }
+    }
+}
+
+impl<'a> std::fmt::Debug for Segment<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Self::Schema(s) => write!(f, "Schema({})", hex::encode(&s.as_bytes()[..2])),
+            Self::Doc(s) => write!(f, "{:?}", s),
+            Self::Peer(s) => write!(f, "{:?}", s),
+            Self::Nonce(s) => write!(f, "Nonce({})", s),
+            Self::Bool(s) => write!(f, "{}", s),
+            Self::U64(s) => write!(f, "{}", s),
+            Self::I64(s) => write!(f, "{}", s),
+            Self::Str(s) => write!(f, "{:?}", s),
+            Self::Policy(s) => write!(f, "{:?}", s),
+            Self::Dot(s) => write!(f, "{:?}", s),
         }
     }
 }
@@ -333,9 +352,14 @@ impl<'a> Path<'a> {
 impl<'a> std::fmt::Debug for Path<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         if let Some(parent) = self.parent() {
-            write!(f, "{:?}.", parent)?;
+            if !parent.is_empty() {
+                write!(f, "{:?}.", parent)?;
+            }
         }
-        write!(f, "{:?}", self.last())
+        if let Some(last) = self.last() {
+            write!(f, "{:?}", last)?;
+        }
+        Ok(())
     }
 }
 

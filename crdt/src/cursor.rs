@@ -310,6 +310,7 @@ impl<'a> Cursor<'a> {
             return Err(anyhow!("unauthorized"));
         }
         let mut path = self.path.clone();
+        path.peer(&self.peer_id);
         path.policy(policy);
         let mut store = DotStore::new();
         store.insert(path);

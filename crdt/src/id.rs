@@ -28,7 +28,7 @@ impl AsRef<[u8; 32]> for DocId {
 
 impl std::fmt::Debug for DocId {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", hex::encode(&self.0[0..2]))
+        write!(f, "Doc({})", hex::encode(&self.0[0..2]))
     }
 }
 
@@ -80,7 +80,7 @@ impl AsRef<[u8; 32]> for PeerId {
 
 impl std::fmt::Debug for PeerId {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", hex::encode(&self.0[0..2]))
+        write!(f, "Peer({})", hex::encode(&self.0[0..2]))
     }
 }
 

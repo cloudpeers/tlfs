@@ -22,12 +22,6 @@ pub struct Ref<T> {
     bytes: sled::IVec,
 }
 
-impl<T> std::fmt::Debug for Ref<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Ref").field(&HexDebug(&self.bytes)).finish()
-    }
-}
-
 impl<T: Archive> Ref<T> {
     pub fn new(bytes: sled::IVec) -> Self {
         Self {
@@ -81,6 +75,24 @@ impl<T> From<Ref<T>> for Vec<u8> {
     }
 }
 
+impl<T: Archive> std::fmt::Debug for Ref<T>
+where
+    Archived<T>: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.as_ref())
+    }
+}
+
+impl<T: Archive> std::fmt::Display for Ref<T>
+where
+    Archived<T>: std::fmt::Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_ref())
+    }
+}
+
 pub trait InPlaceRelationalOps<K, V> {
     fn outer_join_with<W, L, R>(&mut self, that: &BTreeMap<K, W>, l: L, r: R)
     where
@@ -113,13 +125,5 @@ impl<K, V> InPlaceRelationalOps<K, V> for BTreeMap<K, V> {
         }
         // k not in that
         self.retain(|k, v| that.get(k).is_some() || l(k, v, None));
-    }
-}
-
-pub struct HexDebug<'a>(pub &'a [u8]);
-
-impl<'a> std::fmt::Debug for HexDebug<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{}]", hex::encode(self.0))
     }
 }
