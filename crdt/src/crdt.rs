@@ -463,13 +463,18 @@ mod tests {
 
     #[async_std::test]
     async fn test_mvreg() -> Result<()> {
+        let la = Keypair::generate();
         let mut sdk = Backend::memory()?;
         let hash = sdk.register(vec![Lens::Make(Kind::Reg(PrimitiveKind::U64))])?;
         let peer1 = PeerId::new([1; 32]);
-        let doc = sdk
-            .frontend()
-            .create_doc(peer1, &hash, Keypair::generate())?;
+        let doc = sdk.frontend().create_doc(peer1, &hash, la)?;
         Pin::new(&mut sdk).await?;
+
+        let mut sdk2 = Backend::memory()?;
+        let hash2 = sdk2.register(vec![Lens::Make(Kind::Reg(PrimitiveKind::U64))])?;
+        let peer2 = PeerId::new([2; 32]);
+        let doc2 = sdk2.frontend().create_doc(peer2, &hash2, la)?;
+        Pin::new(&mut sdk2).await?;
 
         let peer2 = PeerId::new([2; 32]);
         let op = doc.cursor().say_can(Some(peer2), Permission::Write)?;
@@ -478,14 +483,13 @@ mod tests {
         let op1 = doc.cursor().assign_u64(42)?;
         doc.apply(&op1)?;
 
-        //TODO
-        //let op2 = crdt.assign(path.as_path(), &peer2, Primitive::U64(43))?;
-        //crdt.join(&peer2, &op2)?;
+        let op2 = doc2.cursor().assign_u64(43)?;
+        doc.apply(&op2)?;
 
         let values = doc.cursor().u64s()?.collect::<Result<BTreeSet<u64>>>()?;
-        //assert_eq!(values.len(), 2);
+        assert_eq!(values.len(), 2);
         assert!(values.contains(&42));
-        //assert!(values.contains(&43));
+        assert!(values.contains(&43));
 
         let op = doc.cursor().assign_u64(99)?;
         doc.apply(&op)?;
