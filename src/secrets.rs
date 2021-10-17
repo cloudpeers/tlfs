@@ -20,12 +20,14 @@ impl Metadata {
     }
 
     /// Queries a secret based on a doc.
+    #[allow(unused)]
     pub fn doc(mut self, doc: DocId) -> Self {
         self.0[..32].copy_from_slice(doc.as_ref());
         self
     }
 
     /// Queries a secret based on a peer.
+    #[allow(unused)]
     pub fn peer(mut self, peer: PeerId) -> Self {
         self.0[32..64].copy_from_slice(peer.as_ref());
         self
@@ -85,6 +87,7 @@ impl Secrets {
         Ok(nonce)
     }
 
+    #[allow(unused)]
     pub fn key_nonce(&self, metadata: Metadata) -> Result<Option<KeyNonce>> {
         if let Some(key) = self.key(metadata)? {
             let nonce = self.nonce(metadata)?;
@@ -102,6 +105,7 @@ impl Secrets {
         Ok(())
     }
 
+    #[allow(unused)]
     pub fn generate_key(&self, metadata: Metadata) -> Result<()> {
         self.0.insert(
             metadata.ty(KeyType::Key),
@@ -110,6 +114,7 @@ impl Secrets {
         Ok(())
     }
 
+    #[allow(unused)]
     pub fn add_key(&self, metadata: Metadata, key: Key) -> Result<()> {
         self.0
             .insert(metadata.ty(KeyType::Key), Ref::archive(&key).as_bytes())?;

@@ -1,28 +1,20 @@
-use crate::{Metadata, Secrets};
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 use async_trait::async_trait;
 use bytecheck::CheckBytes;
 use fnv::FnvHashMap;
 use futures::io::{AsyncRead, AsyncWrite};
 use futures::prelude::*;
-use libp2p::gossipsub::{
-    Gossipsub, GossipsubConfigBuilder, GossipsubEvent, IdentTopic, MessageAuthenticity,
-    ValidationMode,
-};
 use libp2p::request_response::{
     self, ProtocolName, ProtocolSupport, RequestId, RequestResponse, RequestResponseCodec,
     RequestResponseConfig,
 };
 use libp2p::swarm::NetworkBehaviourEventProcess;
 use libp2p::{Multiaddr, NetworkBehaviour};
-use rkyv::{Archive, Archived, Deserialize, Serialize};
+use rkyv::{Archive, Deserialize, Serialize};
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tlfs_crdt::{
-    Backend, Causal, CausalContext, DocId, Encrypted, Hash, Key, Keypair, PeerId, Permission, Ref,
-    Signed,
-};
+use tlfs_crdt::{Backend, Causal, CausalContext, DocId, Hash, Keypair, PeerId, Ref};
 
 macro_rules! unwrap {
     ($r:expr) => {
@@ -50,8 +42,7 @@ impl ProtocolName for SyncProtocol {
 #[repr(C)]
 pub enum SyncRequest {
     Lenses([u8; 32]),
-    Key(DocId),
-    Unjoin(CausalContext),
+    Unjoin(DocId, CausalContext),
 }
 
 #[derive(Debug, Archive, Deserialize, Serialize)]
@@ -59,8 +50,7 @@ pub enum SyncRequest {
 #[repr(C)]
 pub enum SyncResponse {
     Lenses(Vec<u8>),
-    Key(Key),
-    Unjoin(Causal),
+    Unjoin([u8; 32], Causal),
 }
 
 #[derive(Clone, Default)]
@@ -131,14 +121,7 @@ type RequestResponseEvent =
     request_response::RequestResponseEvent<Ref<SyncRequest>, Ref<SyncResponse>>;
 
 pub enum Event {
-    Gossip(GossipsubEvent),
     ReqResp(RequestResponseEvent),
-}
-
-impl From<GossipsubEvent> for Event {
-    fn from(ev: GossipsubEvent) -> Self {
-        Self::Gossip(ev)
-    }
 }
 
 impl From<RequestResponseEvent> for Event {
@@ -152,44 +135,25 @@ impl From<RequestResponseEvent> for Event {
 pub struct Behaviour {
     #[behaviour(ignore)]
     backend: Backend,
-    #[behaviour(ignore)]
-    secrets: Secrets,
     req: RequestResponse<SyncCodec>,
-    gossip: Gossipsub,
     #[behaviour(ignore)]
-    peer_id: PeerId,
+    unjoin_req: FnvHashMap<RequestId, DocId>,
     #[behaviour(ignore)]
-    key_req: FnvHashMap<RequestId, DocId>,
-    #[behaviour(ignore)]
-    encrypted: Vec<(DocId, PeerId, Ref<Encrypted>)>,
-    #[behaviour(ignore)]
-    buffer: Vec<(PeerId, Causal)>,
+    buffer: Vec<(Hash, DocId, PeerId, Causal)>,
 }
 
 impl Behaviour {
-    pub fn new(backend: Backend, secrets: Secrets) -> Result<Self> {
-        let peer_id = secrets.keypair(Metadata::new())?.unwrap().peer_id();
-        Ok(Self {
+    pub fn new(backend: Backend) -> Self {
+        Self {
             backend,
-            secrets,
             req: RequestResponse::new(
                 SyncCodec::default(),
                 vec![(SyncProtocol, ProtocolSupport::Full)],
                 RequestResponseConfig::default(),
             ),
-            gossip: Gossipsub::new(
-                MessageAuthenticity::Author(peer_id.to_libp2p().into_peer_id()),
-                GossipsubConfigBuilder::default()
-                    .validation_mode(ValidationMode::None)
-                    .build()
-                    .unwrap(),
-            )
-            .unwrap(),
-            peer_id,
-            key_req: Default::default(),
-            encrypted: Default::default(),
+            unjoin_req: Default::default(),
             buffer: Default::default(),
-        })
+        }
     }
 
     pub fn poll_backend(&mut self, cx: &mut Context) -> Poll<Result<()>> {
@@ -212,103 +176,14 @@ impl Behaviour {
         self.req.send_request(&peer_id, Ref::archive(&req))
     }
 
-    pub fn request_key(&mut self, peer_id: &PeerId, doc: DocId) -> RequestId {
-        tracing::debug!("request_key {} {}", peer_id, doc);
-        let peer_id = peer_id.to_libp2p().into_peer_id();
-        let req = SyncRequest::Key(doc);
-        let id = self.req.send_request(&peer_id, Ref::archive(&req));
-        self.key_req.insert(id, doc);
-        id
-    }
-
     pub fn request_unjoin(&mut self, peer_id: &PeerId, doc: DocId) -> Result<RequestId> {
         tracing::debug!("request_unjoin {} {}", peer_id, doc);
         let peer_id = peer_id.to_libp2p().into_peer_id();
-        let ctx = self.backend.doc(doc)?.ctx()?;
-        let req = SyncRequest::Unjoin(ctx);
-        Ok(self.req.send_request(&peer_id, Ref::archive(&req)))
-    }
-
-    pub fn subscribe_doc(&mut self, id: DocId) -> Result<()> {
-        tracing::debug!("subscribe_doc {}", id);
-        let doc = self.backend.doc(id)?;
-        let metadata = Metadata::new().doc(id).peer(*doc.peer_id());
-        if self.secrets.key(metadata)?.is_none() {
-            self.rotate_key(id)?;
-        }
-        let topic = IdentTopic::new(id.to_string());
-        self.gossip
-            .subscribe(&topic)
-            .map_err(|err| anyhow!("{:?}", err))?;
-        Ok(())
-    }
-
-    pub fn send_delta(&mut self, causal: &Causal) -> Result<()> {
-        let doc = self.backend.doc(*causal.ctx().doc())?;
-        let signed = self.secrets.keypair(Metadata::new())?.unwrap().sign(causal);
-        let metadata = Metadata::new().doc(*doc.id()).peer(*doc.peer_id());
-        let encrypted = self.secrets.key_nonce(metadata)?.unwrap().encrypt(&signed);
-        let msg = Ref::archive(&encrypted);
-        let topic = IdentTopic::new(doc.id().to_string());
-        self.gossip.publish(topic, msg).ok();
-        Ok(())
-    }
-
-    pub fn rotate_key(&mut self, doc: DocId) -> Result<()> {
-        tracing::debug!("rotate_key {}", doc);
-        let peer_id = *self.backend.doc(doc)?.peer_id();
-        self.secrets
-            .generate_key(Metadata::new().doc(doc).peer(peer_id))?;
-        Ok(())
-    }
-
-    fn inject_signed(&mut self, signed: &Archived<Signed>) {
-        let (peer, causal) = unwrap!(signed.verify::<Causal>());
-        let causal: Causal = unwrap!(causal.deserialize(&mut rkyv::Infallible));
-        let lenses = causal.ctx().schema();
-        if unwrap!(self.backend.registry().contains(&lenses)) {
-            self.backend.join(&peer, causal).ok();
-            // TODO: detect missing updates and request unjoin
-        } else {
-            self.buffer.push((peer, causal));
-            self.request_lenses(&peer, lenses);
-        }
-    }
-}
-
-impl NetworkBehaviourEventProcess<GossipsubEvent> for Behaviour {
-    fn inject_event(&mut self, ev: GossipsubEvent) {
-        use GossipsubEvent::*;
-        match ev {
-            Message {
-                propagation_source: _,
-                message_id: _,
-                mut message,
-            } => {
-                let doc = unwrap!(message.topic.as_str().parse());
-                let peer = unwrap!(libp2p_peer_id(&message.source.unwrap()));
-                let meta = Metadata::new().doc(doc).peer(peer);
-                let encrypted = unwrap!(Ref::checked(&message.data));
-                let signed = match unwrap!(self.secrets.key(meta)) {
-                    Some(key) => key.decrypt::<Signed>(&mut message.data).ok(),
-                    None => None,
-                };
-                if let Some(signed) = signed {
-                    self.inject_signed(signed);
-                } else {
-                    self.encrypted.push((doc, peer, encrypted));
-                    self.request_key(&peer, doc);
-                }
-            }
-            Subscribed {
-                peer_id: _,
-                topic: _,
-            } => {}
-            Unsubscribed {
-                peer_id: _,
-                topic: _,
-            } => {}
-        }
+        let ctx = self.backend.frontend().ctx(&doc)?;
+        let req = SyncRequest::Unjoin(doc, ctx);
+        let id = self.req.send_request(&peer_id, Ref::archive(&req));
+        self.unjoin_req.insert(id, doc);
+        Ok(id)
     }
 }
 
@@ -335,24 +210,11 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
                                     self.req.send_response(channel, resp).ok();
                                 }
                             }
-                            Key(doc) => {
-                                // TODO: fine grained keys
-                                let doc = unwrap!(self.backend.doc(*doc));
+                            Unjoin(doc, ctx) => {
                                 let peer = unwrap!(libp2p_peer_id(&peer));
-                                if !unwrap!(doc.cursor().can(&peer, Permission::Read)) {
-                                    return;
-                                }
-                                let meta = Metadata::new().doc(*doc.id()).peer(self.peer_id);
-                                if let Some(key) = unwrap!(self.secrets.key(meta)) {
-                                    let resp = SyncResponse::Key(key);
-                                    let resp = Ref::archive(&resp);
-                                    self.req.send_response(channel, resp).ok();
-                                }
-                            }
-                            Unjoin(ctx) => {
-                                let peer = unwrap!(libp2p_peer_id(&peer));
-                                let causal = unwrap!(self.backend.unjoin(&peer, ctx));
-                                let resp = SyncResponse::Unjoin(causal);
+                                let causal = unwrap!(self.backend.unjoin(&peer, doc, ctx));
+                                let schema = unwrap!(self.backend.frontend().schema_id(doc));
+                                let resp = SyncResponse::Unjoin(schema.into(), causal);
                                 let resp = Ref::archive(&resp);
                                 self.req.send_response(channel, resp).ok();
                             }
@@ -368,41 +230,23 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
                             Lenses(lenses) => {
                                 let schema = unwrap!(self.backend.registry().register(lenses));
                                 for i in 0..self.buffer.len() {
-                                    if self.buffer[i].1.ctx().schema() == schema {
-                                        let (peer, causal) = self.buffer.remove(i);
-                                        unwrap!(self.backend.join(&peer, causal));
+                                    if self.buffer[i].0 == schema {
+                                        let (schema, doc, peer, causal) = self.buffer.remove(i);
+                                        unwrap!(self.backend.join(&peer, &doc, &schema, causal));
                                     }
                                 }
                             }
-                            Key(key) => {
-                                let doc = if let Some(doc) = self.key_req.remove(&request_id) {
-                                    doc
-                                } else {
-                                    return;
-                                };
+                            Unjoin(schema, causal) => {
+                                let schema = Hash::from(*schema);
                                 let peer = unwrap!(libp2p_peer_id(&peer));
-                                unwrap!(self
-                                    .secrets
-                                    .add_key(Metadata::new().doc(doc).peer(peer), *key));
-                                for i in 0..self.encrypted.len() {
-                                    if self.encrypted[i].0 == doc && self.encrypted[i].1 == peer {
-                                        let mut encrypted: Vec<u8> =
-                                            self.encrypted.remove(i).2.into();
-                                        let signed = unwrap!(key.decrypt::<Signed>(&mut encrypted));
-                                        self.inject_signed(signed);
-                                    }
-                                }
-                            }
-                            Unjoin(causal) => {
-                                let peer = unwrap!(libp2p_peer_id(&peer));
-                                let lenses = causal.ctx().schema();
                                 // TODO: don't deserialize
                                 let causal = unwrap!(causal.deserialize(&mut rkyv::Infallible));
-                                if unwrap!(self.backend.registry().contains(&lenses)) {
-                                    unwrap!(self.backend.join(&peer, causal));
+                                let doc = self.unjoin_req.remove(&request_id).unwrap();
+                                if unwrap!(self.backend.registry().contains(&schema)) {
+                                    unwrap!(self.backend.join(&peer, &doc, &schema, causal));
                                 } else {
-                                    self.buffer.push((peer, causal));
-                                    self.request_lenses(&peer, lenses);
+                                    self.buffer.push((schema, doc, peer, causal));
+                                    self.request_lenses(&peer, schema);
                                 }
                             }
                         }
@@ -414,7 +258,7 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
                 request_id,
                 error,
             } => {
-                self.key_req.remove(&request_id);
+                self.unjoin_req.remove(&request_id);
                 tracing::error!("{}", error);
             }
             InboundFailure {
