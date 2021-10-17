@@ -117,7 +117,7 @@ fn arb_struct(
     })
 }
 
-pub fn arb_dotstore() -> impl Strategy<Value = DotStore> {
+fn arb_dotstore() -> impl Strategy<Value = DotStore> {
     let leaf = prop_oneof![
         arb_dotset(0..10),
         arb_primitive_kind().prop_flat_map(|kind| arb_dotfun(kind, 0..10)),
@@ -131,7 +131,7 @@ pub fn arb_dotstore() -> impl Strategy<Value = DotStore> {
     })
 }
 
-pub fn arb_causal(
+fn arb_causal_for_dotstore(
     store: impl Strategy<Value = crate::crdt::DotStore>,
 ) -> impl Strategy<Value = Causal> {
     store.prop_map(|store| {
@@ -139,6 +139,7 @@ pub fn arb_causal(
         let mut path = PathBuf::new();
         path.doc(&doc);
         Causal {
+            // TODO: add some expired
             expired: Default::default(),
             store: store.prefix(path.as_path()),
         }
@@ -159,7 +160,7 @@ pub fn arb_schema() -> impl Strategy<Value = Schema> {
     })
 }
 
-pub fn arb_dotstore_for_schema(s: Schema) -> BoxedStrategy<DotStore> {
+fn arb_dotstore_for_schema(s: Schema) -> BoxedStrategy<DotStore> {
     match s {
         Schema::Null => Just(DotStore::new()).boxed(),
         Schema::Flag => arb_dotset(0..10).boxed(),
@@ -188,6 +189,14 @@ pub fn arb_dotstore_for_schema(s: Schema) -> BoxedStrategy<DotStore> {
     }
 }
 
+pub fn arb_causal() -> impl Strategy<Value = Causal> {
+    arb_causal_for_dotstore(arb_dotstore())
+}
+
+pub fn arb_causal_for_schema(schema: Schema) -> impl Strategy<Value = Causal> {
+    arb_causal_for_dotstore(arb_dotstore_for_schema(schema))
+}
+
 pub fn validate(schema: &Schema, value: &Causal) -> bool {
     let schema = Ref::archive(schema);
     schema.as_ref().validate(value.store())
@@ -196,7 +205,7 @@ pub fn validate(schema: &Schema, value: &Causal) -> bool {
 prop_compose! {
     pub fn schema_and_causal()
         (schema in arb_schema())
-        (schema in Just(schema.clone()), crdt in arb_causal(arb_dotstore_for_schema(schema))) -> (Schema, Causal)
+        (schema in Just(schema.clone()), crdt in arb_causal_for_schema(schema)) -> (Schema, Causal)
     {
         (schema, crdt)
     }
@@ -205,7 +214,11 @@ prop_compose! {
 prop_compose! {
     pub fn schema_and_causal2()
         (schema in arb_schema())
-        (schema in Just(schema.clone()), crdt1 in arb_causal(arb_dotstore_for_schema(schema.clone())), crdt2 in arb_causal(arb_dotstore_for_schema(schema))) -> (Schema, Causal, Causal)
+        (
+            schema in Just(schema.clone()),
+            crdt1 in arb_causal_for_schema(schema.clone()),
+            crdt2 in arb_causal_for_schema(schema),
+        ) -> (Schema, Causal, Causal)
     {
         (schema, crdt1, crdt2)
     }
@@ -335,7 +348,7 @@ prop_compose! {
 prop_compose! {
     pub fn lens_schema_and_causal()
         (schema in arb_schema())
-        (lens in arb_lens_for_schema(&schema), schema in Just(schema.clone()), crdt in arb_causal(arb_dotstore_for_schema(schema))) -> (Lens, Schema, Causal)
+        (lens in arb_lens_for_schema(&schema), schema in Just(schema.clone()), crdt in arb_causal_for_schema(schema)) -> (Lens, Schema, Causal)
     {
         (lens, schema, crdt)
     }
@@ -344,7 +357,7 @@ prop_compose! {
 prop_compose! {
     pub fn lenses_and_causal()
         (lenses in arb_lenses())
-        (lenses in Just(lenses.clone()), crdt in arb_causal(arb_dotstore_for_schema(lenses_to_schema(&lenses)))) -> (Lenses, Causal)
+        (lenses in Just(lenses.clone()), crdt in arb_causal_for_schema(lenses_to_schema(&lenses))) -> (Lenses, Causal)
     {
         (lenses, crdt)
     }

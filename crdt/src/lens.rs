@@ -297,7 +297,7 @@ impl ArchivedLenses {
 #[cfg(test)]
 mod tests {
     use crate::props::*;
-    use crate::Ref;
+    use crate::{DocId, Ref};
     use proptest::prelude::*;
 
     proptest! {
@@ -322,11 +322,12 @@ mod tests {
         #[test]
         #[ignore]
         fn crdt_transform((lens, schema, mut causal) in lens_schema_and_causal()) {
+            let doc = DocId::new([0; 32]);
             let lens = Ref::archive(&lens);
             prop_assume!(validate(&schema, &causal));
-            let crdt = causal_to_crdt(&causal);
-            lens.as_ref().to_ref().transform_crdt(&causal.doc, &crdt).unwrap();
-            let causal2 = crdt_to_causal(&crdt, &causal.ctx());
+            let crdt = causal_to_crdt(&doc, &causal);
+            lens.as_ref().to_ref().transform_crdt(&doc, &crdt).unwrap();
+            let causal2 = crdt_to_causal(&doc, &crdt);
             lens.as_ref().to_ref().transform_dotstore(&mut causal.store);
             assert_eq!(causal, causal2);
         }

@@ -55,6 +55,12 @@ impl DotStore {
         self.0.iter().map(|path| path.as_path().dot())
     }
 
+    pub fn union(&mut self, other: &Self) {
+        for path in other.iter() {
+            self.insert(path.to_owned());
+        }
+    }
+
     pub fn join(&mut self, other: &Self, expired: &impl AbstractDotSet) {
         for path in other.0.iter() {
             self.0.insert(path.clone());
@@ -371,7 +377,7 @@ impl Crdt {
 mod tests {
     use super::*;
     use crate::{props::*, Keypair};
-    use crate::{Backend, Kind, Lens, PrimitiveKind};
+    use crate::{Backend, Kind, Lens, PrimitiveKind, Ref};
     use proptest::prelude::*;
     use std::pin::Pin;
 
@@ -380,60 +386,54 @@ mod tests {
         let mut sdk = Backend::memory()?;
         let peer = PeerId::new([0; 32]);
         let hash = sdk.register(vec![Lens::Make(Kind::Flag)])?;
-        let doc = sdk.frontend().create_doc(peer, &hash)?;
+        let doc = sdk
+            .frontend()
+            .create_doc(peer, &hash, Keypair::generate())?;
         Pin::new(&mut sdk).await?;
         let op = doc.cursor().enable()?;
         assert!(!doc.cursor().enabled()?);
-        sdk.join(&peer, op)?;
+        doc.apply(&op)?;
         assert!(doc.cursor().enabled()?);
         let op = doc.cursor().disable()?;
-        sdk.join(&peer, op)?;
+        doc.apply(&op)?;
         assert!(!doc.cursor().enabled()?);
         Ok(())
     }
 
     #[async_std::test]
     async fn test_ewflag_unjoin() -> Result<()> {
-        let peer1 = PeerId::new([0; 32]);
         let la = Keypair::generate();
+        let peer = PeerId::new([0; 32]);
 
         let mut sdk1 = Backend::memory()?;
         let hash1 = sdk1.register(vec![Lens::Make(Kind::Flag)])?;
-        let doc1 = sdk1
-            .frontend()
-            .create_doc_deterministic(peer1, &hash1, la)?;
+        let doc1 = sdk1.frontend().create_doc(peer, &hash1, la)?;
         Pin::new(&mut sdk1).await?;
 
         let mut sdk2 = Backend::memory()?;
         let hash2 = sdk2.register(vec![Lens::Make(Kind::Flag)])?;
-        let doc2 = sdk2
-            .frontend()
-            .create_doc_deterministic(peer1, &hash2, la)?;
+        let doc2 = sdk2.frontend().create_doc(peer, &hash2, la)?;
         Pin::new(&mut sdk2).await?;
         assert_eq!(hash1, hash2);
 
-        let mut op = doc1.cursor().enable()?;
+        let op = doc1.cursor().enable()?;
         println!("{:?}", op);
-        sdk1.join(&peer1, op.clone())?;
-        op.doc = *doc2.id();
-        sdk2.join(&peer1, op)?;
+        doc1.apply(&op)?;
+        doc2.apply(&op)?;
 
-        println!("{:#?}", doc1);
-        println!("{:#?}", doc2);
         assert!(doc1.cursor().enabled()?);
         assert!(doc2.cursor().enabled()?);
 
         let ctx_after_enable = doc1.ctx()?;
-        let mut op = doc1.cursor().disable()?;
-        sdk1.join(&peer1, op.clone())?;
+        let op = doc1.cursor().disable()?;
+        doc1.apply(&op)?;
         let ctx_after_disable = doc1.ctx()?;
         if false {
             // apply the op
-            op.doc = *doc2.id();
-            sdk2.join(&peer1, op)?;
+            doc2.apply(&op)?;
         } else {
             // compute the delta using unjoin, and apply that
-            let mut delta = sdk1.unjoin(&peer1, Ref::archive(&ctx_after_enable).as_ref())?;
+            let delta = sdk1.unjoin(&peer, &doc1.id(), Ref::archive(&ctx_after_enable).as_ref())?;
             let diff = ctx_after_disable
                 .expired
                 .difference(&ctx_after_enable.expired);
@@ -442,9 +442,8 @@ mod tests {
             println!("expired after disable {:?}", ctx_after_disable.expired);
             println!("difference {:?}", diff);
             println!("delta {:?}", delta);
-            delta.doc = *doc2.id();
             println!("{:?}", delta.store());
-            sdk2.join(&peer1, delta)?;
+            sdk2.join(&peer, &doc1.id(), &hash1, delta)?;
         }
         assert!(!doc1.cursor().enabled()?);
         assert!(!doc2.cursor().enabled()?);
@@ -457,15 +456,17 @@ mod tests {
         let mut sdk = Backend::memory()?;
         let hash = sdk.register(vec![Lens::Make(Kind::Reg(PrimitiveKind::U64))])?;
         let peer1 = PeerId::new([1; 32]);
-        let doc = sdk.frontend().create_doc(peer1, &hash)?;
+        let doc = sdk
+            .frontend()
+            .create_doc(peer1, &hash, Keypair::generate())?;
         Pin::new(&mut sdk).await?;
 
         let peer2 = PeerId::new([2; 32]);
         let op = doc.cursor().say_can(Some(peer2), Permission::Write)?;
-        sdk.join(&peer1, op)?;
+        doc.apply(&op)?;
 
-        let op1 = doc.cursor().assign(Primitive::U64(42))?;
-        sdk.join(&peer1, op1)?;
+        let op1 = doc.cursor().assign_u64(42)?;
+        doc.apply(&op1)?;
 
         //TODO
         //let op2 = crdt.assign(path.as_path(), &peer2, Primitive::U64(43))?;
@@ -476,8 +477,8 @@ mod tests {
         assert!(values.contains(&42));
         //assert!(values.contains(&43));
 
-        let op = doc.cursor().assign(Primitive::U64(99))?;
-        sdk.join(&peer1, op)?;
+        let op = doc.cursor().assign_u64(99)?;
+        doc.apply(&op)?;
 
         let values = doc.cursor().u64s()?.collect::<Result<BTreeSet<u64>>>()?;
         assert_eq!(values.len(), 1);
@@ -497,24 +498,28 @@ mod tests {
                 Kind::Reg(PrimitiveKind::U64),
             ))))),
         ])?;
-        let doc = sdk.frontend().create_doc(peer, &hash)?;
+        let doc = sdk
+            .frontend()
+            .create_doc(peer, &hash, Keypair::generate())?;
         Pin::new(&mut sdk).await?;
 
-        let a = Primitive::Str("a".into());
-        let b = Primitive::Str("b".into());
-        let cur = doc.cursor().key(&a)?.key(&b)?;
-        let op = cur.assign(Primitive::U64(42))?;
-        sdk.join(&peer, op)?;
+        let cur = doc.cursor().key_str("a")?.key_str("b")?;
+        let op = cur.assign_u64(42)?;
+        doc.apply(&op)?;
 
         let values = cur.u64s()?.collect::<Result<BTreeSet<u64>>>()?;
         assert_eq!(values.len(), 1);
         assert!(values.contains(&42));
 
-        let cur = doc.cursor().key(&a)?;
-        let op = cur.remove(b.clone())?;
-        sdk.join(&peer, op)?;
+        let op = doc.cursor().key_str("a")?.key_str("b")?.remove()?;
+        doc.apply(&op)?;
 
-        let values = cur.key(&b)?.u64s()?.collect::<Result<BTreeSet<u64>>>()?;
+        let values = doc
+            .cursor()
+            .key_str("a")?
+            .key_str("b")?
+            .u64s()?
+            .collect::<Result<BTreeSet<u64>>>()?;
         assert!(values.is_empty());
 
         Ok(())
@@ -522,20 +527,18 @@ mod tests {
 
     proptest! {
         #[test]
-        fn causal_unjoin(a in arb_causal(arb_dotstore()), b in arb_causal_ctx()) {
-            let b = a.unjoin(&b);
+        fn causal_unjoin(a in arb_causal(), b in arb_causal()) {
+            let b = a.unjoin(&b.ctx());
             prop_assert_eq!(join(&a, &b), a);
         }
 
         #[test]
-        fn causal_join_idempotent(a in arb_causal(arb_dotstore())) {
+        fn causal_join_idempotent(a in arb_causal()) {
             prop_assert_eq!(join(&a, &a), a);
         }
 
         #[test]
-        fn causal_join_commutative(dots in arb_causal(arb_dotstore()), a in arb_causal_ctx(), b in arb_causal_ctx()) {
-            let a = dots.unjoin(&a);
-            let b = dots.unjoin(&b);
+        fn causal_join_commutative(a in arb_causal(), b in arb_causal()) {
             let ab = join(&a, &b);
             let ba = join(&b, &a);
             if ab != ba {
@@ -548,34 +551,28 @@ mod tests {
         }
 
         #[test]
-        fn causal_join_associative(dots in arb_causal(arb_dotstore()), a in arb_causal_ctx(), b in arb_causal_ctx(), c in arb_causal_ctx()) {
-            let a = dots.unjoin(&a);
-            let b = dots.unjoin(&b);
-            let c = dots.unjoin(&c);
+        fn causal_join_associative(a in arb_causal(), b in arb_causal(), c in arb_causal()) {
             prop_assert_eq!(join(&join(&a, &b), &c), join(&a, &join(&b, &c)));
         }
 
         #[test]
-        fn crdt_join(dots in arb_causal(arb_dotstore()), a in arb_causal_ctx(), b in arb_causal_ctx()) {
-            let a = dots.unjoin(&a);
-            let b = dots.unjoin(&b);
-            let crdt = causal_to_crdt(&a);
+        fn crdt_join(a in arb_causal(), b in arb_causal()) {
+            let doc = DocId::new([0; 32]);
+            let crdt = causal_to_crdt(&doc, &a);
             let c = join(&a, &b);
-            crdt.join(&dots.doc.into(), &b).unwrap();
-            let c2 = crdt_to_causal(&crdt, &dots.ctx());
-            // TODO: crdt doesn't causally join
-            assert_eq!(c.store, c2.store);
+            crdt.join(&doc.into(), &doc, &b).unwrap();
+            let c2 = crdt_to_causal(&doc, &crdt);
+            assert_eq!(c, c2);
         }
 
         #[test]
-        fn crdt_unjoin(causal in arb_causal(arb_dotstore()), ctx in arb_causal_ctx()) {
-            let crdt = causal_to_crdt(&causal);
-            let c = causal.unjoin(&ctx);
-            let actx = Ref::archive(&ctx);
-            let mut c2 = crdt.unjoin(&ctx.doc.into(), actx.as_ref()).unwrap();
-            c2.schema = [0; 32];
-            // TODO: crdt doesn't causally join
-            assert_eq!(c.store, c2.store);
+        fn crdt_unjoin(a in arb_causal(), b in arb_causal()) {
+            let doc = DocId::new([0; 32]);
+            let crdt = causal_to_crdt(&doc, &a);
+            let c = a.unjoin(&b.ctx());
+            let actx = Ref::archive(&b.ctx());
+            let c2 = crdt.unjoin(&doc.into(), &doc, actx.as_ref()).unwrap();
+            assert_eq!(c, c2);
         }
     }
 }
