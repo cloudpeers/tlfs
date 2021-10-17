@@ -2,7 +2,7 @@ mod secrets;
 mod sync;
 
 pub use libp2p::Multiaddr;
-pub use tlfs_crdt::{Causal, DocId, Hash, Kind, Lens, PeerId, Permission, PrimitiveKind};
+pub use tlfs_crdt::{Causal, DocId, Hash, Keypair, Kind, Lens, PeerId, Permission, PrimitiveKind};
 
 use crate::secrets::{Metadata, Secrets};
 use crate::sync::{Behaviour, ToLibp2pKeypair, ToLibp2pPublic};
@@ -47,7 +47,7 @@ impl Migrate {
         self.backend.register(lenses)
     }
 
-    pub fn migrate(&mut self, doc: DocId, hash: &Hash) -> Result<()> {
+    pub fn migrate(&mut self, doc: &DocId, hash: &Hash) -> Result<()> {
         self.backend.transform(doc, hash)
     }
 
@@ -72,7 +72,7 @@ impl Sdk {
         let keypair = secrets.keypair(Metadata::new())?.unwrap();
 
         let transport = libp2p::development_transport(keypair.to_libp2p()).await?;
-        let behaviour = Behaviour::new(backend, secrets.clone())?;
+        let behaviour = Behaviour::new(backend);
         let mut swarm = Swarm::new(
             transport,
             behaviour,
@@ -93,12 +93,6 @@ impl Sdk {
                     Command::Addresses(ch) => {
                         let addrs = swarm.listeners().cloned().collect::<Vec<_>>();
                         ch.send(addrs).ok();
-                    }
-                    Command::Publish(causal) => {
-                        swarm.behaviour_mut().send_delta(&causal).ok();
-                    }
-                    Command::Subscribe(id) => {
-                        swarm.behaviour_mut().subscribe_doc(id).ok();
                     }
                     Command::Unjoin(doc, peer) => {
                         swarm.behaviour_mut().request_unjoin(&peer, doc).ok();
@@ -150,38 +144,21 @@ impl Sdk {
 
     pub fn create_doc(&mut self, schema: &Hash) -> Result<Doc> {
         let peer_id = self.peer_id()?;
-        let doc = self.frontend.create_doc(peer_id, schema)?;
-        self.swarm
-            .unbounded_send(Command::Subscribe(*doc.id()))
-            .ok();
-        Ok(doc)
+        self.frontend
+            .create_doc(peer_id, schema, Keypair::generate())
     }
 
     pub fn add_doc(&self, id: DocId, schema: &Hash) -> Result<Doc> {
         let peer_id = self.peer_id()?;
-        let doc = self.frontend.add_doc(id, &peer_id, schema)?;
-        self.swarm
-            .unbounded_send(Command::Subscribe(*doc.id()))
-            .ok();
-        Ok(doc)
+        self.frontend.add_doc(id, &peer_id, schema)
     }
 
     pub fn doc(&self, id: DocId) -> Result<Doc> {
-        let doc = self.frontend.doc(id)?;
-        self.swarm
-            .unbounded_send(Command::Subscribe(*doc.id()))
-            .ok();
-        Ok(doc)
+        self.frontend.doc(id)
     }
 
     pub fn remove_doc(&self, id: DocId) -> Result<()> {
         self.frontend.remove_doc(id)
-    }
-
-    pub fn apply(&mut self, causal: Causal) -> Result<()> {
-        self.frontend.apply(&causal)?;
-        self.swarm.unbounded_send(Command::Publish(causal)).ok();
-        Ok(())
     }
 
     pub fn unjoin(&self, doc: DocId, peer: PeerId) {
@@ -193,8 +170,6 @@ enum Command {
     AddAddress(PeerId, Multiaddr),
     RemoveAddress(PeerId, Multiaddr),
     Addresses(oneshot::Sender<Vec<Multiaddr>>),
-    Publish(Causal),
-    Subscribe(DocId),
     Unjoin(DocId, PeerId),
 }
 
@@ -236,19 +211,18 @@ mod tests {
         assert!(doc.cursor().can(&sdk.peer_id()?, Permission::Write)?);
 
         let title = "something that needs to be done";
-        let delta = doc
+        let op = doc
             .cursor()
             .field("todos")?
-            .key(&0u64.into())?
+            .key_u64(0)?
             .field("title")?
-            .assign(title)?;
-
-        sdk.apply(delta)?;
+            .assign_str(title)?;
+        doc.apply(&op)?;
 
         let value = doc
             .cursor()
             .field("todos")?
-            .key(&0u64.into())?
+            .key_u64(0)?
             .field("title")?
             .strs()?
             .next()
@@ -261,7 +235,7 @@ mod tests {
         let op = doc
             .cursor()
             .say_can(Some(sdk2.peer_id()?), Permission::Write)?;
-        sdk.apply(op)?;
+        doc.apply(&op)?;
 
         for addr in sdk.addresses().await {
             sdk2.add_address(sdk.peer_id()?, addr);
@@ -277,7 +251,7 @@ mod tests {
         let value = doc2
             .cursor()
             .field("todos")?
-            .key(&0u64.into())?
+            .key_u64(0)?
             .field("title")?
             .strs()?
             .next()
