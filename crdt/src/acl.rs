@@ -390,7 +390,7 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Backend, EMPTY_HASH};
+    use crate::{Backend, Keypair, EMPTY_HASH};
     use std::pin::Pin;
     use Permission::*;
 
@@ -401,7 +401,9 @@ mod tests {
     #[async_std::test]
     async fn test_la_says_can() -> Result<()> {
         let mut sdk = Backend::memory()?;
-        let doc = sdk.frontend().create_doc(peer('a'), &EMPTY_HASH.into())?;
+        let doc = sdk
+            .frontend()
+            .create_doc(peer('a'), &EMPTY_HASH.into(), Keypair::generate())?;
         Pin::new(&mut sdk).await?;
 
         assert!(!doc.cursor().can(&peer('b'), Read)?);
@@ -417,19 +419,23 @@ mod tests {
     #[async_std::test]
     async fn test_says_if() -> Result<()> {
         let mut sdk = Backend::memory()?;
-        let doc1 = sdk.frontend().create_doc(peer('a'), &EMPTY_HASH.into())?;
-        let doc2 = sdk.frontend().create_doc(peer('a'), &EMPTY_HASH.into())?;
+        let doc1 = sdk
+            .frontend()
+            .create_doc(peer('a'), &EMPTY_HASH.into(), Keypair::generate())?;
+        let doc2 = sdk
+            .frontend()
+            .create_doc(peer('a'), &EMPTY_HASH.into(), Keypair::generate())?;
         Pin::new(&mut sdk).await?;
 
         let cond = doc1.cursor().cond(Actor::Peer(peer('b')), Read);
         let op = doc2
             .cursor()
             .say_can_if(Actor::Peer(peer('b')), Write, cond)?;
-        sdk.join(&peer('a'), op)?;
+        doc2.apply(&op)?;
         assert!(!doc2.cursor().can(&peer('b'), Read)?);
 
         let op = doc1.cursor().say_can(Some(peer('b')), Write)?;
-        sdk.join(&peer('a'), op)?;
+        doc1.apply(&op)?;
         assert!(doc2.cursor().can(&peer('b'), Read)?);
 
         Ok(())
@@ -438,17 +444,21 @@ mod tests {
     #[async_std::test]
     async fn test_says_if_unbound() -> Result<()> {
         let mut sdk = Backend::memory()?;
-        let doc1 = sdk.frontend().create_doc(peer('a'), &EMPTY_HASH.into())?;
-        let doc2 = sdk.frontend().create_doc(peer('a'), &EMPTY_HASH.into())?;
+        let doc1 = sdk
+            .frontend()
+            .create_doc(peer('a'), &EMPTY_HASH.into(), Keypair::generate())?;
+        let doc2 = sdk
+            .frontend()
+            .create_doc(peer('a'), &EMPTY_HASH.into(), Keypair::generate())?;
         Pin::new(&mut sdk).await?;
 
         let cond = doc1.cursor().cond(Actor::Unbound, Read);
         let op = doc2.cursor().say_can_if(Actor::Unbound, Write, cond)?;
-        sdk.join(&peer('a'), op)?;
+        doc2.apply(&op)?;
         assert!(!doc2.cursor().can(&peer('b'), Read)?);
 
         let op = doc1.cursor().say_can(Some(peer('b')), Write)?;
-        sdk.join(&peer('a'), op)?;
+        doc1.apply(&op)?;
         assert!(doc2.cursor().can(&peer('b'), Read)?);
 
         Ok(())
@@ -457,11 +467,13 @@ mod tests {
     #[async_std::test]
     async fn test_own_and_control() -> Result<()> {
         let mut sdk = Backend::memory()?;
-        let doc = sdk.frontend().create_doc(peer('a'), &EMPTY_HASH.into())?;
+        let doc = sdk
+            .frontend()
+            .create_doc(peer('a'), &EMPTY_HASH.into(), Keypair::generate())?;
         Pin::new(&mut sdk).await?;
 
         let op = doc.cursor().say_can(Some(peer('b')), Control)?;
-        sdk.join(&peer('a'), op)?;
+        doc.apply(&op)?;
         assert!(doc.cursor().can(&peer('b'), Control)?);
 
         //let op = doc.cursor().say_can(peer('c'), Control)?;
@@ -475,11 +487,13 @@ mod tests {
     #[async_std::test]
     async fn test_anonymous_can() -> Result<()> {
         let mut sdk = Backend::memory()?;
-        let doc = sdk.frontend().create_doc(peer('a'), &EMPTY_HASH.into())?;
+        let doc = sdk
+            .frontend()
+            .create_doc(peer('a'), &EMPTY_HASH.into(), Keypair::generate())?;
         Pin::new(&mut sdk).await?;
 
         let op = doc.cursor().say_can(None, Read)?;
-        sdk.join(&peer('a'), op)?;
+        doc.apply(&op)?;
         assert!(doc.cursor().can(&peer('b'), Read)?);
         Ok(())
     }
@@ -487,15 +501,17 @@ mod tests {
     #[async_std::test]
     async fn test_revoke() -> Result<()> {
         let mut sdk = Backend::memory()?;
-        let doc = sdk.frontend().create_doc(peer('a'), &EMPTY_HASH.into())?;
+        let doc = sdk
+            .frontend()
+            .create_doc(peer('a'), &EMPTY_HASH.into(), Keypair::generate())?;
         Pin::new(&mut sdk).await?;
 
         let op = doc.cursor().say_can(Some(peer('b')), Write)?;
-        sdk.join(&peer('a'), op)?;
+        doc.apply(&op)?;
         assert!(doc.cursor().can(&peer('b'), Write)?);
 
-        let op = doc.cursor().revoke(Dot::new(peer('a'), 1))?;
-        sdk.join(&peer('a'), op)?;
+        let op = doc.cursor().revoke(op.store.iter().next().unwrap().dot())?;
+        doc.apply(&op)?;
         assert!(!doc.cursor().can(&peer('b'), Write)?);
 
         Ok(())

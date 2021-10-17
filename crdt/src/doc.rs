@@ -245,14 +245,14 @@ impl Frontend {
         self.docs.docs()
     }
 
-    pub fn create_doc(&mut self, owner: PeerId, schema: &Hash, la: Keypair) -> Result<Doc> {
+    pub fn create_doc(&self, owner: PeerId, schema: &Hash, la: Keypair) -> Result<Doc> {
         let id = DocId::new(la.peer_id().into());
         self.docs.create(&id, schema)?;
         let doc = self.doc(id)?;
-        let delta = doc.cursor()?.say_can(Some(owner), Permission::Own)?;
-        doc.set_peer_id(owner)?;
+        let delta = doc.cursor().say_can(Some(owner), Permission::Own)?;
+        self.set_peer_id(&id, &owner)?;
         self.crdt.join(&id.into(), &id, &delta)?;
-        self.tx.send(()).now_or_never();
+        self.tx.clone().send(()).now_or_never();
         Ok(doc)
     }
 
@@ -266,19 +266,47 @@ impl Frontend {
         todo!()
     }
 
-    pub fn doc(&self, id: DocId) -> Result<Doc> {
-        Doc::new(
-            id,
-            self.crdt.clone(),
-            self.docs.clone(),
-            self.registry.clone(),
-        )
+    pub fn peer_id(&self, id: &DocId) -> Result<PeerId> {
+        self.docs.peer_id(&id)
     }
 
-    pub fn apply(&mut self, doc: &DocId, causal: &Causal) -> Result<()> {
+    pub fn set_peer_id(&self, id: &DocId, peer: &PeerId) -> Result<()> {
+        self.docs.set_peer_id(id, peer)
+    }
+
+    pub fn schema_id(&self, id: &DocId) -> Result<Hash> {
+        self.docs.schema_id(id)
+    }
+
+    pub fn lenses(&self, id: &Hash) -> Result<Ref<Lenses>> {
+        Ok(self
+            .registry
+            .lenses(id)?
+            .unwrap_or_else(|| Ref::new(EMPTY_LENSES.as_ref().into())))
+    }
+
+    pub fn schema(&self, id: &Hash) -> Result<Ref<Schema>> {
+        Ok(self
+            .registry
+            .schema(id)?
+            .unwrap_or_else(|| Ref::new(EMPTY_SCHEMA.as_ref().into())))
+    }
+
+    pub fn ctx(&self, id: &DocId) -> Result<CausalContext> {
+        self.crdt.ctx(id)
+    }
+
+    pub fn doc(&self, id: DocId) -> Result<Doc> {
+        let hash = self.schema_id(&id)?;
+        let schema = self.schema(&hash)?;
+        let peer_id = self.peer_id(&id)?;
+        Ok(Doc::new(id, self.clone(), peer_id, schema))
+    }
+
+    pub fn apply(&self, doc: &DocId, causal: &Causal) -> Result<()> {
         let peer_id = self.docs.peer_id(doc)?;
         self.crdt.join(&peer_id, doc, causal)?;
-        self.tx.send(()).now_or_never();
+        self.tx.clone().send(()).now_or_never();
         Ok(())
     }
 }
@@ -286,87 +314,41 @@ impl Frontend {
 #[derive(Clone)]
 pub struct Doc {
     id: DocId,
-    schema_id: Hash,
+    frontend: Frontend,
     peer_id: PeerId,
-    lenses: Ref<Lenses>,
     schema: Ref<Schema>,
-    crdt: Crdt,
-    registry: Registry,
-    docs: Docs,
-}
-
-impl std::fmt::Debug for Doc {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Doc")
-            .field("id", &self.id)
-            .field("schema_id", &self.schema_id)
-            .field("peer_id", &self.peer_id)
-            .field("lenses", &self.lenses)
-            .field("schema", &self.schema)
-            .field("crdt", &self.crdt)
-            .finish_non_exhaustive()
-    }
 }
 
 impl Doc {
-    fn new(id: DocId, crdt: Crdt, docs: Docs, registry: Registry) -> Result<Self> {
-        let peer_id = docs.peer_id(&id)?;
-        let schema_id = docs.schema_id(&id)?;
-        let lenses = registry
-            .lenses(&schema_id)?
-            .unwrap_or_else(|| Ref::new(EMPTY_LENSES.as_ref().into()));
-        let schema = registry
-            .schema(&schema_id)?
-            .unwrap_or_else(|| Ref::new(EMPTY_SCHEMA.as_ref().into()));
-        Ok(Self {
+    fn new(id: DocId, frontend: Frontend, peer_id: PeerId, schema: Ref<Schema>) -> Self {
+        Self {
             id,
-            schema_id,
+            frontend,
             peer_id,
-            lenses,
             schema,
-            crdt,
-            registry,
-            docs,
-        })
+        }
     }
 
     pub fn id(&self) -> &DocId {
         &self.id
     }
 
-    pub fn schema_id(&self) -> Result<Hash> {
-        self.docs.schema_id(&self.id)
-    }
-
-    pub fn lenses(&self) -> &Archived<Lenses> {
-        self.lenses.as_ref()
-    }
-
-    pub fn schema(&self) -> &Archived<Schema> {
-        self.schema.as_ref()
-    }
-
-    pub fn peer_id(&self) -> Result<PeerId> {
-        self.docs.peer_id(&self.id)
-    }
-
-    pub fn set_peer_id(&self, id: PeerId) -> Result<()> {
-        self.docs.set_peer_id(&self.id, &id)
-    }
-
     pub fn ctx(&self) -> Result<CausalContext> {
-        self.crdt.ctx(&self.id)
+        self.frontend.ctx(&self.id)
     }
 
     /// Returns a cursor for the document.
-    pub fn cursor(&self) -> Result<Cursor<'_>> {
-        Ok(Cursor::new(
+    pub fn cursor(&self) -> Cursor<'_> {
+        Cursor::new(
             self.id,
-            self.schema_id()?,
-            self.peer_id()?,
-            self.schema(),
-            &self.crdt,
-        ))
+            self.peer_id,
+            self.schema.as_ref(),
+            &self.frontend.crdt,
+        )
+    }
+
+    pub fn apply(&self, causal: &Causal) -> Result<()> {
+        self.frontend.apply(&self.id, causal)
     }
 }
 
@@ -401,23 +383,25 @@ mod tests {
         let hash = sdk.register(lenses.clone())?;
 
         let peer = PeerId::new([0; 32]);
-        let doc = sdk.frontend().create_doc(peer, &hash)?;
+        let doc = sdk
+            .frontend()
+            .create_doc(peer, &hash, Keypair::generate())?;
         Pin::new(&mut sdk).await?;
         assert!(doc.cursor().can(&peer, Permission::Write)?);
 
         let title = "something that needs to be done";
-        let delta = doc
+        let op = doc
             .cursor()
             .field("todos")?
-            .key(&0u64.into())?
+            .key_u64(0)?
             .field("title")?
-            .assign(title)?;
-        sdk.join(&peer, delta)?;
+            .assign_str(title)?;
+        doc.apply(&op)?;
 
         let value = doc
             .cursor()
             .field("todos")?
-            .key(&0u64.into())?
+            .key_u64(0)?
             .field("title")?
             .strs()?
             .next()
@@ -428,18 +412,18 @@ mod tests {
         sdk2.register(lenses)?;
         let peer2 = PeerId::new([1; 32]);
         let op = doc.cursor().say_can(Some(peer2), Permission::Write)?;
-        sdk.join(&peer, op)?;
+        doc.apply(&op)?;
 
         let doc2 = sdk2.frontend().add_doc(*doc.id(), &peer2, &hash)?;
         let ctx = Ref::archive(&doc2.ctx()?);
-        let delta = sdk.unjoin(&peer2, ctx.as_ref())?;
+        let delta = sdk.unjoin(&peer2, doc2.id(), ctx.as_ref())?;
         println!("{:?}", delta);
-        sdk2.join(&peer, delta)?;
+        sdk2.join(&peer, doc.id(), &hash, delta)?;
 
         let value = doc2
             .cursor()
             .field("todos")?
-            .key(&0u64.into())?
+            .key_u64(0)?
             .field("title")?
             .strs()?
             .next()

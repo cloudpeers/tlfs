@@ -1,6 +1,6 @@
 use crate::{
-    Actor, ArchivedSchema, Can, Causal, Crdt, DocId, Dot, DotSet, DotStore, Hash, Path, PathBuf,
-    PeerId, Permission, Policy, PrimitiveKind, Schema,
+    Actor, ArchivedSchema, Can, Causal, Crdt, DocId, Dot, DotSet, DotStore, Path, PathBuf, PeerId,
+    Permission, Policy, PrimitiveKind, Schema,
 };
 use anyhow::{anyhow, Result};
 use rkyv::Archived;
@@ -8,26 +8,18 @@ use rkyv::Archived;
 #[derive(Clone)]
 pub struct Cursor<'a> {
     id: DocId,
-    schema_id: Hash,
-    schema: &'a Archived<Schema>,
     peer_id: PeerId,
-    path: PathBuf,
+    schema: &'a Archived<Schema>,
     crdt: &'a Crdt,
+    path: PathBuf,
 }
 
 impl<'a> Cursor<'a> {
-    pub fn new(
-        id: DocId,
-        schema_id: Hash,
-        peer_id: PeerId,
-        schema: &'a Archived<Schema>,
-        crdt: &'a Crdt,
-    ) -> Self {
+    pub fn new(id: DocId, peer_id: PeerId, schema: &'a Archived<Schema>, crdt: &'a Crdt) -> Self {
         let mut path = PathBuf::new();
         path.doc(&id);
         Self {
             id,
-            schema_id,
             schema,
             peer_id,
             path,
@@ -225,7 +217,10 @@ impl<'a> Cursor<'a> {
         })
     }
 
-    fn assign(&self) -> Result<(PathBuf, DotSet)> {
+    fn assign(&self, kind: PrimitiveKind) -> Result<(PathBuf, DotSet)> {
+        if *self.schema != ArchivedSchema::Reg(kind) {
+            return Err(anyhow!("not a Reg<{:?}>", kind));
+        }
         if !self.can(&self.peer_id, Permission::Write)? {
             return Err(anyhow!("unauthorized"));
         }
@@ -234,7 +229,7 @@ impl<'a> Cursor<'a> {
         for r in self.crdt.scan_prefix(self.path.as_path()) {
             let k = r?;
             let path = Path::new(&k);
-            if path.last().unwrap().prim_bool().is_some() {
+            if path.last().unwrap().is_prim() {
                 expired.insert(path.dot());
             }
         }
@@ -246,10 +241,7 @@ impl<'a> Cursor<'a> {
 
     /// Assigns a value to a register.
     pub fn assign_bool(&self, value: bool) -> Result<Causal> {
-        if *self.schema != ArchivedSchema::Reg(PrimitiveKind::Bool) {
-            return Err(anyhow!("not a Reg<Bool>"));
-        }
-        let (mut path, expired) = self.assign()?;
+        let (mut path, expired) = self.assign(PrimitiveKind::Bool)?;
         let mut store = DotStore::new();
         path.prim_bool(value);
         store.insert(path);
@@ -258,10 +250,7 @@ impl<'a> Cursor<'a> {
 
     /// Assigns a value to a register.
     pub fn assign_u64(&self, value: u64) -> Result<Causal> {
-        if *self.schema != ArchivedSchema::Reg(PrimitiveKind::U64) {
-            return Err(anyhow!("not a Reg<u64>"));
-        }
-        let (mut path, expired) = self.assign()?;
+        let (mut path, expired) = self.assign(PrimitiveKind::U64)?;
         let mut store = DotStore::new();
         path.prim_u64(value);
         store.insert(path);
@@ -270,10 +259,7 @@ impl<'a> Cursor<'a> {
 
     /// Assigns a value to a register.
     pub fn assign_i64(&self, value: i64) -> Result<Causal> {
-        if *self.schema != ArchivedSchema::Reg(PrimitiveKind::I64) {
-            return Err(anyhow!("not a Reg<i64>"));
-        }
-        let (mut path, expired) = self.assign()?;
+        let (mut path, expired) = self.assign(PrimitiveKind::I64)?;
         let mut store = DotStore::new();
         path.prim_i64(value);
         store.insert(path);
@@ -282,10 +268,7 @@ impl<'a> Cursor<'a> {
 
     /// Assigns a value to a register.
     pub fn assign_str(&self, value: &str) -> Result<Causal> {
-        if *self.schema != ArchivedSchema::Reg(PrimitiveKind::Str) {
-            return Err(anyhow!("not a Reg<String>"));
-        }
-        let (mut path, expired) = self.assign()?;
+        let (mut path, expired) = self.assign(PrimitiveKind::Str)?;
         let mut store = DotStore::new();
         path.prim_str(value);
         store.insert(path);

@@ -143,6 +143,13 @@ impl<'a> Segment<'a> {
             None
         }
     }
+
+    pub fn is_prim(self) -> bool {
+        match self {
+            Segment::Bool(_) | Segment::U64(_) | Segment::I64(_) | Segment::Str(_) => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Clone, Default, Eq, PartialEq, Hash, Ord, PartialOrd, Archive, Deserialize, Serialize)]
