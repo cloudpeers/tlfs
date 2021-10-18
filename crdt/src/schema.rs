@@ -1,4 +1,4 @@
-use crate::crdt::DotStore;
+use crate::{DotStore, Path, Segment};
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -56,13 +56,13 @@ pub enum PrimitiveKind {
 }
 
 impl PrimitiveKind {
-    pub fn validate(self, v: &Primitive) -> bool {
+    pub fn validate(self, seg: Segment) -> bool {
         matches!(
-            (self, v),
-            (Self::Bool, Primitive::Bool(_))
-                | (Self::U64, Primitive::U64(_))
-                | (Self::I64, Primitive::I64(_))
-                | (Self::Str, Primitive::Str(_))
+            (self, seg),
+            (Self::Bool, Segment::Bool(_))
+                | (Self::U64, Segment::U64(_))
+                | (Self::I64, Segment::I64(_))
+                | (Self::Str, Segment::Str(_))
         )
     }
 }
@@ -80,8 +80,62 @@ pub enum Schema {
 }
 
 impl ArchivedSchema {
-    pub fn validate(&self, _v: &DotStore) -> bool {
-        // TODO
+    pub fn validate(&self, store: &DotStore) -> bool {
+        for path in store.iter() {
+            if let Some((seg, child)) = path.split_first() {
+                if seg.doc().is_none() {
+                    return false;
+                }
+                if self.validate_path(child) != Some(true) {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
         true
+    }
+
+    fn validate_path(&self, path: Path) -> Option<bool> {
+        if self.validate_policy(path) == Some(true) {
+            return Some(true);
+        }
+        match self {
+            Self::Null => {
+                let eof = path.is_empty();
+                Some(eof)
+            }
+            Self::Flag => {
+                let peer = path.first()?.peer().is_some();
+                let nonce = path.child()?.first()?.nonce().is_some();
+                let eof = path.child()?.child()?.is_empty();
+                Some(peer && nonce && eof)
+            }
+            Self::Reg(kind) => {
+                let peer = path.first()?.peer().is_some();
+                let nonce = path.child()?.first()?.nonce().is_some();
+                let prim = path.child()?.child()?.first()?;
+                let eof = path.child()?.child()?.child()?.is_empty();
+                Some(peer && nonce && kind.validate(prim) && eof)
+            }
+            Self::Table(kind, schema) => {
+                let key = path.first()?;
+                let value = path.child()?;
+                Some(kind.validate(key) && schema.validate_path(value)?)
+            }
+            Self::Struct(fields) => {
+                let field = path.first()?.prim_str()?;
+                let value = path.child()?;
+                let schema = fields.get(field)?;
+                Some(schema.validate_path(value)?)
+            }
+        }
+    }
+
+    fn validate_policy(&self, path: Path) -> Option<bool> {
+        let peer = path.first()?.peer().is_some();
+        let policy = path.child()?.first()?.policy().is_some();
+        let eof = path.child()?.child()?.is_empty();
+        Some(peer && policy && eof)
     }
 }

@@ -311,6 +311,7 @@ mod tests {
         }
 
         #[test]
+        #[ignore]
         fn transform_preserves_validity((lens, mut schema, mut causal) in lens_schema_and_causal()) {
             let lens = Ref::archive(&lens);
             prop_assume!(validate(&schema, &causal));

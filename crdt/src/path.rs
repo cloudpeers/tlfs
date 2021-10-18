@@ -321,25 +321,25 @@ impl<'a> Path<'a> {
         Some(u16::from_be_bytes(len) as usize)
     }
 
-    pub fn last(&self) -> Option<Segment> {
+    pub fn last(&self) -> Option<Segment<'a>> {
         let len = self.last_len()?;
         let end = self.0.len();
         let ty = SegmentType::new(self.0[end - 1])?;
         Some(Segment::new(ty, &self.0[(end - 3 - len)..(end - 3)]))
     }
 
-    pub fn first(&self) -> Option<Segment> {
+    pub fn first(&self) -> Option<Segment<'a>> {
         let len = self.first_len()?;
         let ty = SegmentType::new(self.0[0])?;
         Some(Segment::new(ty, &self.0[3..(len + 3)]))
     }
 
-    pub fn child(&self) -> Option<Path> {
+    pub fn child(&self) -> Option<Path<'a>> {
         let len = self.first_len()?;
         Some(Path(&self.0[(len + 6)..]))
     }
 
-    pub fn parent(&self) -> Option<Path> {
+    pub fn parent(&self) -> Option<Path<'a>> {
         let len = self.last_len()?;
         let end = self.0.len();
         Some(Path(&self.0[..(end - len - 6)]))
@@ -347,6 +347,18 @@ impl<'a> Path<'a> {
 
     pub fn dot(&self) -> Dot {
         Dot::new(blake3::hash(self.as_ref()).into())
+    }
+
+    pub fn split_first(&self) -> Option<(Segment, Path<'a>)> {
+        let first = self.first()?;
+        let child = self.child()?;
+        Some((first, child))
+    }
+
+    pub fn split_last(&self) -> Option<(Path<'a>, Segment)> {
+        let parent = self.parent()?;
+        let last = self.last()?;
+        Some((parent, last))
     }
 }
 
