@@ -349,13 +349,13 @@ impl<'a> Path<'a> {
         Dot::new(blake3::hash(self.as_ref()).into())
     }
 
-    pub fn split_first(&self) -> Option<(Segment, Path<'a>)> {
+    pub fn split_first(&self) -> Option<(Segment<'a>, Path<'a>)> {
         let first = self.first()?;
         let child = self.child()?;
         Some((first, child))
     }
 
-    pub fn split_last(&self) -> Option<(Path<'a>, Segment)> {
+    pub fn split_last(&self) -> Option<(Path<'a>, Segment<'a>)> {
         let parent = self.parent()?;
         let last = self.last()?;
         Some((parent, last))

@@ -1,5 +1,6 @@
 use crate::{
     AbstractDotSet, Acl, ArchivedLenses, DocId, Dot, DotSet, Path, PathBuf, PeerId, Permission,
+    Subscriber,
 };
 use anyhow::Result;
 use bytecheck::CheckBytes;
@@ -249,15 +250,18 @@ impl Crdt {
         self.state.iter().keys()
     }
 
-    pub fn scan_prefix(&self, path: Path) -> impl Iterator<Item = Result<sled::IVec>> + '_ {
+    pub fn scan_path(&self, path: Path) -> impl Iterator<Item = Result<sled::IVec>> + '_ {
         self.state
             .scan_prefix(path)
             .keys()
             .map(|k| k.map_err(Into::into))
     }
 
-    pub fn watch_path(&self, path: Path) -> sled::Subscriber {
-        self.state.watch_prefix(path)
+    pub fn watch_path(&self, path: Path) -> Subscriber {
+        Subscriber::new(
+            self.state.watch_prefix(path),
+            self.acl.subscribe(&path.first().unwrap().doc().unwrap()),
+        )
     }
 
     pub fn can(&self, peer: &PeerId, perm: Permission, path: Path) -> Result<bool> {
@@ -308,7 +312,7 @@ impl Crdt {
         let mut path = PathBuf::new();
         path.doc(doc);
         let mut common = BTreeSet::new();
-        for r in self.scan_prefix(path.as_path()) {
+        for r in self.scan_path(path.as_path()) {
             let k = r?;
             let path = Path::new(&k[..]);
             let dot = path.dot();
