@@ -1,4 +1,4 @@
-use crate::PeerId;
+use crate::id::PeerId;
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
 use chacha20poly1305::aead::{AeadInPlace, NewAead};
@@ -36,7 +36,11 @@ impl Keypair {
         PeerId::new(self.to_keypair().public.to_bytes())
     }
 
-    pub fn sign<P>(self, payload: &P) -> Signed
+    pub fn sign(self, msg: &[u8]) -> Signature {
+        self.to_keypair().sign(msg)
+    }
+
+    pub fn sign_payload<P>(self, payload: &P) -> Signed
     where
         P: Serialize<AllocSerializer<256>>,
     {

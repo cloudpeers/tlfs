@@ -395,16 +395,18 @@ impl Engine {
     }
 
     fn _add_policy(&mut self, path: Path) -> Option<()> {
-        // schema.doc.(primitive|str)*.peer.policy
-        let peer = path.parent()?.last()?.peer()?;
-        let policy = path.last()?.policy()?;
-        let acl_path = path.parent()?.parent()?.to_owned();
+        let dot = path.dot();
+        // schema.doc.(primitive|str)*.policy.peer.sig
+        let (path, _) = path.split_last()?;
+        let (path, peer) = path.split_last()?;
+        let (path, policy) = path.split_last()?;
+        let peer = peer.peer()?;
+        let policy = policy.policy()?;
+        let path = path.to_owned();
         let says = match policy {
-            Policy::Can(actor, perm) => {
-                Says::Can(path.dot(), peer, Can::new(actor, perm, acl_path))
-            }
+            Policy::Can(actor, perm) => Says::Can(dot, peer, Can::new(actor, perm, path)),
             Policy::CanIf(actor, perm, cond) => {
-                Says::CanIf(path.dot(), peer, Can::new(actor, perm, acl_path), cond)
+                Says::CanIf(dot, peer, Can::new(actor, perm, path), cond)
             }
             Policy::Revokes(dot) => Says::Revokes(peer, dot),
         };
