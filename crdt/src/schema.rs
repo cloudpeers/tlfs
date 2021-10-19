@@ -1,4 +1,4 @@
-use crate::{DotStore, Path, Segment};
+use crate::{Causal, Path, Segment};
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -80,8 +80,8 @@ pub enum Schema {
 }
 
 impl ArchivedSchema {
-    pub fn validate(&self, store: &DotStore) -> bool {
-        for path in store.iter() {
+    pub fn validate(&self, causal: &Causal) -> bool {
+        for path in causal.store.iter() {
             if let Some((seg, child)) = path.split_first() {
                 if seg.doc().is_none() {
                     return false;

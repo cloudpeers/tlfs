@@ -1,27 +1,29 @@
 use crate::{
-    Actor, ArchivedSchema, Can, Causal, Crdt, DocId, Dot, DotSet, DotStore, Path, PathBuf, PeerId,
-    Permission, Policy, PrimitiveKind, Schema,
+    Actor, ArchivedSchema, Can, Causal, Crdt, DocId, Dot, DotSet, DotStore, Keypair, Path, PathBuf,
+    PeerId, Permission, Policy, PrimitiveKind, Schema,
 };
 use anyhow::{anyhow, Result};
 use rkyv::Archived;
 
 #[derive(Clone)]
 pub struct Cursor<'a> {
-    id: DocId,
+    key: Keypair,
     peer_id: PeerId,
+    id: DocId,
     schema: &'a Archived<Schema>,
     crdt: &'a Crdt,
     path: PathBuf,
 }
 
 impl<'a> Cursor<'a> {
-    pub fn new(id: DocId, peer_id: PeerId, schema: &'a Archived<Schema>, crdt: &'a Crdt) -> Self {
+    pub fn new(key: Keypair, id: DocId, schema: &'a Archived<Schema>, crdt: &'a Crdt) -> Self {
         let mut path = PathBuf::new();
         path.doc(&id);
         Self {
+            key,
+            peer_id: key.peer_id(),
             id,
             schema,
-            peer_id,
             path,
             crdt,
         }

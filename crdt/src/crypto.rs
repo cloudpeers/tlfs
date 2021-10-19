@@ -16,6 +16,10 @@ use std::pin::Pin;
 pub struct Keypair([u8; 32]);
 
 impl Keypair {
+    pub fn new(secret: [u8; 32]) -> Self {
+        Self(secret)
+    }
+
     pub fn generate() -> Self {
         let mut secret = [0; 32];
         getrandom::getrandom(&mut secret).unwrap();
@@ -50,9 +54,21 @@ impl Keypair {
     }
 }
 
+impl std::fmt::Debug for Keypair {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "Keypair({:?})", self.peer_id())
+    }
+}
+
 impl From<Keypair> for [u8; 32] {
     fn from(keypair: Keypair) -> Self {
         keypair.0
+    }
+}
+
+impl AsRef<[u8]> for Keypair {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
     }
 }
 
