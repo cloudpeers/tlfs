@@ -45,6 +45,16 @@ impl Docs {
         Ok(())
     }
 
+    pub fn remove(&self, id: &DocId) -> Result<()> {
+        let mut key = [0; 33];
+        key[..32].copy_from_slice(id.as_ref());
+        key[32] = 0;
+        self.0.remove(key)?;
+        key[32] = 1;
+        self.0.remove(key)?;
+        Ok(())
+    }
+
     pub fn schema_id(&self, id: &DocId) -> Result<Hash> {
         let mut key = [0; 33];
         key[..32].copy_from_slice(id.as_ref());
@@ -98,6 +108,14 @@ impl Docs {
         key[32] = 2;
         let keypair = self.0.get(key)?.unwrap();
         Ok(Keypair::new(keypair.as_ref().try_into().unwrap()))
+    }
+
+    pub fn remove_keypair(&self, peer: &PeerId) -> Result<()> {
+        let mut key = [0; 33];
+        key[..32].copy_from_slice(peer.as_ref());
+        key[32] = 2;
+        self.0.remove(key)?;
+        Ok(())
     }
 }
 
@@ -324,6 +342,10 @@ impl Frontend {
         self.docs.keypair(peer)
     }
 
+    pub fn remove_keypair(&self, peer: &PeerId) -> Result<()> {
+        self.docs.remove_keypair(peer)
+    }
+
     pub fn docs(&self) -> impl Iterator<Item = Result<DocId>> + '_ {
         self.docs.docs()
     }
@@ -345,8 +367,10 @@ impl Frontend {
         self.doc(id)
     }
 
-    pub fn remove_doc(&self, _id: DocId) -> Result<()> {
-        todo!()
+    pub fn remove_doc(&self, id: &DocId) -> Result<()> {
+        self.crdt.remove(id)?;
+        self.docs.remove(id)?;
+        Ok(())
     }
 
     pub fn peer_id(&self, id: &DocId) -> Result<PeerId> {

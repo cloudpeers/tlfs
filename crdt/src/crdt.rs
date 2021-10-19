@@ -372,6 +372,20 @@ impl Crdt {
         Ok(Causal { expired, store })
     }
 
+    pub fn remove(&self, doc: &DocId) -> Result<()> {
+        let mut path = PathBuf::new();
+        path.doc(doc);
+        for r in self.state.scan_prefix(&path).keys() {
+            let k = r?;
+            self.state.remove(k)?;
+        }
+        for r in self.expired.scan_prefix(&path).keys() {
+            let k = r?;
+            self.expired.remove(k)?;
+        }
+        Ok(())
+    }
+
     pub fn transform(&self, doc: &DocId, from: &ArchivedLenses, to: &ArchivedLenses) -> Result<()> {
         from.transform_crdt(doc, self, to)?;
         Ok(())
