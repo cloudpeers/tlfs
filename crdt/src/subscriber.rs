@@ -37,7 +37,7 @@ impl<'a> Iterator for Iter<'a> {
                     } else {
                         Some(peer)
                     };
-                    let perm = unsafe { archived_root::<Rule>(&v) }.perm;
+                    let perm = unsafe { archived_root::<Rule>(v) }.perm;
                     Some(Event::Granted(path, actor, perm))
                 }
                 Some((_, k, None)) => {
