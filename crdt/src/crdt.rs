@@ -1,5 +1,5 @@
 use crate::acl::{Acl, Permission};
-use crate::dotset::{AbstractDotSet, Dot, DotSet};
+use crate::dotset::{AbstractDotSet, DotSet};
 use crate::id::{DocId, PeerId};
 use crate::lens::ArchivedLenses;
 use crate::path::{Path, PathBuf};
@@ -46,6 +46,15 @@ impl DotStore {
         self.0.contains(path.as_ref())
     }
 
+    pub fn contains_prefix(&self, prefix: Path) -> bool {
+        for path in self.iter() {
+            if prefix.is_ancestor(path) {
+                return true;
+            }
+        }
+        false
+    }
+
     pub fn insert(&mut self, path: PathBuf) {
         self.0.insert(path);
     }
@@ -54,21 +63,10 @@ impl DotStore {
         self.0.iter().map(|path| path.as_path())
     }
 
-    pub fn dots(&self) -> impl Iterator<Item = Dot> + '_ {
-        self.0.iter().map(|path| path.as_path().dot())
-    }
-
     pub fn union(&mut self, other: &Self) {
         for path in other.iter() {
             self.insert(path.to_owned());
         }
-    }
-
-    pub fn difference(&self, other: &impl AbstractDotSet) -> Self {
-        self.iter()
-            .filter(|path| !other.contains(&path.dot()))
-            .map(|path| path.to_owned())
-            .collect()
     }
 }
 
@@ -82,12 +80,6 @@ impl FromIterator<PathBuf> for DotStore {
             store.insert(path);
         }
         store
-    }
-}
-
-impl ArchivedDotStore {
-    pub fn dots(&self) -> impl Iterator<Item = Dot> + '_ {
-        self.0.iter().map(|path| path.as_path().dot())
     }
 }
 
@@ -154,6 +146,18 @@ impl Causal {
         &self.expired
     }
 
+    pub fn ctx(&self) -> CausalContext {
+        let mut ctx = CausalContext::new();
+        for path in self.store.iter() {
+            ctx.store.insert(path.dot());
+        }
+        for path in self.expired.iter() {
+            let dot = path.parent().unwrap().parent().unwrap().dot();
+            ctx.expired.insert(dot);
+        }
+        ctx
+    }
+
     pub fn join(&mut self, that: &Causal) {
         self.store.union(&that.store);
         self.expired.union(&that.expired);
@@ -164,16 +168,21 @@ impl Causal {
     }
 
     pub fn unjoin(&self, ctx: &CausalContext) -> Self {
-        let expired = self.expired.difference(&ctx.expired);
-        let store = self.store.difference(&ctx.store).difference(&ctx.expired);
-        Self { expired, store }
-    }
-
-    pub fn ctx(&self) -> CausalContext {
-        CausalContext {
-            store: self.store.dots().collect(),
-            expired: self.expired.dots().collect(),
+        let mut expired = DotStore::new();
+        for path in self.expired.iter() {
+            let dot = path.parent().unwrap().parent().unwrap().dot();
+            if !ctx.expired.contains(&dot) {
+                expired.insert(path.to_owned());
+            }
         }
+        let mut store = DotStore::new();
+        for path in self.store.iter() {
+            let dot = path.dot();
+            if !ctx.store.contains(&dot) && !ctx.expired.contains(&dot) && !expired.contains(path) {
+                store.insert(path.to_owned());
+            }
+        }
+        Self { expired, store }
     }
 
     pub fn transform(&mut self, from: &ArchivedLenses, to: &ArchivedLenses) {
@@ -194,15 +203,6 @@ impl Causal {
     }
 }
 
-impl ArchivedCausal {
-    pub fn ctx(&self) -> CausalContext {
-        CausalContext {
-            store: self.store.dots().collect(),
-            expired: self.expired.dots().collect(),
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct Crdt {
     store: sled::Tree,
@@ -213,22 +213,36 @@ pub struct Crdt {
 impl std::fmt::Debug for Crdt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Crdt")
-            .field("store", &StateDebug(&self.store))
-            .field("expired", &StateDebug(&self.expired))
+            .field("store", &StoreDebug(&self.store))
+            .field("expired", &ExpiredDebug(&self.expired))
             .field("acl", &self.acl)
             .finish()
     }
 }
 
-struct StateDebug<'a>(&'a sled::Tree);
+struct StoreDebug<'a>(&'a sled::Tree);
 
-impl<'a> std::fmt::Debug for StateDebug<'a> {
+impl<'a> std::fmt::Debug for StoreDebug<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut m = f.debug_map();
         for e in self.0.iter().keys() {
             let k = e.map_err(|_| std::fmt::Error::default())?;
             let path = Path::new(&k);
             m.entry(&path.dot(), &path);
+        }
+        m.finish()
+    }
+}
+
+struct ExpiredDebug<'a>(&'a sled::Tree);
+
+impl<'a> std::fmt::Debug for ExpiredDebug<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut m = f.debug_map();
+        for e in self.0.iter().keys() {
+            let k = e.map_err(|_| std::fmt::Error::default())?;
+            let path = Path::new(&k);
+            m.entry(&path.parent().unwrap().parent().unwrap().dot(), &path);
         }
         m.finish()
     }
@@ -276,7 +290,7 @@ impl Crdt {
         }
         for r in self.expired.scan_prefix(path.as_path()).keys() {
             let k = r?;
-            let dot = Path::new(&k).dot();
+            let dot = Path::new(&k).parent().unwrap().parent().unwrap().dot();
             ctx.expired.insert(dot);
         }
         Ok(ctx)
@@ -284,30 +298,50 @@ impl Crdt {
 
     pub fn join_policy(&self, causal: &Causal) -> Result<()> {
         for path in causal.store.iter() {
-            if path.last().unwrap().policy().is_some() {
+            if path
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .last()
+                .unwrap()
+                .policy()
+                .is_some()
+            {
                 self.store.insert(path.to_owned(), &[])?;
             }
         }
         Ok(())
     }
 
+    /// Applies a transaction. Uses the peer that sent the transaction for acl and not
+    /// the peer that created the transaction. The reason for this is that the logic
+    /// would be a little bit more complicated to ensure convergence in the presence of
+    /// revocations.
     pub fn join(&self, peer: &PeerId, causal: &Causal) -> Result<()> {
         for path in causal.store.iter() {
-            if !self.expired.contains_key(path.as_ref())? && !causal.expired.contains(path) {
+            let is_expired = self
+                .expired
+                .scan_prefix(path.as_ref())
+                .next()
+                .transpose()?
+                .is_some();
+            if !is_expired && !causal.expired.contains_prefix(path) {
                 if !self.can(peer, Permission::Write, path)? {
                     tracing::info!("join: peer is unauthorized to insert {}", path);
                     continue;
                 }
-                self.store.insert(path.to_owned(), &[])?;
+                self.store.insert(&path, &[])?;
             }
         }
         for path in causal.expired.iter() {
-            if !self.can(peer, Permission::Write, path)? {
-                tracing::info!("join: peer is unauthorized to remove {}", path);
+            let store_path = path.parent().unwrap().parent().unwrap();
+            if !self.can(peer, Permission::Write, store_path)? {
+                tracing::info!("join: peer is unauthorized to remove {}", store_path);
                 continue;
             }
-            if self.store.contains_key(path)? {
-                self.store.remove(path)?;
+            if self.store.contains_key(store_path)? {
+                self.store.remove(store_path)?;
             }
             self.expired.insert(&path, &[])?;
         }
@@ -339,7 +373,7 @@ impl Crdt {
                 continue;
             }
             if !self.can(peer_id, Permission::Read, path)? {
-                tracing::info!("unjoin: peer is unauthorized to read {}", path);
+                tracing::info!("unjoin: peer is unauthorized to read");
                 continue;
             }
             if store_dots.contains(&dot) {
@@ -350,7 +384,7 @@ impl Crdt {
         for r in self.expired.scan_prefix(path.as_ref()).keys() {
             let k = r?;
             let path = Path::new(&k[..]);
-            let dot = path.dot();
+            let dot = path.parent().unwrap().parent().unwrap().dot();
             if !expired_dots.contains(&dot) {
                 continue;
             }
@@ -465,7 +499,6 @@ mod tests {
         doc1.apply(&op)?;
 
         let delta = sdk1.unjoin(&peer, doc1.id(), Ref::archive(&doc2.ctx()?).as_ref())?;
-        println!("{:?}", delta);
         sdk2.join(&peer, doc1.id(), &hash1, delta)?;
 
         assert!(!doc1.cursor().enabled()?);

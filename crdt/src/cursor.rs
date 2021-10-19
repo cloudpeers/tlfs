@@ -50,7 +50,7 @@ impl<'a> Cursor<'a> {
                 .crdt
                 .scan_path(self.path.as_path())
                 .filter_map(|r| match r {
-                    Ok(path) => Some(Ok(Path::new(&path).last()?.nonce()?)),
+                    Ok(path) => Some(Ok(Path::new(&path).parent()?.parent()?.last()?.nonce()?)),
                     Err(err) => Some(Err(err)),
                 })
                 .next()
@@ -68,7 +68,11 @@ impl<'a> Cursor<'a> {
                 .crdt
                 .scan_path(self.path.as_path())
                 .filter_map(|r| match r {
-                    Ok(path) => Some(Ok(Path::new(&path).last()?.prim_bool()?)),
+                    Ok(path) => Some(Ok(Path::new(&path)
+                        .parent()?
+                        .parent()?
+                        .last()?
+                        .prim_bool()?)),
                     Err(err) => Some(Err(err)),
                 }))
         } else {
@@ -83,7 +87,11 @@ impl<'a> Cursor<'a> {
                 .crdt
                 .scan_path(self.path.as_path())
                 .filter_map(|r| match r {
-                    Ok(path) => Some(Ok(Path::new(&path).last()?.prim_u64()?)),
+                    Ok(path) => Some(Ok(Path::new(&path)
+                        .parent()?
+                        .parent()?
+                        .last()?
+                        .prim_u64()?)),
                     Err(err) => Some(Err(err)),
                 }))
         } else {
@@ -98,7 +106,11 @@ impl<'a> Cursor<'a> {
                 .crdt
                 .scan_path(self.path.as_path())
                 .filter_map(|r| match r {
-                    Ok(path) => Some(Ok(Path::new(&path).last()?.prim_i64()?)),
+                    Ok(path) => Some(Ok(Path::new(&path)
+                        .parent()?
+                        .parent()?
+                        .last()?
+                        .prim_i64()?)),
                     Err(err) => Some(Err(err)),
                 }))
         } else {
@@ -113,7 +125,12 @@ impl<'a> Cursor<'a> {
                 .crdt
                 .scan_path(self.path.as_path())
                 .filter_map(|r| match r {
-                    Ok(path) => Some(Ok(Path::new(&path).last()?.prim_str()?.to_owned())),
+                    Ok(path) => Some(Ok(Path::new(&path)
+                        .parent()?
+                        .parent()?
+                        .last()?
+                        .prim_str()?
+                        .to_owned())),
                     Err(err) => Some(Err(err)),
                 }))
         } else {
@@ -180,10 +197,41 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    fn nonce(&self) -> Result<u64> {
+    fn nonce(&self, path: &mut PathBuf) {
         let mut nonce = [0; 8];
-        getrandom::getrandom(&mut nonce)?;
-        Ok(u64::from_le_bytes(nonce))
+        getrandom::getrandom(&mut nonce).unwrap();
+        let nonce = u64::from_le_bytes(nonce);
+        path.nonce(nonce);
+    }
+
+    fn sign(&self, path: &mut PathBuf) {
+        tracing::debug!("signing {} as {:?}", path.as_path(), self.peer_id);
+        let sig = self.key.sign(path.as_ref());
+        path.peer(&self.peer_id);
+        path.sig(sig);
+    }
+
+    fn tombstone(&self) -> Result<DotStore> {
+        let mut expired = DotStore::new();
+        for r in self.crdt.scan_path(self.path.as_path()) {
+            let k = r?;
+            let path = Path::new(&k);
+            if path
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .last()
+                .unwrap()
+                .policy()
+                .is_none()
+            {
+                let mut path = path.to_owned();
+                self.sign(&mut path);
+                expired.insert(path);
+            }
+        }
+        Ok(expired)
     }
 
     /// Enables a flag.
@@ -195,8 +243,8 @@ impl<'a> Cursor<'a> {
             return Err(anyhow!("unauthorized"));
         }
         let mut path = self.path.to_owned();
-        path.peer(&self.peer_id);
-        path.nonce(self.nonce()?);
+        self.nonce(&mut path);
+        self.sign(&mut path);
         let mut store = DotStore::new();
         store.insert(path);
         Ok(Causal {
@@ -213,18 +261,9 @@ impl<'a> Cursor<'a> {
         if !self.can(&self.peer_id, Permission::Write)? {
             return Err(anyhow!("unauthorized"));
         }
-        let mut expired = DotStore::new();
-        // add all dots to be tombstoned into the context
-        for r in self.crdt.scan_path(self.path.as_path()) {
-            let k = r?;
-            let path = Path::new(&k);
-            if path.last().unwrap().nonce().is_some() {
-                expired.insert(path.to_owned());
-            }
-        }
         Ok(Causal {
             store: DotStore::new(),
-            expired,
+            expired: self.tombstone()?,
         })
     }
 
@@ -235,19 +274,9 @@ impl<'a> Cursor<'a> {
         if !self.can(&self.peer_id, Permission::Write)? {
             return Err(anyhow!("unauthorized"));
         }
-        let mut expired = DotStore::new();
-        // add all dots to be tombstoned into the context
-        for r in self.crdt.scan_path(self.path.as_path()) {
-            let k = r?;
-            let path = Path::new(&k);
-            if path.last().unwrap().policy().is_none() {
-                expired.insert(path.to_owned());
-            }
-        }
         let mut path = self.path.to_owned();
-        path.peer(&self.peer_id);
-        path.nonce(self.nonce()?);
-        Ok((path, expired))
+        self.nonce(&mut path);
+        Ok((path, self.tombstone()?))
     }
 
     /// Assigns a value to a register.
@@ -255,6 +284,7 @@ impl<'a> Cursor<'a> {
         let (mut path, expired) = self.assign(PrimitiveKind::Bool)?;
         let mut store = DotStore::new();
         path.prim_bool(value);
+        self.sign(&mut path);
         store.insert(path);
         Ok(Causal { store, expired })
     }
@@ -264,6 +294,7 @@ impl<'a> Cursor<'a> {
         let (mut path, expired) = self.assign(PrimitiveKind::U64)?;
         let mut store = DotStore::new();
         path.prim_u64(value);
+        self.sign(&mut path);
         store.insert(path);
         Ok(Causal { store, expired })
     }
@@ -273,6 +304,7 @@ impl<'a> Cursor<'a> {
         let (mut path, expired) = self.assign(PrimitiveKind::I64)?;
         let mut store = DotStore::new();
         path.prim_i64(value);
+        self.sign(&mut path);
         store.insert(path);
         Ok(Causal { store, expired })
     }
@@ -282,6 +314,7 @@ impl<'a> Cursor<'a> {
         let (mut path, expired) = self.assign(PrimitiveKind::Str)?;
         let mut store = DotStore::new();
         path.prim_str(value);
+        self.sign(&mut path);
         store.insert(path);
         Ok(Causal { store, expired })
     }
@@ -291,15 +324,9 @@ impl<'a> Cursor<'a> {
         if !self.can(&self.peer_id, Permission::Write)? {
             return Err(anyhow!("unauthorized"));
         }
-        let mut expired = DotStore::new();
-        for r in self.crdt.scan_path(self.path.as_path()) {
-            let k = r?;
-            let path = Path::new(&k);
-            expired.insert(path.to_owned());
-        }
         Ok(Causal {
             store: DotStore::new(),
-            expired,
+            expired: self.tombstone()?,
         })
     }
 
@@ -317,8 +344,8 @@ impl<'a> Cursor<'a> {
             return Err(anyhow!("unauthorized"));
         }
         let mut path = self.path.clone();
-        path.peer(&self.peer_id);
         path.policy(policy);
+        self.sign(&mut path);
         let mut store = DotStore::new();
         store.insert(path);
         Ok(Causal {

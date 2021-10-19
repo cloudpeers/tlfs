@@ -3,6 +3,7 @@ use crate::dotset::Dot;
 use crate::id::{DocId, PeerId};
 use crate::util::Ref;
 use bytecheck::CheckBytes;
+use ed25519_dalek::Signature;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::convert::TryInto;
@@ -23,6 +24,7 @@ pub enum SegmentType {
     Str,
     Policy,
     Dot,
+    Sig,
 }
 
 impl SegmentType {
@@ -38,6 +40,7 @@ impl SegmentType {
             u if u == Str as u8 => Some(Str),
             u if u == Policy as u8 => Some(Policy),
             u if u == Dot as u8 => Some(Dot),
+            u if u == Sig as u8 => Some(Sig),
             _ => None,
         }
     }
@@ -64,6 +67,7 @@ pub enum Segment {
     Policy(Policy),
     /// Path identifier.
     Dot(Dot),
+    Sig(Signature),
 }
 
 impl Segment {
@@ -83,6 +87,7 @@ impl Segment {
                 Self::Policy(policy.to_owned().unwrap())
             }
             SegmentType::Dot => Self::Dot(Dot::new(data.try_into().unwrap())),
+            SegmentType::Sig => Self::Sig(Signature::new(data.try_into().unwrap())),
         }
     }
 
@@ -175,6 +180,15 @@ impl Segment {
             None
         }
     }
+
+    /// Returns the `Signature`.
+    pub fn sig(self) -> Option<Signature> {
+        if let Segment::Sig(sig) = self {
+            Some(sig)
+        } else {
+            None
+        }
+    }
 }
 
 impl std::fmt::Debug for Segment {
@@ -189,6 +203,7 @@ impl std::fmt::Debug for Segment {
             Self::Str(s) => write!(f, "{:?}", s),
             Self::Policy(s) => write!(f, "{:?}", s),
             Self::Dot(s) => write!(f, "{:?}", s),
+            Self::Sig(_) => write!(f, "Sig"),
         }
     }
 }
@@ -270,6 +285,11 @@ impl PathBuf {
         self.push(SegmentType::Dot, dot.as_ref());
     }
 
+    /// Appends a sig segment.
+    pub fn sig(&mut self, sig: Signature) {
+        self.push(SegmentType::Sig, sig.as_ref());
+    }
+
     /// Pops the last segment.
     pub fn pop(&mut self) {
         if let Some(path) = self.as_path().parent() {
@@ -331,6 +351,7 @@ impl FromIterator<Segment> for PathBuf {
                 Str(s) => path.prim_str(s.as_str()),
                 Policy(s) => path.policy(&s),
                 Dot(s) => path.dot(&s),
+                Sig(s) => path.sig(s),
             }
         }
         path
