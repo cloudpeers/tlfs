@@ -199,7 +199,7 @@ pub fn arb_causal_for_schema(schema: Schema) -> impl Strategy<Value = Causal> {
 
 pub fn validate(schema: &Schema, value: &Causal) -> bool {
     let schema = Ref::archive(schema);
-    schema.as_ref().validate(value.store())
+    schema.as_ref().validate(value)
 }
 
 prop_compose! {

@@ -1,10 +1,8 @@
-mod secrets;
 mod sync;
 
 pub use libp2p::Multiaddr;
 pub use tlfs_crdt::{Causal, DocId, Hash, Keypair, Kind, Lens, PeerId, Permission, PrimitiveKind};
 
-use crate::secrets::{Metadata, Secrets};
 use crate::sync::{Behaviour, ToLibp2pKeypair, ToLibp2pPublic};
 use anyhow::Result;
 use futures::channel::{mpsc, oneshot};
@@ -19,7 +17,6 @@ use tracing_subscriber::EnvFilter;
 
 pub struct Migrate {
     backend: Backend,
-    secrets: Secrets,
 }
 
 impl Migrate {
@@ -34,9 +31,8 @@ impl Migrate {
         tracing::subscriber::set_global_default(subscriber).ok();
         log_panics::init();
 
-        let backend = Backend::new(db.clone())?;
-        let secrets = Secrets::new(db.open_tree("secrets")?);
-        Ok(Self { backend, secrets })
+        let backend = Backend::new(db)?;
+        Ok(Self { backend })
     }
 
     pub fn memory() -> Result<Self> {
@@ -52,32 +48,26 @@ impl Migrate {
     }
 
     pub async fn finish(self) -> Result<Sdk> {
-        Sdk::new(self.backend, self.secrets).await
+        Sdk::new(self.backend).await
     }
 }
 
 pub struct Sdk {
     frontend: Frontend,
-    secrets: Secrets,
+    peer: PeerId,
     swarm: mpsc::UnboundedSender<Command>,
 }
 
 impl Sdk {
-    async fn new(backend: Backend, secrets: Secrets) -> Result<Self> {
+    async fn new(backend: Backend) -> Result<Self> {
         let frontend = backend.frontend();
 
-        if secrets.keypair(Metadata::new())?.is_none() {
-            secrets.generate_keypair(Metadata::new())?;
-        }
-        let keypair = secrets.keypair(Metadata::new())?.unwrap();
+        let peer = frontend.generate_keypair()?;
+        let keypair = frontend.keypair(&peer)?;
 
         let transport = libp2p::development_transport(keypair.to_libp2p()).await?;
         let behaviour = Behaviour::new(backend);
-        let mut swarm = Swarm::new(
-            transport,
-            behaviour,
-            keypair.peer_id().to_libp2p().into_peer_id(),
-        );
+        let mut swarm = Swarm::new(transport, behaviour, peer.to_libp2p().into_peer_id());
         swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse().unwrap())?;
 
         let (tx, mut rx) = mpsc::unbounded();
@@ -107,13 +97,13 @@ impl Sdk {
 
         Ok(Self {
             frontend,
-            secrets,
+            peer,
             swarm: tx,
         })
     }
 
-    pub fn peer_id(&self) -> Result<PeerId> {
-        Ok(self.secrets.keypair(Metadata::new())?.unwrap().peer_id())
+    pub fn peer_id(&self) -> &PeerId {
+        &self.peer
     }
 
     pub fn add_address(&self, peer: PeerId, addr: Multiaddr) {
@@ -143,14 +133,14 @@ impl Sdk {
     }
 
     pub fn create_doc(&mut self, schema: &Hash) -> Result<Doc> {
-        let peer_id = self.peer_id()?;
+        let peer_id = self.peer_id();
         self.frontend
-            .create_doc(peer_id, schema, Keypair::generate())
+            .create_doc(*peer_id, schema, Keypair::generate())
     }
 
     pub fn add_doc(&self, id: DocId, schema: &Hash) -> Result<Doc> {
-        let peer_id = self.peer_id()?;
-        self.frontend.add_doc(id, &peer_id, schema)
+        let peer_id = self.peer_id();
+        self.frontend.add_doc(id, peer_id, schema)
     }
 
     pub fn doc(&self, id: DocId) -> Result<Doc> {
@@ -208,7 +198,7 @@ mod tests {
 
         // TODO: subscription api
         async_std::task::sleep(Duration::from_millis(100)).await;
-        assert!(doc.cursor().can(&sdk.peer_id()?, Permission::Write)?);
+        assert!(doc.cursor().can(sdk.peer_id(), Permission::Write)?);
 
         let title = "something that needs to be done";
         let op = doc
@@ -234,16 +224,16 @@ mod tests {
         let sdk2 = sdk2.finish().await?;
         let op = doc
             .cursor()
-            .say_can(Some(sdk2.peer_id()?), Permission::Write)?;
+            .say_can(Some(*sdk2.peer_id()), Permission::Write)?;
         doc.apply(&op)?;
 
         for addr in sdk.addresses().await {
-            sdk2.add_address(sdk.peer_id()?, addr);
+            sdk2.add_address(*sdk.peer_id(), addr);
         }
         let doc2 = sdk2.add_doc(*doc.id(), &hash)?;
 
         async_std::task::sleep(Duration::from_millis(100)).await;
-        sdk2.unjoin(*doc.id(), sdk.peer_id()?);
+        sdk2.unjoin(*doc.id(), *sdk.peer_id());
 
         // TODO: subscription api
         async_std::task::sleep(Duration::from_millis(1000)).await;

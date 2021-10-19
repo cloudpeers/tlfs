@@ -295,13 +295,16 @@ impl Crdt {
         Ok(ctx)
     }
 
-    fn join_store(
-        &self,
-        doc: &DocId,
-        peer: &PeerId,
-        that: &DotStore,
-        expired: &DotSet,
-    ) -> Result<()> {
+    pub fn join_policy(&self, causal: &Causal) -> Result<()> {
+        for path in causal.store.iter() {
+            if path.last().unwrap().policy().is_some() {
+                self.state.insert(path.to_owned(), &[])?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn join(&self, peer: &PeerId, doc: &DocId, causal: &Causal) -> Result<()> {
         let mut path = PathBuf::new();
         path.doc(doc);
         let mut common = BTreeSet::new();
@@ -309,41 +312,28 @@ impl Crdt {
             let k = r?;
             let path = Path::new(&k[..]);
             let dot = path.dot();
-            if that.contains(&path) && !expired.contains(&dot) {
+            if causal.store.contains(&path) && !causal.expired.contains(&dot) {
                 common.insert(path.to_owned());
-            } else if expired.contains(&dot) {
+            } else if causal.expired.contains(&dot) {
                 if !self.can(peer, Permission::Write, path)? {
-                    tracing::info!("00: skipping {} due to lack of permissions", path);
+                    tracing::info!("join: peer is unauthorized to remove {}", path);
                     continue;
                 }
                 self.state.remove(path)?;
             }
         }
-        for path in that.iter() {
+        for path in causal.store.iter() {
             let dot = path.dot();
-            if !common.contains(path.as_ref()) && !expired.contains(&dot) {
+            if !common.contains(path.as_ref()) && !causal.expired.contains(&dot) {
                 if !self.can(peer, Permission::Write, path)? {
-                    tracing::info!("11: skipping {} due to lack of permissions", path);
+                    tracing::info!("join: peer is unauthorized to insert {}", path);
                     continue;
                 }
                 self.state.insert(path.to_owned(), &[])?;
             }
         }
-        Ok(())
-    }
-
-    pub fn join_policy(&self, causal: &Causal) -> Result<()> {
-        for path in causal.store.iter() {
-            if !self.state.contains_key(path)? && path.last().unwrap().policy().is_some() {
-                self.state.insert(path, &[])?;
-            }
-        }
-        Ok(())
-    }
-
-    pub fn join(&self, peer_id: &PeerId, doc: &DocId, causal: &Causal) -> Result<()> {
-        self.join_store(doc, peer_id, &causal.store, causal.expired())?;
         for dot in causal.expired().iter() {
+            // TODO: who can add to the expired set?
             let mut path = PathBuf::new();
             path.doc(doc);
             path.dot(dot);
@@ -374,7 +364,7 @@ impl Crdt {
                 continue;
             }
             if !self.can(peer_id, Permission::Read, path)? {
-                tracing::info!("unjoin: peer is unauthorized to read");
+                tracing::info!("unjoin: peer is unauthorized to read {}", path);
                 continue;
             }
             store.insert(path.to_owned());
@@ -399,7 +389,7 @@ mod tests {
     #[async_std::test]
     async fn test_ewflag() -> Result<()> {
         let mut sdk = Backend::memory()?;
-        let peer = PeerId::new([0; 32]);
+        let peer = sdk.frontend().generate_keypair()?;
         let hash = sdk.register(vec![Lens::Make(Kind::Flag)])?;
         let doc = sdk
             .frontend()
@@ -409,7 +399,6 @@ mod tests {
 
         let op = doc.cursor().enable()?;
         doc.apply(&op)?;
-        println!("{:#?}", doc);
         assert!(doc.cursor().enabled()?);
 
         let op = doc.cursor().disable()?;
@@ -422,21 +411,23 @@ mod tests {
     #[async_std::test]
     async fn test_ewflag_unjoin() -> Result<()> {
         let la = Keypair::generate();
-        let peer = PeerId::new([0; 32]);
+        let key = Keypair::generate();
+        let peer = key.peer_id();
 
         let mut sdk1 = Backend::memory()?;
         let hash1 = sdk1.register(vec![Lens::Make(Kind::Flag)])?;
+        sdk1.frontend().add_keypair(key)?;
         let doc1 = sdk1.frontend().create_doc(peer, &hash1, la)?;
         Pin::new(&mut sdk1).await?;
 
         let mut sdk2 = Backend::memory()?;
         let hash2 = sdk2.register(vec![Lens::Make(Kind::Flag)])?;
+        sdk2.frontend().add_keypair(key)?;
         let doc2 = sdk2.frontend().create_doc(peer, &hash2, la)?;
         Pin::new(&mut sdk2).await?;
         assert_eq!(hash1, hash2);
 
         let op = doc1.cursor().enable()?;
-        println!("{:?}", op);
         doc1.apply(&op)?;
         doc2.apply(&op)?;
 
@@ -445,16 +436,10 @@ mod tests {
 
         let op = doc1.cursor().disable()?;
         doc1.apply(&op)?;
-        if false {
-            // apply the op
-            doc2.apply(&op)?;
-        } else {
-            // compute the delta using unjoin, and apply that
-            let delta = sdk1.unjoin(&peer, doc1.id(), Ref::archive(&doc2.ctx()?).as_ref())?;
-            println!("{:?}", delta);
-            sdk2.join(&peer, doc1.id(), &hash1, delta)?;
-            println!("{:#?}", doc2);
-        }
+
+        let delta = sdk1.unjoin(&peer, doc1.id(), Ref::archive(&doc2.ctx()?).as_ref())?;
+        sdk2.join(&peer, doc1.id(), &hash1, delta)?;
+
         assert!(!doc1.cursor().enabled()?);
         assert!(!doc2.cursor().enabled()?);
 
@@ -465,27 +450,27 @@ mod tests {
     async fn test_mvreg() -> Result<()> {
         let mut sdk = Backend::memory()?;
         let hash = sdk.register(vec![Lens::Make(Kind::Reg(PrimitiveKind::U64))])?;
-        let peer1 = PeerId::new([1; 32]);
+        let peer1 = sdk.frontend().generate_keypair()?;
         let doc = sdk
             .frontend()
             .create_doc(peer1, &hash, Keypair::generate())?;
         Pin::new(&mut sdk).await?;
 
-        let peer2 = PeerId::new([2; 32]);
+        let peer2 = sdk.frontend().generate_keypair()?;
         let op = doc.cursor().say_can(Some(peer2), Permission::Write)?;
         doc.apply(&op)?;
+        Pin::new(&mut sdk).await?;
+        let doc2 = sdk.frontend().doc_as(*doc.id(), &peer2)?;
 
         let op1 = doc.cursor().assign_u64(42)?;
+        let op2 = doc2.cursor().assign_u64(43)?;
         doc.apply(&op1)?;
-
-        //TODO
-        //let op2 = crdt.assign(path.as_path(), &peer2, Primitive::U64(43))?;
-        //crdt.join(&peer2, &op2)?;
+        doc.apply(&op2)?;
 
         let values = doc.cursor().u64s()?.collect::<Result<BTreeSet<u64>>>()?;
-        //assert_eq!(values.len(), 2);
+        assert_eq!(values.len(), 2);
         assert!(values.contains(&42));
-        //assert!(values.contains(&43));
+        assert!(values.contains(&43));
 
         let op = doc.cursor().assign_u64(99)?;
         doc.apply(&op)?;
@@ -500,7 +485,7 @@ mod tests {
     #[async_std::test]
     async fn test_ormap() -> Result<()> {
         let mut sdk = Backend::memory()?;
-        let peer = PeerId::new([1; 32]);
+        let peer = sdk.frontend().generate_keypair()?;
         let hash = sdk.register(vec![
             Lens::Make(Kind::Table(PrimitiveKind::Str)),
             Lens::LensMapValue(Box::new(Lens::Make(Kind::Table(PrimitiveKind::Str)))),
@@ -551,13 +536,7 @@ mod tests {
         fn causal_join_commutative(a in arb_causal(), b in arb_causal()) {
             let ab = join(&a, &b);
             let ba = join(&b, &a);
-            if ab != ba {
-                println!("ab {:?}\nba {:?}", ab.dots(), ba.dots());
-                println!("ab {:?}\nba {:?}", ab.expired(), ba.expired());
-                println!("ab {:?}\nba {:?}", ab.store(), ba.store());
-                println!();
-                prop_assert_eq!(ab, ba);
-            }
+            prop_assert_eq!(ab, ba);
         }
 
         #[test]
