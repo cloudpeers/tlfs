@@ -12,6 +12,7 @@ pub mod props;
 mod registry;
 mod schema;
 mod util;
+mod fraction;
 
 pub use crate::acl::{Acl, Actor, Can, Engine, Permission, Policy};
 pub use crate::crdt::{Causal, CausalContext, Crdt, DotStore};
