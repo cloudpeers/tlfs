@@ -1,6 +1,6 @@
 use crate::{
     Actor, ArchivedSchema, Can, Causal, Crdt, DocId, Dot, DotSet, DotStore, Keypair, Path, PathBuf,
-    PeerId, Permission, Policy, PrimitiveKind, Schema,
+    PeerId, Permission, Policy, PrimitiveKind, Schema, Subscriber,
 };
 use anyhow::{anyhow, Result};
 use rkyv::Archived;
@@ -29,6 +29,11 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    /// Subscribe to a path.
+    pub fn subscribe(&self) -> Subscriber {
+        self.crdt.watch_path(self.path.as_path())
+    }
+
     /// Checks permissions.
     pub fn can(&self, peer: &PeerId, perm: Permission) -> Result<bool> {
         self.crdt.can(peer, perm, self.path.as_path())
@@ -39,7 +44,7 @@ impl<'a> Cursor<'a> {
         if let ArchivedSchema::Flag = &self.schema {
             Ok(self
                 .crdt
-                .scan_prefix(self.path.as_path())
+                .scan_path(self.path.as_path())
                 .filter_map(|r| match r {
                     Ok(path) => Some(Ok(Path::new(&path).last()?.nonce()?)),
                     Err(err) => Some(Err(err)),
@@ -57,7 +62,7 @@ impl<'a> Cursor<'a> {
         if let ArchivedSchema::Reg(PrimitiveKind::Bool) = &self.schema {
             Ok(self
                 .crdt
-                .scan_prefix(self.path.as_path())
+                .scan_path(self.path.as_path())
                 .filter_map(|r| match r {
                     Ok(path) => Some(Ok(Path::new(&path).last()?.prim_bool()?)),
                     Err(err) => Some(Err(err)),
@@ -72,7 +77,7 @@ impl<'a> Cursor<'a> {
         if let ArchivedSchema::Reg(PrimitiveKind::U64) = &self.schema {
             Ok(self
                 .crdt
-                .scan_prefix(self.path.as_path())
+                .scan_path(self.path.as_path())
                 .filter_map(|r| match r {
                     Ok(path) => Some(Ok(Path::new(&path).last()?.prim_u64()?)),
                     Err(err) => Some(Err(err)),
@@ -87,7 +92,7 @@ impl<'a> Cursor<'a> {
         if let ArchivedSchema::Reg(PrimitiveKind::I64) = &self.schema {
             Ok(self
                 .crdt
-                .scan_prefix(self.path.as_path())
+                .scan_path(self.path.as_path())
                 .filter_map(|r| match r {
                     Ok(path) => Some(Ok(Path::new(&path).last()?.prim_i64()?)),
                     Err(err) => Some(Err(err)),
@@ -102,7 +107,7 @@ impl<'a> Cursor<'a> {
         if let ArchivedSchema::Reg(PrimitiveKind::Str) = &self.schema {
             Ok(self
                 .crdt
-                .scan_prefix(self.path.as_path())
+                .scan_path(self.path.as_path())
                 .filter_map(|r| match r {
                     Ok(path) => Some(Ok(Path::new(&path).last()?.prim_str()?.to_owned())),
                     Err(err) => Some(Err(err)),
@@ -206,7 +211,7 @@ impl<'a> Cursor<'a> {
         }
         let mut expired = DotSet::new();
         // add all dots to be tombstoned into the context
-        for r in self.crdt.scan_prefix(self.path.as_path()) {
+        for r in self.crdt.scan_path(self.path.as_path()) {
             let k = r?;
             let path = Path::new(&k);
             if path.last().unwrap().nonce().is_some() {
@@ -228,7 +233,7 @@ impl<'a> Cursor<'a> {
         }
         let mut expired = DotSet::new();
         // add all dots to be tombstoned into the context
-        for r in self.crdt.scan_prefix(self.path.as_path()) {
+        for r in self.crdt.scan_path(self.path.as_path()) {
             let k = r?;
             let path = Path::new(&k);
             if path.last().unwrap().policy().is_none() {
@@ -283,7 +288,7 @@ impl<'a> Cursor<'a> {
             return Err(anyhow!("unauthorized"));
         }
         let mut expired = DotSet::new();
-        for r in self.crdt.scan_prefix(self.path.as_path()) {
+        for r in self.crdt.scan_path(self.path.as_path()) {
             let k = r?;
             let path = Path::new(&k);
             expired.insert(path.dot());

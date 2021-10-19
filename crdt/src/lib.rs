@@ -11,6 +11,7 @@ mod path;
 pub mod props;
 mod registry;
 mod schema;
+mod subscriber;
 mod util;
 
 pub use crate::acl::{Acl, Actor, Can, Engine, Permission, Policy};
@@ -26,4 +27,5 @@ pub use crate::lens::{ArchivedKind, ArchivedLens, ArchivedLenses, Kind, Lens, Le
 pub use crate::path::{Path, PathBuf, Segment, SegmentType};
 pub use crate::registry::{Hash, Registry, EMPTY_HASH, EMPTY_LENSES, EMPTY_SCHEMA};
 pub use crate::schema::{ArchivedSchema, Primitive, PrimitiveKind, Prop, Schema};
+pub use crate::subscriber::{Event, Subscriber};
 pub use crate::util::Ref;

@@ -1,7 +1,9 @@
 mod sync;
 
 pub use libp2p::Multiaddr;
-pub use tlfs_crdt::{Causal, DocId, Hash, Keypair, Kind, Lens, PeerId, Permission, PrimitiveKind};
+pub use tlfs_crdt::{
+    Causal, DocId, Event, Hash, Keypair, Kind, Lens, PeerId, Permission, PrimitiveKind, Subscriber,
+};
 
 use crate::sync::{Behaviour, ToLibp2pKeypair, ToLibp2pPublic};
 use anyhow::Result;
@@ -166,6 +168,7 @@ enum Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::StreamExt;
     use std::time::Duration;
 
     #[async_std::test]
@@ -196,7 +199,6 @@ mod tests {
         let mut sdk = migrate.finish().await?;
         let doc = sdk.create_doc(&hash)?;
 
-        // TODO: subscription api
         async_std::task::sleep(Duration::from_millis(100)).await;
         assert!(doc.cursor().can(sdk.peer_id(), Permission::Write)?);
 
@@ -232,11 +234,20 @@ mod tests {
         }
         let doc2 = sdk2.add_doc(*doc.id(), &hash)?;
 
-        async_std::task::sleep(Duration::from_millis(100)).await;
+        let mut sub = doc2.cursor().field("todos")?.subscribe();
         sdk2.unjoin(*doc.id(), *sdk.peer_id());
 
-        // TODO: subscription api
-        async_std::task::sleep(Duration::from_millis(1000)).await;
+        let mut exit = false;
+        while !exit {
+            if let Some(iter) = Pin::new(&mut sub).next().await {
+                for ev in iter.into_iter() {
+                    if let Event::Insert(_) = ev {
+                        exit = true;
+                        break;
+                    }
+                }
+            }
+        }
 
         let value = doc2
             .cursor()
