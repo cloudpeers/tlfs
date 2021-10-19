@@ -147,7 +147,7 @@ impl Sdk {
         self.frontend.doc(id)
     }
 
-    pub fn remove_doc(&self, id: DocId) -> Result<()> {
+    pub fn remove_doc(&self, id: &DocId) -> Result<()> {
         self.frontend.remove_doc(id)
     }
 
