@@ -3542,6 +3542,7 @@ dependencies = [
  "range-collections",
  "rkyv",
  "sled",
+ "smallvec",
  "tracing",
  "tracing-log",
  "tracing-subscriber",
