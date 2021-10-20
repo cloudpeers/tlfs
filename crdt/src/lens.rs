@@ -239,7 +239,9 @@ impl<'a> LensRef<'a> {
                 }
             }
             Self::HoistProperty(host, target) => {
-                if path[0].prim_str() == Some(host.as_str()) && path[1].prim_str() == Some(target.as_str()) {
+                if path[0].prim_str() == Some(host.as_str())
+                    && path[1].prim_str() == Some(target.as_str())
+                {
                     return path[1..].to_vec();
                 }
             }
