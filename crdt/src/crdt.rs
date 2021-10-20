@@ -179,7 +179,13 @@ impl Causal {
     }
 
     pub fn transform(&mut self, from: &ArchivedLenses, to: &ArchivedLenses) {
-        from.transform_dotstore(&mut self.store, to);
+        let mut store = DotStore::new();
+        for path in self.store.iter() {
+            if let Some(path) = from.transform_path(path, to) {
+                store.insert(path);
+            }
+        }
+        self.store = store;
     }
 }
 
@@ -391,7 +397,17 @@ impl Crdt {
     }
 
     pub fn transform(&self, doc: &DocId, from: &ArchivedLenses, to: &ArchivedLenses) -> Result<()> {
-        from.transform_crdt(doc, self, to)?;
+        let mut path = PathBuf::new();
+        path.doc(doc);
+        for r in self.scan_path(path.as_path()) {
+            let k = r?;
+            let path = Path::new(&k);
+            if let Some(path) = from.transform_path(path, to) {
+                self.state.insert(path, &[])?;
+            }
+            self.state.remove(k)?;
+        }
+        // TODO: expired
         Ok(())
     }
 }
