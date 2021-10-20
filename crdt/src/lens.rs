@@ -326,14 +326,18 @@ impl ArchivedLenses {
     }
 
     pub fn transform_path(&self, path: Path, target: &ArchivedLenses) -> Option<PathBuf> {
-        let mut segments: Vec<Segment> = path.into_iter().collect();
+        let mut segments: Vec<Segment> = path.child().unwrap().into_iter().collect();
         for lens in self.transform(target) {
             segments = lens.transform_path(&segments);
             if segments.is_empty() {
                 return None;
             }
         }
-        Some(segments.into_iter().collect())
+        let doc = path.first().unwrap().doc().unwrap();
+        let mut path = PathBuf::new();
+        path.doc(&doc);
+        path.extend(segments.into_iter().collect::<PathBuf>().as_path());
+        Some(path)
     }
 }
 
