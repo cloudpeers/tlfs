@@ -502,6 +502,86 @@ mod tests {
     }
 
     #[async_std::test]
+    async fn test_orarray_smoke() -> Result<()> {
+        let mut sdk = Backend::memory()?;
+        let peer = PeerId::new([1; 32]);
+        let hash = sdk.register(vec![
+            Lens::Make(Kind::Array),
+            Lens::LensMapValue(Box::new(Lens::Make(Kind::Reg(PrimitiveKind::U64)))),
+        ])?;
+        let doc = sdk
+            .frontend()
+            .create_doc(peer, &hash, Keypair::generate())?;
+        Pin::new(&mut sdk).await?;
+        let cur = doc.cursor().index(0)?;
+        let op = cur.assign_u64(42)?;
+
+        let op1 = cur.assign_u64(43)?;
+        doc.apply(&op)?;
+        doc.apply(&op1)?;
+
+        let r = doc
+            .cursor()
+            .index(0)?
+            .u64s()?
+            .collect::<anyhow::Result<BTreeSet<_>>>()?;
+        assert_eq!(r.len(), 2);
+        assert!(r.contains(&42));
+        assert!(r.contains(&43));
+
+        let op2 = cur.assign_u64(44)?;
+        doc.apply(&op2)?;
+
+        let r = doc
+            .cursor()
+            .index(0)?
+            .u64s()?
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        assert_eq!(r, vec![44]);
+
+        let op_delete = doc.cursor().index(0)?.delete()?;
+        doc.apply(&op_delete)?;
+        assert!(doc.cursor().index(0)?.u64s()?.next().is_none());
+
+        Ok(())
+    }
+
+    #[async_std::test]
+    async fn test_orarray_move() -> Result<()> {
+        let mut sdk = Backend::memory()?;
+        let peer = PeerId::new([1; 32]);
+        let hash = sdk.register(vec![
+            Lens::Make(Kind::Array),
+            Lens::LensMapValue(Box::new(Lens::Make(Kind::Reg(PrimitiveKind::U64)))),
+        ])?;
+        let doc = sdk
+            .frontend()
+            .create_doc(peer, &hash, Keypair::generate())?;
+        Pin::new(&mut sdk).await?;
+        for i in 0..10 {
+            let op = doc.cursor().index(i)?.assign_u64(i as u64)?;
+            doc.apply(&op)?;
+        }
+        let mut r = vec![];
+        for i in 0..10 {
+            r.extend(doc.cursor().index(i)?.u64s()?.collect::<Result<Vec<_>>>()?);
+        }
+        assert_eq!(r, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+
+        println!("{:#?}", doc);
+        let move_op = doc.cursor().index(5)?.r#move(2)?;
+        println!("move_op {:#?}", move_op);
+        doc.apply(&move_op)?;
+
+        let mut r = vec![];
+        for i in 0..10 {
+            r.extend(doc.cursor().index(i)?.u64s()?.collect::<Result<Vec<_>>>()?);
+        }
+        assert_eq!(r, vec![0, 1, 5, 2, 3, 4, 6, 7, 8, 9]);
+        Ok(())
+    }
+
+    #[async_std::test]
     async fn test_ormap() -> Result<()> {
         let mut sdk = Backend::memory()?;
         let peer = PeerId::new([1; 32]);
@@ -524,6 +604,8 @@ mod tests {
         let values = cur.u64s()?.collect::<Result<BTreeSet<u64>>>()?;
         assert_eq!(values.len(), 1);
         assert!(values.contains(&42));
+        println!("{:#?}", doc);
+        assert!(false);
 
         let op = doc.cursor().key_str("a")?.key_str("b")?.remove()?;
         doc.apply(&op)?;

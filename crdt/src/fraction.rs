@@ -1,14 +1,17 @@
-use core::{
-    ops::Index,
-    fmt,
-};
-use smallvec::{SmallVec, smallvec};
+use core::{fmt, ops::Index};
+use smallvec::{smallvec, SmallVec};
 
 /// A binary fraction type. Can encode any value in the interval [0..1) with arbitary precision.
 ///
 /// trailing zeros are not stored.
 #[derive(PartialOrd, Ord, PartialEq, Eq, Clone)]
-pub struct Fraction(SmallVec<[u8;8]>);
+pub struct Fraction(SmallVec<[u8; 8]>);
+
+impl AsRef<[u8]> for Fraction {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
 
 impl Index<usize> for Fraction {
     type Output = u8;
@@ -19,13 +22,13 @@ impl Index<usize> for Fraction {
 }
 
 impl fmt::Debug for Fraction {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {        
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Fraction({})", self)
     }
 }
 
 impl fmt::Display for Fraction {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {        
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if !self.0.is_empty() {
             write!(f, "0x0.{}", hex::encode(&self.0))
         } else {
@@ -35,6 +38,9 @@ impl fmt::Display for Fraction {
 }
 
 impl Fraction {
+    pub fn as_bytes(&self) -> &[u8] {
+        self.0.as_ref()
+    }
     pub fn zero() -> Fraction {
         Self::new(SmallVec::new())
     }
@@ -43,7 +49,7 @@ impl Fraction {
         Self::new(smallvec![0x80u8])
     }
 
-    fn new(mut data: SmallVec<[u8; 8]>) -> Self {
+    pub fn new(mut data: SmallVec<[u8; 8]>) -> Self {
         // canonicalize
         while data.last() == Some(&0u8) {
             data.pop();
@@ -86,12 +92,12 @@ impl Fraction {
             res.extend((0..n).map(|_| 0u8));
         }
         // add 1 to the lowest current fractional digit
-        for byte in res.iter_mut().rev() {            
+        for byte in res.iter_mut().rev() {
             *byte += 1;
             if *byte != 0 {
                 break;
             }
-        }        
+        }
         Self::new(res)
     }
 }
@@ -101,7 +107,7 @@ fn fraction_smoke() {
     let t = Fraction::zero();
     let u = t.succ();
     let v = t.mid(&u);
-    assert!(t<u);
-    assert!(t<v && v<u);
-    println!("{:?} {:?} {:?}", t, u, v);
+    assert!(t < u);
+    assert!(t < v && v < u);
+    println!("{:?} < {:?} < {:?}", t, v, u);
 }

@@ -16,6 +16,7 @@ pub enum Kind {
     Reg(PrimitiveKind),
     Table(PrimitiveKind),
     Struct,
+    Array,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Serialize)]
@@ -120,6 +121,7 @@ impl<'a> LensRef<'a> {
                     ArchivedKind::Reg(kind) => Schema::Reg(*kind),
                     ArchivedKind::Table(kind) => Schema::Table(*kind, Box::new(Schema::Null)),
                     ArchivedKind::Struct => Schema::Struct(Default::default()),
+                    ArchivedKind::Array => Schema::Array(Box::new(Schema::Null)),
                 }
             }
             (Self::Destroy(k), s) => {
@@ -214,6 +216,10 @@ impl<'a> LensRef<'a> {
                     .transform_schema(m.get_mut(key.as_str()).unwrap())?;
             }
             (Self::LensMapValue(rev, lens), Schema::Table(_, schema)) => {
+                lens.to_ref().maybe_reverse(*rev).transform_schema(schema)?
+            }
+
+            (Self::LensMapValue(rev, lens), Schema::Array(schema)) => {
                 lens.to_ref().maybe_reverse(*rev).transform_schema(schema)?
             }
             (_, s) => return Err(anyhow!("invalid lens for schema: {:?} {:?}", self, s)),

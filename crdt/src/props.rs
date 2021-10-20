@@ -186,6 +186,9 @@ fn arb_dotstore_for_schema(s: Schema) -> BoxedStrategy<DotStore> {
                     })
                     .boxed()
             }),
+        Schema::Array(schema) => {
+            todo!()
+        }
     }
 }
 
@@ -283,6 +286,9 @@ pub fn arb_lens_for_schema(s: &Schema) -> BoxedStrategy<Lens> {
                         .boxed(),
                 );
             }
+        }
+        Schema::Array(schema) => {
+            todo!()
         }
     }
     (0..strategy.len())

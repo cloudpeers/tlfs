@@ -77,6 +77,7 @@ pub enum Schema {
     Reg(PrimitiveKind),
     Table(PrimitiveKind, #[omit_bounds] Box<Schema>),
     Struct(#[omit_bounds] BTreeMap<Prop, Schema>),
+    Array(#[omit_bounds] Box<Schema>),
 }
 
 impl ArchivedSchema {
