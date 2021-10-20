@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "cloud-relay",
+    #"cloud-relay",
     "crdt",
     ".",
 ]
@@ -19,7 +19,7 @@ ed25519-dalek = "1.0.1"
 fnv = "1.0.7"
 futures = "0.3.17"
 log-panics = "2.0.0"
-rkyv = "0.7.18"
+rkyv = "0.7.19"
 sled = { git = "https://github.com/spacejam/sled" }
 tlfs-crdt = { version = "0.1.0", path = "crdt" }
 tracing = "0.1.29"
@@ -39,10 +39,6 @@ features = [
     "yamux",
     "websocket",
 ]
-
-[patch.crates-io]
-libp2p = { git = "https://github.com/wngr/rust-libp2p", branch = "ow/wasm" }
-instant = { git = "https://github.com/wngr/instant", branch = "systemtime" }
 
 [dev-dependencies]
 async-std = { version = "1.10.0", features = ["attributes"] }
