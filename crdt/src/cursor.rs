@@ -1,7 +1,11 @@
-use crate::{
-    Actor, ArchivedSchema, Can, Causal, Crdt, DocId, Dot, DotSet, DotStore, Keypair, Path, PathBuf,
-    PeerId, Permission, Policy, PrimitiveKind, Schema, Subscriber,
-};
+use crate::acl::{Actor, Can, Permission, Policy};
+use crate::crdt::{Causal, Crdt, DotStore};
+use crate::crypto::Keypair;
+use crate::dotset::Dot;
+use crate::id::{DocId, PeerId};
+use crate::path::{Path, PathBuf};
+use crate::schema::{ArchivedSchema, PrimitiveKind, Schema};
+use crate::subscriber::Subscriber;
 use anyhow::{anyhow, Result};
 use rkyv::Archived;
 
@@ -209,13 +213,13 @@ impl<'a> Cursor<'a> {
         if !self.can(&self.peer_id, Permission::Write)? {
             return Err(anyhow!("unauthorized"));
         }
-        let mut expired = DotSet::new();
+        let mut expired = DotStore::new();
         // add all dots to be tombstoned into the context
         for r in self.crdt.scan_path(self.path.as_path()) {
             let k = r?;
             let path = Path::new(&k);
             if path.last().unwrap().nonce().is_some() {
-                expired.insert(path.dot());
+                expired.insert(path.to_owned());
             }
         }
         Ok(Causal {
@@ -224,20 +228,20 @@ impl<'a> Cursor<'a> {
         })
     }
 
-    fn assign(&self, kind: PrimitiveKind) -> Result<(PathBuf, DotSet)> {
+    fn assign(&self, kind: PrimitiveKind) -> Result<(PathBuf, DotStore)> {
         if *self.schema != ArchivedSchema::Reg(kind) {
             return Err(anyhow!("not a Reg<{:?}>", kind));
         }
         if !self.can(&self.peer_id, Permission::Write)? {
             return Err(anyhow!("unauthorized"));
         }
-        let mut expired = DotSet::new();
+        let mut expired = DotStore::new();
         // add all dots to be tombstoned into the context
         for r in self.crdt.scan_path(self.path.as_path()) {
             let k = r?;
             let path = Path::new(&k);
             if path.last().unwrap().policy().is_none() {
-                expired.insert(path.dot());
+                expired.insert(path.to_owned());
             }
         }
         let mut path = self.path.to_owned();
@@ -287,11 +291,11 @@ impl<'a> Cursor<'a> {
         if !self.can(&self.peer_id, Permission::Write)? {
             return Err(anyhow!("unauthorized"));
         }
-        let mut expired = DotSet::new();
+        let mut expired = DotStore::new();
         for r in self.crdt.scan_path(self.path.as_path()) {
             let k = r?;
             let path = Path::new(&k);
-            expired.insert(path.dot());
+            expired.insert(path.to_owned());
         }
         Ok(Causal {
             store: DotStore::new(),
@@ -319,7 +323,7 @@ impl<'a> Cursor<'a> {
         store.insert(path);
         Ok(Causal {
             store,
-            expired: DotSet::new(),
+            expired: DotStore::new(),
         })
     }
 

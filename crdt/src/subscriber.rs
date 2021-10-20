@@ -1,5 +1,6 @@
-use crate::acl::Rule;
-use crate::{Path, PeerId, Permission};
+use crate::acl::{Permission, Rule};
+use crate::id::PeerId;
+use crate::path::Path;
 use futures::{Future, Stream};
 use rkyv::archived_root;
 use std::pin::Pin;

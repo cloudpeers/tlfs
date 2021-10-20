@@ -1,4 +1,7 @@
-use crate::{DocId, Dot, Path, PathBuf, PeerId, Ref};
+use crate::dotset::Dot;
+use crate::id::{DocId, PeerId};
+use crate::path::{Path, PathBuf};
+use crate::util::Ref;
 use anyhow::Result;
 use bytecheck::CheckBytes;
 use crepe::crepe;

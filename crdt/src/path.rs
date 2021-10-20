@@ -1,4 +1,7 @@
-use crate::{DocId, Dot, PeerId, Policy, Ref};
+use crate::acl::Policy;
+use crate::dotset::Dot;
+use crate::id::{DocId, PeerId};
+use crate::util::Ref;
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::borrow::Borrow;
