@@ -1,4 +1,5 @@
-use crate::{Path, PathBuf, PrimitiveKind, Prop, Schema, Segment};
+use crate::path::{Path, PathBuf, Segment};
+use crate::schema::{PrimitiveKind, Prop, Schema};
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
 use rkyv::ser::serializers::AllocSerializer;
@@ -238,10 +239,8 @@ impl<'a> LensRef<'a> {
                 }
             }
             Self::HoistProperty(host, target) => {
-                if path[0].prim_str() == Some(host.as_str()) {
-                    if path[1].prim_str() == Some(target.as_str()) {
-                        return path[1..].to_vec();
-                    }
+                if path[0].prim_str() == Some(host.as_str()) && path[1].prim_str() == Some(target.as_str()) {
+                    return path[1..].to_vec();
                 }
             }
             Self::PlungeProperty(host, target) => {
@@ -338,8 +337,10 @@ impl ArchivedLenses {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::props::*;
-    use crate::{Lenses, Ref, EMPTY_LENSES};
+    use crate::registry::EMPTY_LENSES;
+    use crate::util::Ref;
     use proptest::prelude::*;
 
     proptest! {

@@ -31,7 +31,9 @@ impl AsRef<[u8; 32]> for Dot {
 
 impl std::fmt::Debug for Dot {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Dot({})", hex::encode(&self.0[0..2]))
+        let mut id = [0; 44];
+        base64::encode_config_slice(&self.0, base64::URL_SAFE, &mut id);
+        write!(f, "Dot({})", std::str::from_utf8(&id[..4]).expect("wtf?"))
     }
 }
 

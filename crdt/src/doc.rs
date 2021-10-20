@@ -1,7 +1,13 @@
-use crate::{
-    Acl, Causal, CausalContext, Crdt, Cursor, DocId, Engine, Hash, Keypair, Lens, Lenses, Path,
-    PeerId, Permission, Ref, Registry, Schema, EMPTY_HASH, EMPTY_LENSES, EMPTY_SCHEMA,
-};
+use crate::acl::{Acl, Engine, Permission};
+use crate::crdt::{Causal, CausalContext, Crdt};
+use crate::crypto::Keypair;
+use crate::cursor::Cursor;
+use crate::id::{DocId, PeerId};
+use crate::lens::{Lens, Lenses};
+use crate::path::Path;
+use crate::registry::{Hash, Registry, EMPTY_HASH, EMPTY_LENSES, EMPTY_SCHEMA};
+use crate::schema::Schema;
+use crate::util::Ref;
 use anyhow::{anyhow, Result};
 use futures::channel::mpsc;
 use futures::prelude::*;
@@ -179,7 +185,11 @@ impl Backend {
         let registry = Registry::new(db.open_tree("lenses")?);
         let docs = Docs::new(db.open_tree("docs")?);
         let acl = Acl::new(db.open_tree("acl")?);
-        let crdt = Crdt::new(db.open_tree("crdt")?, db.open_tree("expired")?, acl.clone());
+        let crdt = Crdt::new(
+            db.open_tree("store")?,
+            db.open_tree("expired")?,
+            acl.clone(),
+        );
         let engine = Engine::new(acl)?;
         let (tx, rx) = mpsc::channel(1);
         let mut me = Self {
@@ -261,7 +271,7 @@ impl Backend {
         causal.transform(doc_lenses.as_ref(), lenses.as_ref());
         self.crdt.join_policy(&causal)?;
         self.update_acl()?;
-        self.crdt.join(peer_id, doc, &causal)?;
+        self.crdt.join(peer_id, &causal)?;
         Ok(())
     }
 
@@ -417,7 +427,7 @@ impl Frontend {
 
     pub fn apply(&self, doc: &DocId, causal: &Causal) -> Result<()> {
         let peer = self.peer_id(doc)?;
-        self.crdt.join(&peer, doc, causal)?;
+        self.crdt.join(&peer, causal)?;
         self.tx.clone().send(()).now_or_never();
         Ok(())
     }
