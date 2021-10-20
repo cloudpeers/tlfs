@@ -124,9 +124,9 @@ impl ArchivedSchema {
                 Some(kind.validate(key) && schema.validate_path(value)?)
             }
             Self::Struct(fields) => {
-                let field = path.first()?.prim_str()?;
+                let field = path.first()?.prim_string()?;
                 let value = path.child()?;
-                let schema = fields.get(field)?;
+                let schema = fields.get(field.as_str())?;
                 Some(schema.validate_path(value)?)
             }
         }
