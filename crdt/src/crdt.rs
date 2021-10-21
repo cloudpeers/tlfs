@@ -188,6 +188,7 @@ impl Causal {
         for path in self.expired.iter() {
             if let Some(path) = from.transform_path(path, to) {
                 expired.insert(path);
+        let peer = PeerId::new([1; 32]);
             }
         }
         self.expired = expired;

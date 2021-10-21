@@ -387,7 +387,7 @@ impl<'a> ArrayCursor<'a> {
 
     fn value(&self) -> PathBuf {
         let mut p = self.value_path();
-        p.slice(self.pos.as_bytes().to_vec());
+        p.position(&self.pos);
         p.prim_u64(self.uid);
         p
     }
@@ -540,7 +540,7 @@ impl<'a> ArrayCursor<'a> {
             let mut path = meta_path_with_uid.clone();
             path.prim_u64(meta.last_update);
             path.prim_u64(move_op);
-            path.slice(meta.pos.as_ref().to_vec());
+            path.position(&meta.pos);
             path.peer(&self.peer_id);
             path.nonce(Cursor::nonce()?);
 
@@ -549,7 +549,7 @@ impl<'a> ArrayCursor<'a> {
         let old_value_path = {
             let mut p = self.value_path();
 
-            p.slice(self.pos.as_ref().to_vec());
+            p.position(&self.pos);
             p
         };
         let mut new_value_path = self.value_path();
@@ -565,7 +565,7 @@ impl<'a> ArrayCursor<'a> {
 
         // add new pos
         println!("new pos: {:?}", new_pos.as_ref());
-        new_value_path.slice(new_pos.as_ref().to_vec());
+        new_value_path.position(&new_pos);
         new_value_path.prim_u64(self.uid);
         new_value_path.peer(&self.peer_id);
         new_value_path.nonce(Cursor::nonce()?);
@@ -589,7 +589,7 @@ impl<'a> ArrayCursor<'a> {
         let mut p = self.meta();
         p.prim_u64(Cursor::nonce()?);
         p.prim_u64(Cursor::nonce()?);
-        p.slice(self.pos.as_ref().to_vec());
+        p.position(&self.pos);
         p.peer(&self.peer_id);
         p.nonce(Cursor::nonce()?);
         inner.store.insert(p);
@@ -635,7 +635,7 @@ impl<'a> ArrayCursor<'a> {
         let mut p = self.meta();
         p.prim_u64(Cursor::nonce()?);
         p.prim_u64(Cursor::nonce()?);
-        p.slice(self.pos.as_ref().to_vec());
+        p.position(&self.pos);
         p.peer(&self.peer_id);
         p.nonce(Cursor::nonce()?);
         inner.store.insert(p);
@@ -709,13 +709,11 @@ mod array {
                 "Unexpected layout"
             );
 
-            let pos = Fraction::new(
-                path.next()
-                    .context("Unexpected layout")?
-                    .slice()
-                    .context("Unexpected layout")?
-                    .into(),
-            );
+            let pos = path
+                .next()
+                .context("Unexpected layout")?
+                .position()
+                .context("Unexpected layout")?;
 
             let uid = path
                 .next()
@@ -770,13 +768,11 @@ mod array {
                 .prim_u64()
                 .context("Unexpected layout")?;
 
-            let pos = Fraction::new(
-                path.next()
-                    .context("Unexpected layout")?
-                    .slice()
-                    .context("Unexpected layout")?
-                    .into(),
-            );
+            let pos = path
+                .next()
+                .context("Unexpected layout")?
+                .position()
+                .context("Unexpected layout")?;
             Ok(Self {
                 last_update,
                 last_move,

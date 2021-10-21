@@ -1,5 +1,6 @@
 use crate::acl::Policy;
 use crate::dotset::Dot;
+use crate::fraction::Fraction;
 use crate::id::{DocId, PeerId};
 use crate::util::Ref;
 use anyhow::Context;
@@ -24,8 +25,7 @@ pub enum SegmentType {
     Str,
     Policy,
     Dot,
-    // TODO: maybe just make a distinct `Position` member
-    Slice,
+    Position,
 }
 
 impl SegmentType {
@@ -41,7 +41,7 @@ impl SegmentType {
             u if u == Str as u8 => Some(Str),
             u if u == Policy as u8 => Some(Policy),
             u if u == Dot as u8 => Some(Dot),
-            u if u == Slice as u8 => Some(Slice),
+            u if u == Position as u8 => Some(Position),
             _ => unreachable!("Unexpected SegmentType: {}", u),
         }
     }
@@ -58,7 +58,7 @@ pub enum Segment {
     Str(String),
     Policy(Policy),
     Dot(Dot),
-    Slice(Vec<u8>),
+    Position(Fraction),
 }
 
 impl Segment {
@@ -78,7 +78,7 @@ impl Segment {
                 Self::Policy(policy.to_owned().unwrap())
             }
             SegmentType::Dot => Self::Dot(Dot::new(data.try_into().unwrap())),
-            SegmentType::Slice => Self::Slice(data.to_vec()),
+            SegmentType::Position => Self::Position(Fraction::new(data.into())),
         }
     }
 
@@ -162,9 +162,9 @@ impl Segment {
         }
     }
 
-    pub fn slice(self) -> Option<Vec<u8>> {
-        if let Segment::Slice(slice) = self {
-            Some(slice)
+    pub fn position(self) -> Option<Fraction> {
+        if let Segment::Position(frac) = self {
+            Some(frac)
         } else {
             None
         }
@@ -183,7 +183,7 @@ impl std::fmt::Debug for Segment {
             Self::Str(s) => write!(f, "{:?}", s),
             Self::Policy(s) => write!(f, "{:?}", s),
             Self::Dot(s) => write!(f, "{:?}", s),
-            Self::Slice(s) => write!(f, "Slice({})", base64::encode(s)),
+            Self::Position(s) => write!(f, "Position({})", base64::encode(s)),
         }
     }
 }
@@ -228,7 +228,7 @@ impl PathBuf {
             Segment::Str(d) => self.prim_str(&*d),
             Segment::Policy(d) => self.policy(&d),
             Segment::Dot(d) => self.dot(&d),
-            Segment::Slice(d) => self.slice(d),
+            Segment::Position(d) => self.position(&d),
         }
     }
 
@@ -269,8 +269,8 @@ impl PathBuf {
         self.push(SegmentType::Dot, dot.as_ref());
     }
 
-    pub fn slice(&mut self, data: Vec<u8>) {
-        self.push(SegmentType::Slice, &data[..]);
+    pub fn position(&mut self, data: &Fraction) {
+        self.push(SegmentType::Position, data.as_ref());
     }
 
     pub fn pop(&mut self) {
