@@ -1,6 +1,7 @@
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Deserialize, Serialize};
 
+/// Document identifier is an ephemeral ed25519 public key.
 #[derive(
     Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd, Archive, CheckBytes, Deserialize, Serialize,
 )]
@@ -55,6 +56,7 @@ impl std::str::FromStr for DocId {
     }
 }
 
+/// Peer identifier is a static ed25519 public key.
 #[derive(
     Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd, Archive, CheckBytes, Deserialize, Serialize,
 )]
