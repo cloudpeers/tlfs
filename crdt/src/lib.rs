@@ -58,8 +58,51 @@
 //! `apply(Tj, apply(Ti, S))` also satisfies I.
 //!
 //! ## Access control
+//! Coordination free access control is built on the following principles:
+//!
+//! - Policy is encoded in a logical language that provides a means to specify permissions of
+//! actors on paths.
+//! - Authority flows from a single root; policy statements combine without ambiguity. Two replicas
+//! with an identical set of policy claims will make identical access control decisions regardless
+//! of the order in which they learned of these claims.
+//! - Access control checks are performed within the operations that implement data replication.
+//! These access control checks are enforced according to the local policy state present at the time
+//! of enforcement.
+//! - Encoded security policy is replicated as data by the existing replication framework.
+//!
+//! The authority root is an ephemeral keypair generated when creating a document. The public key
+//! is used as the document identifier. There are three kinds of policy statements each encoded as
+//! a path in the ORSet:
+//!
+//! - unconditional: {actor} says {actor} can {permission} {path}
+//! - conditional: {actor} says {actor} can {permission} {path} if C can {permission} {path}
+//! - revocation: {actor} revokes {hash(path)}
+//!
+//! where permission is one of read/write/control/own. control allows delegating read and write
+//! permission while own allows delegating read/write/control/own permissions and actor is either
+//! a public key or anonymous. The `anonymous` actor can be used to for example give read
+//! permissions to everyone.
+//!
+//! The set of all policy statements is used to deduce if a peer is authorized to perform a task.
+//! There are five inference rules that can be used to determine if a peer has access:
+//!
+//! - resolve conditional: if there is a true statement that implies the condition, the conditional
+//! is transformed into an unconditional statement.
+//! - local authority: if an unconditional is signed by the ephemeral document key then the statement
+//! is authorized.
+//! - ownership: if an unconditional is signed by a peer and there is an authorized statement that
+//! implies the peer has ownership, the statement is authorized.
+//! - control: if an unconditional is signed by a peer and there is an authorized statement that
+//! implies the peer has control privileges, the statement is authorized if it is delegating
+//! read/write permissions.
+//! - revoke: a peer can revoke a statement if one of the following conditions is met:
+//!     - the revoking peer is the root authority
+//!     - the revoking peer has higher permissions than the issuing peer but at least control permission
+//!     - the revoking peer has permissions on the parent the issuing peer doesn't have access to
+//!     - the revoking peer is the same peer as the issuing peer
 //!
 //! ## Schemas and transforms
+//! // TODO
 //!
 //! ## Future improvements
 //! - compromise recovery: recover from accidental or malicious modification to restore a previous
