@@ -26,7 +26,8 @@
 //! concurrent updates the set of values will converge.
 //!
 //! NOTE: peer identifiers in paths are for declaring authorship and verifying signatures. they
-//! are not required for convergence.
+//! are not required for convergence.  nonces are used to add some randomness to paths to make
+//! them unique.
 //!
 //! ## Byzantine Eventual Consistency
 //! In distributed systems without coordination only some properties are achievable. The strongest
@@ -102,15 +103,31 @@
 //!     - the revoking peer is the same peer as the issuing peer
 //!
 //! ## Schemas and transforms
-//! // TODO
+//! So that applications can evolve in backwards and forwards compatible ways a system of
+//! bidirectional schema transforms called lenses is used. From an ordered list of lenses a
+//! schema is constructed which is used to enforce I-confluent invariants. From a source and
+//! destination ordered lists of lenses data valid in one schema can be transformed into another
+//! schema. This is done by finding the common prefix of those list and applying the reverse of
+//! the lenses of the source schema in reverse order followed by applying the lenses of the target
+//! schema.
+//!
+//! ## Networking
+//! To ensure convergence in the presence of byzantine nodes periodic unjoins are requested from
+//! peers. When requesting an unjoin a `CausalContext` is sent which includes a set of active dots
+//! and a set of expired dots, where a dot is the hash of a path. The server then responds with
+//! a `Causal` which includes a set of active paths not contained in the set active dots or expired
+//! dots and the set of expired paths not contained in the set of expired dots.
+//!
+//! To ensure the correct nodes form a fully connected component we use a point to point broadcast
+//! protocol. This makes the broadcast protocol sybil resistant and prevents eclipse attacks.
 //!
 //! ## Future improvements
 //! - compromise recovery: recover from accidental or malicious modification to restore a previous
 //! state.
 //! - using untrusted servers: currently the ORSet converges even when the paths are encrypted.
 //! However for correct operation we need to also prove that encrypted updates don't violate the
-//! invariants and that the author had permission to make the change. Also Homomorphic transforms
-//! that preserve the zero knowledge proofs will be required.
+//! invariants and that the author had permission to make the change. In additon homomorphic
+//! transforms which preserve the zero knowledge proofs will be necessary.
 mod acl;
 mod crdt;
 mod crypto;
