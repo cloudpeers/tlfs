@@ -10,7 +10,9 @@ use libp2p::request_response::{
 };
 use libp2p::swarm::NetworkBehaviourEventProcess;
 use libp2p::{Multiaddr, NetworkBehaviour};
+use libp2p_broadcast::{Broadcast, BroadcastConfig, BroadcastEvent, Topic};
 use rkyv::{Archive, Deserialize, Serialize};
+use std::convert::TryInto;
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -53,6 +55,14 @@ pub enum SyncResponse {
     Unjoin([u8; 32], Causal),
 }
 
+#[derive(Debug, Archive, Deserialize, Serialize)]
+#[archive_attr(derive(Debug, CheckBytes))]
+#[repr(C)]
+pub struct Delta {
+    schema: [u8; 32],
+    causal: Causal,
+}
+
 #[derive(Clone, Default)]
 pub struct SyncCodec {
     buffer: Vec<u8>,
@@ -70,10 +80,8 @@ impl RequestResponseCodec for SyncCodec {
     {
         self.buffer.clear();
         io.read_to_end(&mut self.buffer).await?;
-        // TODO: doesn't work
-        //Ref::checked(&self.buffer)
-        //    .map_err(|err| io::Error::new(io::ErrorKind::Other, format!("{}", err)))
-        Ok(Ref::new(self.buffer.clone().into()))
+        Ref::checked(&self.buffer)
+            .map_err(|err| io::Error::new(io::ErrorKind::Other, format!("{}", err)))
     }
 
     async fn read_response<T>(&mut self, _: &SyncProtocol, io: &mut T) -> io::Result<Self::Response>
@@ -82,10 +90,8 @@ impl RequestResponseCodec for SyncCodec {
     {
         self.buffer.clear();
         io.read_to_end(&mut self.buffer).await?;
-        // TODO: doesn't work
-        //Ref::checked(&self.buffer)
-        //    .map_err(|err| io::Error::new(io::ErrorKind::Other, format!("{}", err)))
-        Ok(Ref::new(self.buffer.clone().into()))
+        Ref::checked(&self.buffer)
+            .map_err(|err| io::Error::new(io::ErrorKind::Other, format!("{}", err)))
     }
 
     async fn write_request<T>(
@@ -120,18 +126,7 @@ impl RequestResponseCodec for SyncCodec {
 type RequestResponseEvent =
     request_response::RequestResponseEvent<Ref<SyncRequest>, Ref<SyncResponse>>;
 
-pub enum Event {
-    ReqResp(RequestResponseEvent),
-}
-
-impl From<RequestResponseEvent> for Event {
-    fn from(ev: RequestResponseEvent) -> Self {
-        Self::ReqResp(ev)
-    }
-}
-
 #[derive(NetworkBehaviour)]
-#[behaviour(out_event = "Event")]
 pub struct Behaviour {
     #[behaviour(ignore)]
     backend: Backend,
@@ -140,11 +135,12 @@ pub struct Behaviour {
     unjoin_req: FnvHashMap<RequestId, DocId>,
     #[behaviour(ignore)]
     buffer: Vec<(Hash, DocId, PeerId, Causal)>,
+    broadcast: Broadcast,
 }
 
 impl Behaviour {
-    pub fn new(backend: Backend) -> Self {
-        Self {
+    pub fn new(backend: Backend) -> Result<Self> {
+        let mut me = Self {
             backend,
             req: RequestResponse::new(
                 SyncCodec::default(),
@@ -153,7 +149,13 @@ impl Behaviour {
             ),
             unjoin_req: Default::default(),
             buffer: Default::default(),
+            broadcast: Broadcast::new(BroadcastConfig::default()),
+        };
+        for res in me.backend.frontend().docs() {
+            let doc = res?;
+            me.subscribe(&doc);
         }
+        Ok(me)
     }
 
     pub fn poll_backend(&mut self, cx: &mut Context) -> Poll<Result<()>> {
@@ -185,74 +187,118 @@ impl Behaviour {
         self.unjoin_req.insert(id, doc);
         Ok(id)
     }
+
+    pub fn subscribe(&mut self, doc: &DocId) {
+        let topic = Topic::new(doc.as_ref());
+        self.broadcast.subscribe(topic);
+    }
+
+    pub fn broadcast(&mut self, doc: &DocId, causal: Causal) -> Result<()> {
+        let topic = Topic::new(doc.as_ref());
+        let hash = self.backend.frontend().schema_id(doc)?;
+        let delta = Delta {
+            schema: hash.into(),
+            causal,
+        };
+        let delta = Ref::archive(&delta);
+        self.broadcast.broadcast(&topic, delta.as_bytes().into());
+        Ok(())
+    }
+
+    fn inject_causal(
+        &mut self,
+        peer: PeerId,
+        doc: DocId,
+        schema: Hash,
+        causal: Causal,
+    ) -> Result<()> {
+        if self.backend.registry().contains(&schema)? {
+            self.backend.join(&peer, &doc, &schema, causal)?;
+        } else {
+            self.buffer.push((schema, doc, peer, causal));
+            self.request_lenses(&peer, schema);
+        }
+        Ok(())
+    }
+}
+
+impl NetworkBehaviourEventProcess<BroadcastEvent> for Behaviour {
+    fn inject_event(&mut self, ev: BroadcastEvent) {
+        use BroadcastEvent::*;
+        match ev {
+            Subscribed(peer, topic) => {
+                let peer = unwrap!(libp2p_peer_id(&peer));
+                let doc = DocId::new(topic.as_ref().try_into().unwrap());
+                unwrap!(self.request_unjoin(&peer, doc));
+            }
+            Received(peer, topic, msg) => {
+                let peer = unwrap!(libp2p_peer_id(&peer));
+                let doc = DocId::new(topic.as_ref().try_into().unwrap());
+                let delta = unwrap!(unwrap!(Ref::<Delta>::checked(&msg)).to_owned());
+                unwrap!(self.inject_causal(peer, doc, delta.schema.into(), delta.causal));
+            }
+            Unsubscribed(_peer, _topic) => {}
+        }
+    }
 }
 
 impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
     fn inject_event(&mut self, ev: RequestResponseEvent) {
         use request_response::{RequestResponseEvent::*, RequestResponseMessage::*};
         match ev {
-            Message { peer, message } => {
-                match message {
-                    Request {
-                        request_id: _,
-                        request,
-                        channel,
-                    } => {
-                        tracing::debug!("{:?}", request.as_ref());
-                        use ArchivedSyncRequest::*;
-                        match request.as_ref() {
-                            Lenses(hash) => {
-                                let hash = Hash::from(*hash);
-                                if let Some(lenses) = unwrap!(self.backend.registry().lenses(&hash))
-                                {
-                                    let resp = SyncResponse::Lenses(lenses.into());
-                                    let resp = Ref::archive(&resp);
-                                    self.req.send_response(channel, resp).ok();
-                                }
-                            }
-                            Unjoin(doc, ctx) => {
-                                let peer = unwrap!(libp2p_peer_id(&peer));
-                                let causal = unwrap!(self.backend.unjoin(&peer, doc, ctx));
-                                let schema = unwrap!(self.backend.frontend().schema_id(doc));
-                                let resp = SyncResponse::Unjoin(schema.into(), causal);
+            Message { peer, message } => match message {
+                Request {
+                    request_id: _,
+                    request,
+                    channel,
+                } => {
+                    tracing::debug!("{:?}", request.as_ref());
+                    use ArchivedSyncRequest::*;
+                    match request.as_ref() {
+                        Lenses(hash) => {
+                            let hash = Hash::from(*hash);
+                            if let Some(lenses) = unwrap!(self.backend.registry().lenses(&hash)) {
+                                let resp = SyncResponse::Lenses(lenses.into());
                                 let resp = Ref::archive(&resp);
                                 self.req.send_response(channel, resp).ok();
                             }
                         }
-                    }
-                    Response {
-                        request_id,
-                        response,
-                    } => {
-                        tracing::debug!("{:?}", response.as_ref());
-                        use ArchivedSyncResponse::*;
-                        match response.as_ref() {
-                            Lenses(lenses) => {
-                                let schema = unwrap!(self.backend.registry().register(lenses));
-                                for i in 0..self.buffer.len() {
-                                    if self.buffer[i].0 == schema {
-                                        let (schema, doc, peer, causal) = self.buffer.remove(i);
-                                        unwrap!(self.backend.join(&peer, &doc, &schema, causal));
-                                    }
-                                }
-                            }
-                            Unjoin(schema, causal) => {
-                                let schema = Hash::from(*schema);
-                                let peer = unwrap!(libp2p_peer_id(&peer));
-                                // TODO: don't deserialize
-                                let causal = unwrap!(causal.deserialize(&mut rkyv::Infallible));
-                                let doc = self.unjoin_req.remove(&request_id).unwrap();
-                                if unwrap!(self.backend.registry().contains(&schema)) {
-                                    unwrap!(self.backend.join(&peer, &doc, &schema, causal));
-                                } else {
-                                    self.buffer.push((schema, doc, peer, causal));
-                                    self.request_lenses(&peer, schema);
-                                }
-                            }
+                        Unjoin(doc, ctx) => {
+                            let peer = unwrap!(libp2p_peer_id(&peer));
+                            let causal = unwrap!(self.backend.unjoin(&peer, doc, ctx));
+                            let schema = unwrap!(self.backend.frontend().schema_id(doc));
+                            let resp = SyncResponse::Unjoin(schema.into(), causal);
+                            let resp = Ref::archive(&resp);
+                            self.req.send_response(channel, resp).ok();
                         }
                     }
                 }
-            }
+                Response {
+                    request_id,
+                    response,
+                } => {
+                    tracing::debug!("{:?}", response.as_ref());
+                    use ArchivedSyncResponse::*;
+                    match response.as_ref() {
+                        Lenses(lenses) => {
+                            let schema = unwrap!(self.backend.registry().register(lenses));
+                            for i in 0..self.buffer.len() {
+                                if self.buffer[i].0 == schema {
+                                    let (schema, doc, peer, causal) = self.buffer.remove(i);
+                                    unwrap!(self.backend.join(&peer, &doc, &schema, causal));
+                                }
+                            }
+                        }
+                        Unjoin(schema, causal) => {
+                            let schema = Hash::from(*schema);
+                            let peer = unwrap!(libp2p_peer_id(&peer));
+                            let causal = unwrap!(causal.deserialize(&mut rkyv::Infallible));
+                            let doc = self.unjoin_req.remove(&request_id).unwrap();
+                            unwrap!(self.inject_causal(peer, doc, schema, causal));
+                        }
+                    }
+                }
+            },
             OutboundFailure {
                 peer: _,
                 request_id,
