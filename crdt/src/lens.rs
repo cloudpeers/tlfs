@@ -1,5 +1,5 @@
-use crate::crdt::DotStore;
-use crate::{Crdt, DocId, PrimitiveKind, Prop, Schema};
+use crate::path::{Path, PathBuf, Segment};
+use crate::schema::{PrimitiveKind, Prop, Schema};
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
 use rkyv::ser::serializers::AllocSerializer;
@@ -227,13 +227,59 @@ impl<'a> LensRef<'a> {
         Ok(())
     }
 
-    pub fn transform_dotstore(&self, _store: &mut DotStore) {
-        // TODO
-    }
-
-    pub fn transform_crdt(&self, _doc: &DocId, _store: &Crdt) -> Result<()> {
-        // TODO
-        Ok(())
+    pub fn transform_path(&self, path: &[Segment]) -> Vec<Segment> {
+        match self {
+            Self::Make(_) => {}
+            Self::Destroy(_) => return vec![],
+            Self::AddProperty(_) => {}
+            Self::RemoveProperty(prop) => {
+                if path[0].prim_str() == Some(prop.as_str()) {
+                    return vec![];
+                }
+            }
+            Self::RenameProperty(from, to) => {
+                if path[0].prim_str() == Some(from.as_str()) {
+                    let mut p2 = vec![Segment::Str(to.to_string())];
+                    p2.extend(path[1..].to_vec());
+                    return p2;
+                }
+            }
+            Self::HoistProperty(host, target) => {
+                if path[0].prim_str() == Some(host.as_str())
+                    && path[1].prim_str() == Some(target.as_str())
+                {
+                    return path[1..].to_vec();
+                }
+            }
+            Self::PlungeProperty(host, target) => {
+                if path[0].prim_str() == Some(target.as_str()) {
+                    let mut p2 = vec![Segment::Str(host.to_string())];
+                    p2.extend(path[1..].to_vec());
+                    return p2;
+                }
+            }
+            Self::LensIn(rev, key, lens) => {
+                if path[0].prim_str() == Some(key.as_str()) {
+                    let path = lens.to_ref().maybe_reverse(*rev).transform_path(&path[1..]);
+                    if path.is_empty() {
+                        return path;
+                    }
+                    let mut p2 = vec![Segment::Str(key.to_string())];
+                    p2.extend(path);
+                    return p2;
+                }
+            }
+            Self::LensMapValue(rev, lens) => {
+                let path = lens.to_ref().maybe_reverse(*rev).transform_path(&path[1..]);
+                if path.is_empty() {
+                    return path;
+                }
+                let mut p2 = vec![path[0].clone()];
+                p2.extend(path);
+                return p2;
+            }
+        }
+        path.to_vec()
     }
 }
 
@@ -285,25 +331,28 @@ impl ArchivedLenses {
         c
     }
 
-    pub fn transform_dotstore(&self, store: &mut DotStore, target: &ArchivedLenses) {
+    pub fn transform_path(&self, path: Path, target: &ArchivedLenses) -> Option<PathBuf> {
+        let mut segments: Vec<Segment> = path.child().unwrap().into_iter().collect();
         for lens in self.transform(target) {
-            tracing::info!("{:?}", lens);
-            lens.transform_dotstore(store);
+            segments = lens.transform_path(&segments);
+            if segments.is_empty() {
+                return None;
+            }
         }
-    }
-
-    pub fn transform_crdt(&self, doc: &DocId, crdt: &Crdt, target: &ArchivedLenses) -> Result<()> {
-        for lens in self.transform(target) {
-            lens.transform_crdt(doc, crdt)?;
-        }
-        Ok(())
+        let doc = path.first().unwrap().doc().unwrap();
+        let mut path = PathBuf::new();
+        path.doc(&doc);
+        path.extend(segments.into_iter().collect::<PathBuf>().as_path());
+        Some(path)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::props::*;
-    use crate::{DocId, Ref};
+    use crate::registry::EMPTY_LENSES;
+    use crate::util::Ref;
     use proptest::prelude::*;
 
     proptest! {
@@ -318,24 +367,13 @@ mod tests {
 
         #[test]
         fn transform_preserves_validity((lens, mut schema, mut causal) in lens_schema_and_causal()) {
-            let lens = Ref::archive(&lens);
+            let from = Ref::<Lenses>::new(EMPTY_LENSES.as_ref().into());
+            let to = Ref::archive(&Lenses::new(vec![lens]));
+            let lens = to.as_ref().lenses()[0].to_ref();
             prop_assume!(validate(&schema, &causal));
-            prop_assume!(lens.as_ref().to_ref().transform_schema(&mut schema).is_ok());
-            lens.as_ref().to_ref().transform_dotstore(&mut causal.store);
+            prop_assume!(lens.transform_schema(&mut schema).is_ok());
+            causal.transform(from.as_ref(), to.as_ref());
             prop_assert!(validate(&schema, &causal));
-        }
-
-        #[test]
-        #[ignore]
-        fn crdt_transform((lens, schema, mut causal) in lens_schema_and_causal()) {
-            let doc = DocId::new([0; 32]);
-            let lens = Ref::archive(&lens);
-            prop_assume!(validate(&schema, &causal));
-            let crdt = causal_to_crdt(&doc, &causal);
-            lens.as_ref().to_ref().transform_crdt(&doc, &crdt).unwrap();
-            let causal2 = crdt_to_causal(&doc, &crdt);
-            lens.as_ref().to_ref().transform_dotstore(&mut causal.store);
-            assert_eq!(causal, causal2);
         }
     }
 }

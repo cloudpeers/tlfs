@@ -30,7 +30,7 @@ impl fmt::Debug for Fraction {
 impl fmt::Display for Fraction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if !self.0.is_empty() {
-            write!(f, "0x0.{}", hex::encode(&self.0))
+            write!(f, "0x0.{}", base64::encode(&self.0))
         } else {
             write!(f, "0x0")
         }

@@ -1,10 +1,20 @@
-use crate::crdt::DotStore;
-use crate::{
-    Causal, CausalContext, Crdt, DocId, Kind, Lens, Lenses, PathBuf, PeerId, Primitive,
-    PrimitiveKind, Prop, Ref, Schema,
-};
+use crate::acl::Acl;
+use crate::crdt::{Causal, CausalContext, Crdt, DotStore};
+use crate::id::{DocId, PeerId};
+use crate::lens::{Kind, Lens};
+use crate::path::PathBuf;
+use crate::schema::{PrimitiveKind, Prop, Schema};
+use crate::util::Ref;
 use proptest::collection::SizeRange;
 use proptest::prelude::*;
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub enum Primitive {
+    Bool(bool),
+    U64(u64),
+    I64(i64),
+    Str(String),
+}
 
 pub fn arb_prop() -> impl Strategy<Value = Prop> {
     "[a-z]"
@@ -12,19 +22,6 @@ pub fn arb_prop() -> impl Strategy<Value = Prop> {
 
 pub fn arb_peer_id() -> impl Strategy<Value = PeerId> {
     (0u8..5).prop_map(|i| PeerId::new([i; 32]))
-}
-
-pub fn arb_doc_id() -> impl Strategy<Value = DocId> {
-    (0u8..5).prop_map(|i| DocId::new([i; 32]))
-}
-
-pub fn arb_primitive() -> impl Strategy<Value = Primitive> {
-    prop_oneof![
-        any::<bool>().prop_map(Primitive::Bool),
-        any::<u64>().prop_map(Primitive::U64),
-        any::<i64>().prop_map(Primitive::I64),
-        ".*".prop_map(Primitive::Str),
-    ]
 }
 
 pub fn arb_primitive_kind() -> impl Strategy<Value = PrimitiveKind> {
@@ -202,7 +199,7 @@ pub fn arb_causal_for_schema(schema: Schema) -> impl Strategy<Value = Causal> {
 
 pub fn validate(schema: &Schema, value: &Causal) -> bool {
     let schema = Ref::archive(schema);
-    schema.as_ref().validate(value.store())
+    schema.as_ref().validate(value)
 }
 
 prop_compose! {
@@ -296,52 +293,6 @@ pub fn arb_lens_for_schema(s: &Schema) -> BoxedStrategy<Lens> {
         .boxed()
 }
 
-fn arb_lenses_inner(
-    lenses: Vec<Lens>,
-    schema: Schema,
-) -> impl Strategy<Value = (Vec<Lens>, Schema)> {
-    arb_lens_for_schema(&schema).prop_flat_map(move |lens| {
-        let mut lenses = lenses.clone();
-        let mut schema = schema.clone();
-        let alens = Ref::archive(&lens);
-        alens
-            .as_ref()
-            .to_ref()
-            .transform_schema(&mut schema)
-            .unwrap();
-        lenses.push(lens);
-        (Just(lenses), Just(schema))
-    })
-}
-
-fn arb_n_lenses(n: i32) -> BoxedStrategy<Lenses> {
-    if n < 1 {
-        return Just(Lenses::new(vec![Lens::Make(Kind::Struct)])).boxed();
-    }
-    let mut inner = arb_lenses_inner(Vec::with_capacity(n as usize), Schema::Null).boxed();
-    for _ in 1..n {
-        inner = inner
-            .prop_flat_map(|(lenses, schema)| arb_lenses_inner(lenses, schema))
-            .boxed();
-    }
-    inner.prop_map(|(lenses, _)| Lenses::new(lenses)).boxed()
-}
-
-prop_compose! {
-    pub fn arb_lenses()(n in 0..25)(lenses in arb_n_lenses(n)) -> Lenses {
-        lenses
-    }
-}
-
-fn lenses_to_schema(lenses: &Lenses) -> Schema {
-    let lenses = Ref::archive(lenses);
-    let mut schema = Schema::Null;
-    for lens in lenses.as_ref().lenses() {
-        lens.to_ref().transform_schema(&mut schema).unwrap();
-    }
-    schema
-}
-
 prop_compose! {
     pub fn lens_and_schema()
         (schema in arb_schema())
@@ -360,15 +311,6 @@ prop_compose! {
     }
 }
 
-prop_compose! {
-    pub fn lenses_and_causal()
-        (lenses in arb_lenses())
-        (lenses in Just(lenses.clone()), crdt in arb_causal_for_schema(lenses_to_schema(&lenses))) -> (Lenses, Causal)
-    {
-        (lenses, crdt)
-    }
-}
-
 pub fn join(c: &Causal, o: &Causal) -> Causal {
     let mut c = c.clone();
     c.join(o);
@@ -377,11 +319,11 @@ pub fn join(c: &Causal, o: &Causal) -> Causal {
 
 pub fn causal_to_crdt(doc: &DocId, causal: &Causal) -> Crdt {
     let db = sled::Config::new().temporary(true).open().unwrap();
-    let state = db.open_tree("state").unwrap();
+    let store = db.open_tree("store").unwrap();
     let expired = db.open_tree("expired").unwrap();
-    let acl = crate::Acl::new(db.open_tree("acl").unwrap());
-    let crdt = Crdt::new(state, expired, acl);
-    crdt.join(&(*doc).into(), doc, causal).unwrap();
+    let acl = Acl::new(db.open_tree("acl").unwrap());
+    let crdt = Crdt::new(store, expired, acl);
+    crdt.join(&(*doc).into(), causal).unwrap();
     crdt
 }
 

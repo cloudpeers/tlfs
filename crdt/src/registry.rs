@@ -1,4 +1,6 @@
-use crate::{Lenses, Ref, Schema};
+use crate::lens::Lenses;
+use crate::schema::Schema;
+use crate::util::Ref;
 use anyhow::{anyhow, Result};
 pub use blake3::Hash;
 use rkyv::validation::validators::check_archived_root;

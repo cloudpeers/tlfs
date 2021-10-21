@@ -1,10 +1,13 @@
-use crate::{DocId, Dot, PeerId, Policy, Ref};
+use crate::acl::Policy;
+use crate::dotset::Dot;
+use crate::id::{DocId, PeerId};
+use crate::util::Ref;
 use anyhow::Context;
-use blake3::Hash;
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::borrow::Borrow;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryInto;
+use std::iter::FromIterator;
 
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Archive, Deserialize, Serialize,
@@ -12,7 +15,6 @@ use std::convert::{TryFrom, TryInto};
 #[archive(as = "SegmentType")]
 #[repr(u8)]
 pub enum SegmentType {
-    Schema,
     Doc,
     Peer,
     Nonce,
@@ -22,6 +24,7 @@ pub enum SegmentType {
     Str,
     Policy,
     Dot,
+    // TODO: maybe just make a distinct `Position` member
     Slice,
 }
 
@@ -29,7 +32,6 @@ impl SegmentType {
     fn new(u: u8) -> Option<Self> {
         use SegmentType::*;
         match u {
-            u if u == Schema as u8 => Some(Schema),
             u if u == Doc as u8 => Some(Doc),
             u if u == Peer as u8 => Some(Peer),
             u if u == Nonce as u8 => Some(Nonce),
@@ -45,46 +47,38 @@ impl SegmentType {
     }
 }
 
-#[derive(Eq, PartialEq)]
-pub enum Segment<'a> {
-    Schema(Hash),
+#[derive(Clone, Eq, PartialEq)]
+pub enum Segment {
     Doc(DocId),
     Peer(PeerId),
     Nonce(u64),
     Bool(bool),
     U64(u64),
     I64(i64),
-    Str(&'a str),
+    Str(String),
     Policy(Policy),
     Dot(Dot),
-    Slice(&'a [u8]),
+    Slice(Vec<u8>),
 }
 
-impl<'a> Segment<'a> {
-    fn new(ty: SegmentType, data: &'a [u8]) -> Self {
+impl Segment {
+    fn new(ty: SegmentType, data: &[u8]) -> Self {
         match ty {
-            SegmentType::Schema => Self::Schema(Hash::from(<[u8; 32]>::try_from(data).unwrap())),
             SegmentType::Doc => Self::Doc(DocId::new(data.try_into().unwrap())),
             SegmentType::Peer => Self::Peer(PeerId::new(data.try_into().unwrap())),
             SegmentType::Nonce => Self::Nonce(u64::from_be_bytes(data.try_into().unwrap())),
             SegmentType::Bool => Self::Bool(data[0] > 0),
             SegmentType::U64 => Self::U64(u64::from_be_bytes(data.try_into().unwrap())),
             SegmentType::I64 => Self::I64(i64::from_be_bytes(data.try_into().unwrap())),
-            SegmentType::Str => Self::Str(unsafe { std::str::from_utf8_unchecked(data) }),
+            SegmentType::Str => {
+                Self::Str(unsafe { std::str::from_utf8_unchecked(data) }.to_string())
+            }
             SegmentType::Policy => {
                 let policy = Ref::<Policy>::new(data.into());
                 Self::Policy(policy.to_owned().unwrap())
             }
             SegmentType::Dot => Self::Dot(Dot::new(data.try_into().unwrap())),
-            SegmentType::Slice => Self::Slice(data),
-        }
-    }
-
-    pub fn schema(self) -> Option<Hash> {
-        if let Segment::Schema(schema) = self {
-            Some(schema)
-        } else {
-            None
+            SegmentType::Slice => Self::Slice(data.to_vec()),
         }
     }
 
@@ -136,7 +130,15 @@ impl<'a> Segment<'a> {
         }
     }
 
-    pub fn prim_str(self) -> Option<&'a str> {
+    pub fn prim_str(&self) -> Option<&str> {
+        if let Segment::Str(s) = self {
+            Some(s.as_str())
+        } else {
+            None
+        }
+    }
+
+    pub fn prim_string(self) -> Option<String> {
         if let Segment::Str(s) = self {
             Some(s)
         } else {
@@ -160,7 +162,7 @@ impl<'a> Segment<'a> {
         }
     }
 
-    pub fn slice(self) -> Option<&'a [u8]> {
+    pub fn slice(self) -> Option<Vec<u8>> {
         if let Segment::Slice(slice) = self {
             Some(slice)
         } else {
@@ -169,10 +171,9 @@ impl<'a> Segment<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for Segment<'a> {
+impl std::fmt::Debug for Segment {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::Schema(s) => write!(f, "Schema({})", hex::encode(&s.as_bytes()[..2])),
             Self::Doc(s) => write!(f, "{:?}", s),
             Self::Peer(s) => write!(f, "{:?}", s),
             Self::Nonce(s) => write!(f, "Nonce({})", s),
@@ -182,7 +183,7 @@ impl<'a> std::fmt::Debug for Segment<'a> {
             Self::Str(s) => write!(f, "{:?}", s),
             Self::Policy(s) => write!(f, "{:?}", s),
             Self::Dot(s) => write!(f, "{:?}", s),
-            Self::Slice(s) => write!(f, "Slice({})", hex::encode(s)),
+            Self::Slice(s) => write!(f, "Slice({})", base64::encode(s)),
         }
     }
 }
@@ -216,24 +217,19 @@ impl PathBuf {
         self.0.extend(&[ty as u8]);
     }
 
-    pub fn push_segment(&mut self, segment: &Segment) {
+    pub fn push_segment(&mut self, segment: Segment) {
         match segment {
-            Segment::Schema(d) => self.schema(d),
-            Segment::Doc(d) => self.doc(d),
-            Segment::Peer(d) => self.peer(d),
-            Segment::Nonce(d) => self.nonce(*d),
-            Segment::Bool(d) => self.prim_bool(*d),
-            Segment::U64(d) => self.prim_u64(*d),
-            Segment::I64(d) => self.prim_i64(*d),
-            Segment::Str(d) => self.prim_str(d),
-            Segment::Policy(d) => self.policy(d),
-            Segment::Dot(d) => self.dot(d),
+            Segment::Doc(d) => self.doc(&d),
+            Segment::Peer(d) => self.peer(&d),
+            Segment::Nonce(d) => self.nonce(d),
+            Segment::Bool(d) => self.prim_bool(d),
+            Segment::U64(d) => self.prim_u64(d),
+            Segment::I64(d) => self.prim_i64(d),
+            Segment::Str(d) => self.prim_str(&*d),
+            Segment::Policy(d) => self.policy(&d),
+            Segment::Dot(d) => self.dot(&d),
             Segment::Slice(d) => self.slice(d),
         }
-    }
-
-    pub fn schema(&mut self, schema: &Hash) {
-        self.push(SegmentType::Schema, schema.as_bytes());
     }
 
     pub fn doc(&mut self, doc: &DocId) {
@@ -273,8 +269,8 @@ impl PathBuf {
         self.push(SegmentType::Dot, dot.as_ref());
     }
 
-    pub fn slice(&mut self, data: &[u8]) {
-        self.push(SegmentType::Slice, data);
+    pub fn slice(&mut self, data: Vec<u8>) {
+        self.push(SegmentType::Slice, &data[..]);
     }
 
     pub fn pop(&mut self) {
@@ -314,6 +310,19 @@ impl AsRef<[u8]> for PathBuf {
 impl ArchivedPathBuf {
     pub fn as_path(&self) -> Path<'_> {
         Path(&self.0)
+    }
+}
+
+impl FromIterator<Segment> for PathBuf {
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = Segment>,
+    {
+        let mut path = PathBuf::new();
+        for seg in iter.into_iter() {
+            path.push_segment(seg);
+        }
+        path
     }
 }
 
@@ -363,7 +372,7 @@ impl<'a> Path<'a> {
         Some(Segment::new(ty, &self.0[(end - 3 - len)..(end - 3)]))
     }
 
-    pub fn first(&self) -> Option<Segment<'a>> {
+    pub fn first(&self) -> Option<Segment> {
         let len = self.first_len()?;
         let ty = SegmentType::new(self.0[0])?;
         Some(Segment::new(ty, &self.0[3..(len + 3)]))
@@ -374,7 +383,7 @@ impl<'a> Path<'a> {
         Some(Path(&self.0[(len + 6)..]))
     }
 
-    pub fn parent(&self) -> Option<Path> {
+    pub fn parent(&self) -> Option<Path<'a>> {
         let len = self.last_len()?;
         let end = self.0.len();
         Some(Path(&self.0[..(end - len - 6)]))
@@ -385,28 +394,29 @@ impl<'a> Path<'a> {
     }
 
     /// Returns a path that, when joined onto `base`, yields `self`.
-    pub fn strip_prefix(&self, base: Self) -> anyhow::Result<Self> {
-        iter_after(*self, base).context("StripPrefixError")
+    pub fn strip_prefix(&self, base: Self) -> anyhow::Result<PathBuf> {
+        Ok(iter_after(self.clone().into_iter(), base.into_iter())
+            .context("StripPrefixError")?
+            .collect())
+    }
+
+    pub fn split_first(&self) -> Option<(Segment, Path<'a>)> {
+        let first = self.first()?;
+        let child = self.child()?;
+        Some((first, child))
+    }
+
+    pub fn split_last(&self) -> Option<(Path<'a>, Segment)> {
+        let parent = self.parent()?;
+        let last = self.last()?;
+        Some((parent, last))
     }
 }
 
-impl<'a> Iterator for Path<'a> {
-    type Item = Segment<'a>;
-
-    fn next(&mut self) -> Option<Segment<'a>> {
-        let r = self.first();
-        if let Some(c) = self.child() {
-            *self = c;
-        }
-
-        r
-    }
-}
-
-fn iter_after<'a, 'b, I, J>(mut iter: I, mut prefix: J) -> Option<I>
+fn iter_after<I, J>(mut iter: I, mut prefix: J) -> Option<I>
 where
-    I: Iterator<Item = Segment<'a>> + Clone,
-    J: Iterator<Item = Segment<'b>>,
+    I: Iterator<Item = Segment> + Clone,
+    J: Iterator<Item = Segment>,
 {
     loop {
         let mut iter_next = iter.clone();
@@ -418,6 +428,31 @@ where
             (None, Some(_)) => return None,
         }
         iter = iter_next;
+    }
+}
+
+#[derive(Clone)]
+pub struct PathIter<'a>(Path<'a>);
+
+impl<'a> Iterator for PathIter<'a> {
+    type Item = Segment;
+
+    fn next(&mut self) -> Option<Segment> {
+        if let Some((seg, path)) = self.0.split_first() {
+            self.0 = path;
+            Some(seg)
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a> IntoIterator for Path<'a> {
+    type IntoIter = PathIter<'a>;
+    type Item = Segment;
+
+    fn into_iter(self) -> Self::IntoIter {
+        PathIter(self)
     }
 }
 
@@ -461,14 +496,14 @@ mod tests {
         p.prim_i64(43);
         p.prim_str("c");
 
-        let mut path = p.as_path();
+        let mut path = p.as_path().into_iter();
         for i in [
             Segment::Doc(DocId::new([0; 32])),
-            Segment::Str("a"),
+            Segment::Str("a".to_string()),
             Segment::I64(42),
-            Segment::Str("b"),
+            Segment::Str("b".to_string()),
             Segment::I64(43),
-            Segment::Str("c"),
+            Segment::Str("c".to_string()),
         ] {
             assert_eq!(path.next().unwrap(), i);
         }
@@ -490,10 +525,15 @@ mod tests {
         base.prim_str("a");
         base.prim_i64(42);
 
-        let mut relative = p.as_path().strip_prefix(base.as_path()).unwrap();
-        for i in [Segment::Str("b"), Segment::I64(43), Segment::Str("c")] {
-            assert_eq!(relative.next().unwrap(), i);
+        let relative = p.as_path().strip_prefix(base.as_path()).unwrap();
+        let mut iter = relative.as_path().into_iter();
+        for i in [
+            Segment::Str("b".to_string()),
+            Segment::I64(43),
+            Segment::Str("c".to_string()),
+        ] {
+            assert_eq!(iter.next().unwrap(), i);
         }
-        assert!(relative.next().is_none());
+        assert!(iter.next().is_none());
     }
 }

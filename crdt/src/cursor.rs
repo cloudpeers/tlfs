@@ -1,30 +1,42 @@
-use crate::{
-    fraction::Fraction, Actor, ArchivedSchema, Can, Causal, Crdt, DocId, Dot, DotSet, DotStore,
-    Path, PathBuf, PeerId, Permission, Policy, PrimitiveKind, Schema,
-};
+use crate::acl::{Actor, Can, Permission, Policy};
+use crate::crdt::{Causal, Crdt, DotStore};
+use crate::crypto::Keypair;
+use crate::dotset::Dot;
+use crate::fraction::Fraction;
+use crate::id::{DocId, PeerId};
+use crate::path::{Path, PathBuf};
+use crate::schema::{ArchivedSchema, PrimitiveKind, Schema};
+use crate::subscriber::Subscriber;
 use anyhow::{anyhow, Context, Result};
 use rkyv::Archived;
 
 #[derive(Clone)]
 pub struct Cursor<'a> {
-    id: DocId,
+    key: Keypair,
     peer_id: PeerId,
+    id: DocId,
     schema: &'a Archived<Schema>,
     crdt: &'a Crdt,
     path: PathBuf,
 }
 
 impl<'a> Cursor<'a> {
-    pub fn new(id: DocId, peer_id: PeerId, schema: &'a Archived<Schema>, crdt: &'a Crdt) -> Self {
+    pub fn new(key: Keypair, id: DocId, schema: &'a Archived<Schema>, crdt: &'a Crdt) -> Self {
         let mut path = PathBuf::new();
         path.doc(&id);
         Self {
+            key,
+            peer_id: key.peer_id(),
             id,
             schema,
-            peer_id,
             path,
             crdt,
         }
+    }
+
+    /// Subscribe to a path.
+    pub fn subscribe(&self) -> Subscriber {
+        self.crdt.watch_path(self.path.as_path())
     }
 
     /// Checks permissions.
@@ -37,12 +49,11 @@ impl<'a> Cursor<'a> {
         if let ArchivedSchema::Flag = &self.schema {
             Ok(self
                 .crdt
-                .scan_prefix(self.path.as_path())
+                .scan_path(self.path.as_path())
                 .find_map(|r| match r {
                     Ok(path) => Some(Ok(Path::new(&path).last()?.nonce()?)),
                     Err(err) => Some(Err(err)),
                 })
-                .transpose()?
                 .is_some())
         } else {
             Err(anyhow!("not a flag"))
@@ -54,7 +65,7 @@ impl<'a> Cursor<'a> {
         if let ArchivedSchema::Reg(PrimitiveKind::Bool) = &self.schema {
             Ok(self
                 .crdt
-                .scan_prefix(self.path.as_path())
+                .scan_path(self.path.as_path())
                 .filter_map(|r| match r {
                     Ok(path) => Some(Ok(Path::new(&path).last()?.prim_bool()?)),
                     Err(err) => Some(Err(err)),
@@ -69,7 +80,7 @@ impl<'a> Cursor<'a> {
         if let ArchivedSchema::Reg(PrimitiveKind::U64) = &self.schema {
             Ok(self
                 .crdt
-                .scan_prefix(self.path.as_path())
+                .scan_path(self.path.as_path())
                 .filter_map(|r| match r {
                     Ok(path) => Some(Ok(Path::new(&path).last()?.prim_u64()?)),
                     Err(err) => Some(Err(err)),
@@ -84,7 +95,7 @@ impl<'a> Cursor<'a> {
         if let ArchivedSchema::Reg(PrimitiveKind::I64) = &self.schema {
             Ok(self
                 .crdt
-                .scan_prefix(self.path.as_path())
+                .scan_path(self.path.as_path())
                 .filter_map(|r| match r {
                     Ok(path) => Some(Ok(Path::new(&path).last()?.prim_i64()?)),
                     Err(err) => Some(Err(err)),
@@ -99,7 +110,7 @@ impl<'a> Cursor<'a> {
         if let ArchivedSchema::Reg(PrimitiveKind::Str) = &self.schema {
             Ok(self
                 .crdt
-                .scan_prefix(self.path.as_path())
+                .scan_path(self.path.as_path())
                 .filter_map(|r| match r {
                     Ok(path) => Some(Ok(Path::new(&path).last()?.prim_str()?.to_owned())),
                     Err(err) => Some(Err(err)),
@@ -213,13 +224,13 @@ impl<'a> Cursor<'a> {
         if !self.can(&self.peer_id, Permission::Write)? {
             return Err(anyhow!("unauthorized"));
         }
-        let mut expired = DotSet::new();
+        let mut expired = DotStore::new();
         // add all dots to be tombstoned into the context
-        for r in self.crdt.scan_prefix(self.path.as_path()) {
+        for r in self.crdt.scan_path(self.path.as_path()) {
             let k = r?;
             let path = Path::new(&k);
             if path.last().unwrap().nonce().is_some() {
-                expired.insert(path.dot());
+                expired.insert(path.to_owned());
             }
         }
         Ok(Causal {
@@ -228,20 +239,20 @@ impl<'a> Cursor<'a> {
         })
     }
 
-    fn assign(&self, kind: PrimitiveKind) -> Result<(PathBuf, DotSet)> {
+    fn assign(&self, kind: PrimitiveKind) -> Result<(PathBuf, DotStore)> {
         if !self.can(&self.peer_id, Permission::Write)? {
             return Err(anyhow!("unauthorized"));
         }
         if *self.schema != ArchivedSchema::Reg(kind) {
             return Err(anyhow!("not a Reg<{:?}>", kind));
         }
-        let mut expired = DotSet::new();
+        let mut expired = DotStore::new();
         // add all dots to be tombstoned into the context
-        for r in self.crdt.scan_prefix(self.path.as_path()) {
+        for r in self.crdt.scan_path(self.path.as_path()) {
             let k = r?;
             let path = Path::new(&k);
             if path.last().unwrap().policy().is_none() {
-                expired.insert(path.dot());
+                expired.insert(path.to_owned());
             }
         }
         let mut path = self.path.to_owned();
@@ -291,12 +302,11 @@ impl<'a> Cursor<'a> {
         if !self.can(&self.peer_id, Permission::Write)? {
             return Err(anyhow!("unauthorized"));
         }
-        let mut expired = DotSet::new();
-        for r in self.crdt.scan_prefix(self.path.as_path()) {
+        let mut expired = DotStore::new();
+        for r in self.crdt.scan_path(self.path.as_path()) {
             let k = r?;
             let path = Path::new(&k);
-            // TODO: policy?
-            expired.insert(path.dot());
+            expired.insert(path.to_owned());
         }
         Ok(Causal {
             store: DotStore::new(),
@@ -324,7 +334,7 @@ impl<'a> Cursor<'a> {
         store.insert(path);
         Ok(Causal {
             store,
-            expired: DotSet::new(),
+            expired: DotStore::new(),
         })
     }
 
@@ -351,6 +361,7 @@ impl<'a> Cursor<'a> {
 
 #[derive(Clone)]
 pub struct ArrayCursor<'a> {
+    key: Keypair,
     id: DocId,
     peer_id: PeerId,
     schema: &'a Archived<Schema>,
@@ -376,7 +387,7 @@ impl<'a> ArrayCursor<'a> {
 
     fn value(&self) -> PathBuf {
         let mut p = self.value_path();
-        p.slice(self.pos.as_bytes());
+        p.slice(self.pos.as_bytes().to_vec());
         p.prim_u64(self.uid);
         p
     }
@@ -391,25 +402,27 @@ impl<'a> ArrayCursor<'a> {
         let mut p = cursor.path.clone();
         p.prim_str(array::ARRAY_VALUES);
         // TODO: use sled's size hint
-        let len = cursor.crdt.scan_prefix(p.as_path()).count();
-        let mut iter = cursor.crdt.scan_prefix(p.as_path());
+        let len = cursor.crdt.scan_path(p.as_path()).count();
+        let mut iter = cursor.crdt.scan_path(p.as_path());
 
         ix = ix.min(len);
         let (pos, uid) = if let Some(entry) = iter.nth(ix) {
             let entry = entry?;
             let p_c = cursor.path.clone();
-            let data = array::ArrayValue::from_path(Path::new(&entry).strip_prefix(p_c.as_path())?)
-                .context("Reading array data")?;
+            let data = array::ArrayValue::from_path(
+                Path::new(&entry).strip_prefix(p_c.as_path())?.as_path(),
+            )
+            .context("Reading array data")?;
             (data.pos, data.uid)
         } else {
             // No entry :-(
             let (left, right) = match ix.checked_sub(1) {
                 Some(s) => {
                     let p_c = cursor.path.clone();
-                    let mut iter = cursor.crdt.scan_prefix(p.as_path()).skip(s).map(move |p| {
+                    let mut iter = cursor.crdt.scan_path(p.as_path()).skip(s).map(move |p| {
                         p.and_then(|iv| {
                             let meta = array::ArrayValue::from_path(
-                                Path::new(&iv).strip_prefix(p_c.as_path())?,
+                                Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
                             )?;
                             Ok(meta.pos)
                         })
@@ -418,10 +431,10 @@ impl<'a> ArrayCursor<'a> {
                 }
                 None => {
                     let p_c = cursor.path.clone();
-                    let mut iter = cursor.crdt.scan_prefix(p.as_path()).map(move |p| {
+                    let mut iter = cursor.crdt.scan_path(p.as_path()).map(move |p| {
                         p.and_then(|iv| {
                             let meta = array::ArrayValue::from_path(
-                                Path::new(&iv).strip_prefix(p_c.as_path())?,
+                                Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
                             )?;
                             Ok(meta.pos)
                         })
@@ -441,6 +454,7 @@ impl<'a> ArrayCursor<'a> {
         };
 
         Ok(Self {
+            key: cursor.key,
             id: cursor.id,
             peer_id: cursor.peer_id,
             schema: cursor.schema,
@@ -460,7 +474,7 @@ impl<'a> ArrayCursor<'a> {
         let new_pos = {
             let value_path = self.value_path();
             // TODO: use sled's size hint
-            let len = self.crdt.scan_prefix(value_path.as_path()).count();
+            let len = self.crdt.scan_path(value_path.as_path()).count();
 
             to = to.min(len);
             let (left, right) = match to.checked_sub(1) {
@@ -468,12 +482,12 @@ impl<'a> ArrayCursor<'a> {
                     let p_c = self.base.clone();
                     let mut iter =
                         self.crdt
-                            .scan_prefix(value_path.as_path())
+                            .scan_path(value_path.as_path())
                             .skip(s)
                             .map(move |p| {
                                 p.and_then(|iv| {
                                     let meta = array::ArrayValue::from_path(
-                                        Path::new(&iv).strip_prefix(p_c.as_path())?,
+                                        Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
                                     )?;
                                     Ok(meta.pos)
                                 })
@@ -482,10 +496,10 @@ impl<'a> ArrayCursor<'a> {
                 }
                 None => {
                     let p_c = self.base.clone();
-                    let mut iter = self.crdt.scan_prefix(value_path.as_path()).map(move |p| {
+                    let mut iter = self.crdt.scan_path(value_path.as_path()).map(move |p| {
                         p.and_then(|iv| {
                             let meta = array::ArrayValue::from_path(
-                                Path::new(&iv).strip_prefix(p_c.as_path())?,
+                                Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
                             )?;
                             Ok(meta.pos)
                         })
@@ -511,22 +525,22 @@ impl<'a> ArrayCursor<'a> {
         };
         let existing_meta = self
             .crdt
-            .scan_prefix(meta_path_with_uid.as_path())
+            .scan_path(meta_path_with_uid.as_path())
             .collect::<Result<Vec<_>>>()?;
         anyhow::ensure!(!existing_meta.is_empty(), "Value does not exist!");
 
         let mut store = DotStore::new();
-        let mut expired = DotSet::new();
+        let mut expired = DotStore::new();
         let move_op = Cursor::nonce()?;
         for e in existing_meta {
             let p = Path::new(&e);
-            expired.insert(p.dot());
+            expired.insert(p.to_owned());
 
             let meta = self.get_meta(p)?;
             let mut path = meta_path_with_uid.clone();
             path.prim_u64(meta.last_update);
             path.prim_u64(move_op);
-            path.slice(meta.pos.as_ref());
+            path.slice(meta.pos.as_ref().to_vec());
             path.peer(&self.peer_id);
             path.nonce(Cursor::nonce()?);
 
@@ -535,38 +549,38 @@ impl<'a> ArrayCursor<'a> {
         let old_value_path = {
             let mut p = self.value_path();
 
-            p.slice(self.pos.as_ref());
+            p.slice(self.pos.as_ref().to_vec());
             p
         };
         let mut new_value_path = self.value_path();
         // remove old pos
         let old = self
             .crdt
-            .scan_prefix(old_value_path.as_path())
+            .scan_path(old_value_path.as_path())
             .next()
             .expect("non empty")?;
         let p = Path::new(&old);
-        expired.insert(p.dot());
+        expired.insert(p.to_owned());
         let v = self.get_value(p)?;
 
         // add new pos
         println!("new pos: {:?}", new_pos.as_ref());
-        new_value_path.slice(new_pos.as_ref());
+        new_value_path.slice(new_pos.as_ref().to_vec());
         new_value_path.prim_u64(self.uid);
         new_value_path.peer(&self.peer_id);
         new_value_path.nonce(Cursor::nonce()?);
-        new_value_path.push_segment(&v.value);
+        new_value_path.push_segment(v.value);
         store.insert(new_value_path);
 
         Ok(Causal { store, expired })
     }
 
     fn get_meta(&self, path: Path) -> Result<array::ArrayMeta> {
-        array::ArrayMeta::from_path(path.strip_prefix(self.base.as_path())?)
+        array::ArrayMeta::from_path(path.strip_prefix(self.base.as_path())?.as_path())
     }
 
-    fn get_value(&'a self, path: Path<'a>) -> Result<array::ArrayValue<'a>> {
-        array::ArrayValue::from_path(path.strip_prefix(self.base.as_path())?)
+    fn get_value(&self, path: Path<'_>) -> Result<array::ArrayValue> {
+        array::ArrayValue::from_path(path.strip_prefix(self.base.as_path())?.as_path())
     }
 
     // [..].meta.<uid>.<last_update>.<last_move>.<pos>.<peer>.<nonce>
@@ -575,7 +589,7 @@ impl<'a> ArrayCursor<'a> {
         let mut p = self.meta();
         p.prim_u64(Cursor::nonce()?);
         p.prim_u64(Cursor::nonce()?);
-        p.slice(self.pos.as_ref());
+        p.slice(self.pos.as_ref().to_vec());
         p.peer(&self.peer_id);
         p.nonce(Cursor::nonce()?);
         inner.store.insert(p);
@@ -583,15 +597,15 @@ impl<'a> ArrayCursor<'a> {
     }
 
     pub fn delete(&self) -> Result<Causal> {
-        let mut expired = DotSet::default();
+        let mut expired = DotStore::default();
 
         for e in self
             .crdt
-            .scan_prefix(self.value().as_path())
-            .chain(self.crdt.scan_prefix(self.meta().as_path()))
+            .scan_path(self.value().as_path())
+            .chain(self.crdt.scan_path(self.meta().as_path()))
         {
             let e = e?;
-            expired.insert(Path::new(&e).dot());
+            expired.insert(Path::new(&e).to_owned());
         }
         Ok(Causal {
             expired,
@@ -607,21 +621,21 @@ impl<'a> ArrayCursor<'a> {
         // and adding a single tree of height 3 with the current position. This position is chosen
         // deterministically from the set of current possible positions.
         // update VALUES
-        for e in self.crdt.scan_prefix(self.value().as_path()) {
+        for e in self.crdt.scan_path(self.value().as_path()) {
             let e = e?;
-            inner.expired.insert(Path::new(&e).dot());
+            inner.expired.insert(Path::new(&e).to_owned());
         }
         // clean up meta
-        for e in self.crdt.scan_prefix(self.meta().as_path()) {
+        for e in self.crdt.scan_path(self.meta().as_path()) {
             let e = e?;
-            inner.expired.insert(Path::new(&e).dot());
+            inner.expired.insert(Path::new(&e).to_owned());
         }
 
         // Commit current position
         let mut p = self.meta();
         p.prim_u64(Cursor::nonce()?);
         p.prim_u64(Cursor::nonce()?);
-        p.slice(self.pos.as_ref());
+        p.slice(self.pos.as_ref().to_vec());
         p.peer(&self.peer_id);
         p.nonce(Cursor::nonce()?);
         inner.store.insert(p);
@@ -632,6 +646,7 @@ impl<'a> ArrayCursor<'a> {
     pub fn assign_u64(&self, value: u64) -> Result<Causal> {
         let path = self.value();
         let inner = Cursor {
+            key: self.key,
             id: self.id,
             peer_id: self.peer_id,
             schema: self.schema,
@@ -641,7 +656,7 @@ impl<'a> ArrayCursor<'a> {
         .assign_u64(value)?;
         if self
             .crdt
-            .scan_prefix(self.value_path().as_path())
+            .scan_path(self.value_path().as_path())
             .next()
             .is_some()
         {
@@ -657,13 +672,10 @@ impl<'a> ArrayCursor<'a> {
         println!("{} {:?}", self.pos, path);
 
         if let ArchivedSchema::Reg(PrimitiveKind::U64) = &self.schema {
-            Ok(self
-                .crdt
-                .scan_prefix(path.as_path())
-                .filter_map(|r| match r {
-                    Ok(path) => Some(Ok(Path::new(&path).last()?.prim_u64()?)),
-                    Err(err) => Some(Err(err)),
-                }))
+            Ok(self.crdt.scan_path(path.as_path()).filter_map(|r| match r {
+                Ok(path) => Some(Ok(Path::new(&path).last()?.prim_u64()?)),
+                Err(err) => Some(Err(err)),
+            }))
         } else {
             Err(anyhow!("not a Reg<u64>"))
         }
@@ -671,20 +683,23 @@ impl<'a> ArrayCursor<'a> {
 }
 
 mod array {
+    use anyhow::Context;
+
     use crate::Segment;
 
     use super::*;
     // [..].crdt.<uid>.<last_update>.<last_move>.<pos>.<peer>.<nonce>
     // [..].values.<pos>.<uid>.<value>.<peer>.<nonce>
-    pub(crate) struct ArrayValue<'a> {
+    pub(crate) struct ArrayValue {
         pub(crate) uid: u64,
         pub(crate) pos: Fraction,
-        pub(crate) value: Segment<'a>,
+        pub(crate) value: Segment,
     }
-    impl<'a> ArrayValue<'a> {
+    impl ArrayValue {
         /// `path` needs to point into the array root dir
-        pub(crate) fn from_path(mut path: Path<'a>) -> Result<ArrayValue<'a>> {
+        pub(crate) fn from_path(path: Path<'_>) -> Result<ArrayValue> {
             println!("{}", path);
+            let mut path = path.into_iter();
             anyhow::ensure!(
                 path.next()
                     .context("Unexpected layout")?
@@ -727,8 +742,9 @@ mod array {
     pub(crate) const ARRAY_META: &str = "META";
     impl ArrayMeta {
         /// `path` needs to point into the array root dir
-        pub(crate) fn from_path(mut path: Path) -> Result<Self> {
+        pub(crate) fn from_path(path: Path) -> Result<Self> {
             println!("ArrayMeta::from_path: {}", path);
+            let mut path = path.into_iter();
             anyhow::ensure!(
                 path.next()
                     .context("Unexpected layout")?

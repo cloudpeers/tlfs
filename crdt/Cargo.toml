@@ -13,11 +13,7 @@ crepe = "0.1.5"
 ed25519-dalek = "1.0.1"
 futures = "0.3.17"
 getrandom = "0.2.3"
-hex = "0.4.3"
-itertools = "0.10.1"
-proptest = { version = "1.0.0", optional = true }
-range-collections = { version = "0.2.1", features = ["rkyv_validated"], default_features = false }
-rkyv = { version = "0.7.18", features = ["validation"] }
+rkyv = { version = "0.7.19", features = ["validation"] }
 sled = { git = "https://github.com/spacejam/sled" }
 smallvec = "1.7.0"
 tracing = "0.1.29"
