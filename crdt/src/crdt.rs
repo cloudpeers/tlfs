@@ -188,7 +188,7 @@ impl Causal {
         for path in self.expired.iter() {
             if let Some(path) = from.transform_path(path, to) {
                 expired.insert(path);
-        let peer = PeerId::new([1; 32]);
+                let peer = PeerId::new([1; 32]);
             }
         }
         self.expired = expired;
@@ -248,7 +248,7 @@ impl Crdt {
         self.store.iter().keys()
     }
 
-    pub fn scan_path(&self, path: Path) -> impl Iterator<Item = Result<sled::IVec>> + '_ {
+    pub fn scan_path(&self, path: Path) -> impl Iterator<Item = Result<sled::IVec>> {
         self.store
             .scan_prefix(path)
             .keys()
@@ -552,6 +552,62 @@ mod tests {
         let op_delete = doc.cursor().index(0)?.delete()?;
         doc.apply(&op_delete)?;
         assert!(doc.cursor().index(0)?.u64s()?.next().is_none());
+
+        Ok(())
+    }
+
+    #[async_std::test]
+    async fn test_orarray_nested() -> Result<()> {
+        let mut sdk = Backend::memory()?;
+        let hash = sdk.register(vec![
+            Lens::Make(Kind::Array),
+            Lens::LensMapValue(Box::new(Lens::Make(Kind::Table(PrimitiveKind::Str)))),
+            Lens::LensMapValue(Box::new(Lens::LensMapValue(Box::new(Lens::Make(
+                Kind::Reg(PrimitiveKind::U64),
+            ))))),
+        ])?;
+        let peer = sdk.frontend().generate_keypair()?;
+        let doc = sdk
+            .frontend()
+            .create_doc(peer, &hash, Keypair::generate())?;
+        Pin::new(&mut sdk).await?;
+        let cur = doc.cursor().index(0)?.key_str("a")?;
+        let op = cur.assign_u64(42)?;
+
+        let op1 = cur.assign_u64(43)?;
+        doc.apply(&op)?;
+        doc.apply(&op1)?;
+
+        let r = doc
+            .cursor()
+            .index(0)?
+            .key_str("a")?
+            .u64s()?
+            .collect::<anyhow::Result<BTreeSet<_>>>()?;
+        assert_eq!(r.len(), 2);
+        assert!(r.contains(&42));
+        assert!(r.contains(&43));
+
+        let op2 = cur.assign_u64(44)?;
+        doc.apply(&op2)?;
+
+        let r = doc
+            .cursor()
+            .index(0)?
+            .key_str("a")?
+            .u64s()?
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        assert_eq!(r, vec![44]);
+
+        let op_delete = doc.cursor().index(0)?.key_str("a")?.delete()?;
+        doc.apply(&op_delete)?;
+        assert!(doc
+            .cursor()
+            .index(0)?
+            .key_str("a")?
+            .u64s()?
+            .next()
+            .is_none());
 
         Ok(())
     }

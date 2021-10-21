@@ -10,7 +10,7 @@ use crate::subscriber::Subscriber;
 use anyhow::{anyhow, Context, Result};
 use rkyv::Archived;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Cursor<'a> {
     key: Keypair,
     peer_id: PeerId,
@@ -61,7 +61,7 @@ impl<'a> Cursor<'a> {
     }
 
     /// Returns an iterator of bools.
-    pub fn bools(&self) -> Result<impl Iterator<Item = Result<bool>> + '_> {
+    pub fn bools(&self) -> Result<impl Iterator<Item = Result<bool>>> {
         if let ArchivedSchema::Reg(PrimitiveKind::Bool) = &self.schema {
             Ok(self
                 .crdt
@@ -76,7 +76,7 @@ impl<'a> Cursor<'a> {
     }
 
     /// Returns an iterator of u64s.
-    pub fn u64s(&self) -> Result<impl Iterator<Item = Result<u64>> + '_> {
+    pub fn u64s(&self) -> Result<impl Iterator<Item = Result<u64>>> {
         if let ArchivedSchema::Reg(PrimitiveKind::U64) = &self.schema {
             Ok(self
                 .crdt
@@ -91,7 +91,7 @@ impl<'a> Cursor<'a> {
     }
 
     /// Returns an iterator of i64s.
-    pub fn i64s(&self) -> Result<impl Iterator<Item = Result<i64>> + '_> {
+    pub fn i64s(&self) -> Result<impl Iterator<Item = Result<i64>>> {
         if let ArchivedSchema::Reg(PrimitiveKind::I64) = &self.schema {
             Ok(self
                 .crdt
@@ -106,7 +106,7 @@ impl<'a> Cursor<'a> {
     }
 
     /// Returns an iterator of strs.
-    pub fn strs(&self) -> Result<impl Iterator<Item = Result<String>> + '_> {
+    pub fn strs(&self) -> Result<impl Iterator<Item = Result<String>>> {
         if let ArchivedSchema::Reg(PrimitiveKind::Str) = &self.schema {
             Ok(self
                 .crdt
@@ -359,14 +359,11 @@ impl<'a> Cursor<'a> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
+// TODO: Can't yet nest Arrays
 pub struct ArrayCursor<'a> {
-    key: Keypair,
-    id: DocId,
-    peer_id: PeerId,
-    schema: &'a Archived<Schema>,
-    crdt: &'a Crdt,
-    base: PathBuf,
+    cursor: Cursor<'a>,
+    array_path: PathBuf,
     pos: Fraction,
     uid: u64,
 }
@@ -374,13 +371,13 @@ pub struct ArrayCursor<'a> {
 // FIXME: Nested cursors
 impl<'a> ArrayCursor<'a> {
     fn meta_path(&self) -> PathBuf {
-        let mut p = self.base.clone();
+        let mut p = self.array_path.clone();
         p.prim_str(array::ARRAY_META);
         p
     }
 
     fn value_path(&self) -> PathBuf {
-        let mut p = self.base.clone();
+        let mut p = self.array_path.clone();
         p.prim_str(array::ARRAY_VALUES);
         p
     }
@@ -454,12 +451,8 @@ impl<'a> ArrayCursor<'a> {
         };
 
         Ok(Self {
-            key: cursor.key,
-            id: cursor.id,
-            peer_id: cursor.peer_id,
-            schema: cursor.schema,
-            crdt: cursor.crdt,
-            base: cursor.path,
+            array_path: cursor.path.clone(),
+            cursor,
             pos,
             uid,
         })
@@ -470,40 +463,45 @@ impl<'a> ArrayCursor<'a> {
         // On a Move, the replica deletes all children of all existing roots, and adds a single
         // child tree to all roots with the new position.
 
-        println!("move: {}", self.base);
+        println!("move: {}", self.cursor.path);
         let new_pos = {
             let value_path = self.value_path();
             // TODO: use sled's size hint
-            let len = self.crdt.scan_path(value_path.as_path()).count();
+            let len = self.cursor.crdt.scan_path(value_path.as_path()).count();
 
             to = to.min(len);
             let (left, right) = match to.checked_sub(1) {
                 Some(s) => {
-                    let p_c = self.base.clone();
-                    let mut iter =
-                        self.crdt
-                            .scan_path(value_path.as_path())
-                            .skip(s)
-                            .map(move |p| {
-                                p.and_then(|iv| {
-                                    let meta = array::ArrayValue::from_path(
-                                        Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
-                                    )?;
-                                    Ok(meta.pos)
-                                })
-                            });
+                    let p_c = self.array_path.clone();
+                    let mut iter = self
+                        .cursor
+                        .crdt
+                        .scan_path(value_path.as_path())
+                        .skip(s)
+                        .map(move |p| {
+                            p.and_then(|iv| {
+                                let meta = array::ArrayValue::from_path(
+                                    Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
+                                )?;
+                                Ok(meta.pos)
+                            })
+                        });
                     (iter.next(), iter.next())
                 }
                 None => {
-                    let p_c = self.base.clone();
-                    let mut iter = self.crdt.scan_path(value_path.as_path()).map(move |p| {
-                        p.and_then(|iv| {
-                            let meta = array::ArrayValue::from_path(
-                                Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
-                            )?;
-                            Ok(meta.pos)
-                        })
-                    });
+                    let p_c = self.array_path.clone();
+                    let mut iter = self
+                        .cursor
+                        .crdt
+                        .scan_path(value_path.as_path())
+                        .map(move |p| {
+                            p.and_then(|iv| {
+                                let meta = array::ArrayValue::from_path(
+                                    Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
+                                )?;
+                                Ok(meta.pos)
+                            })
+                        });
 
                     (None, iter.next())
                 }
@@ -524,6 +522,7 @@ impl<'a> ArrayCursor<'a> {
             p
         };
         let existing_meta = self
+            .cursor
             .crdt
             .scan_path(meta_path_with_uid.as_path())
             .collect::<Result<Vec<_>>>()?;
@@ -541,7 +540,7 @@ impl<'a> ArrayCursor<'a> {
             path.prim_u64(meta.last_update);
             path.prim_u64(move_op);
             path.position(&meta.pos);
-            path.peer(&self.peer_id);
+            path.peer(&self.cursor.peer_id);
             path.nonce(Cursor::nonce()?);
 
             store.insert(path);
@@ -555,6 +554,7 @@ impl<'a> ArrayCursor<'a> {
         let mut new_value_path = self.value_path();
         // remove old pos
         let old = self
+            .cursor
             .crdt
             .scan_path(old_value_path.as_path())
             .next()
@@ -567,7 +567,7 @@ impl<'a> ArrayCursor<'a> {
         println!("new pos: {:?}", new_pos.as_ref());
         new_value_path.position(&new_pos);
         new_value_path.prim_u64(self.uid);
-        new_value_path.peer(&self.peer_id);
+        new_value_path.peer(&self.cursor.peer_id);
         new_value_path.nonce(Cursor::nonce()?);
         new_value_path.push_segment(v.value);
         store.insert(new_value_path);
@@ -576,11 +576,11 @@ impl<'a> ArrayCursor<'a> {
     }
 
     fn get_meta(&self, path: Path) -> Result<array::ArrayMeta> {
-        array::ArrayMeta::from_path(path.strip_prefix(self.base.as_path())?.as_path())
+        array::ArrayMeta::from_path(path.strip_prefix(self.array_path.as_path())?.as_path())
     }
 
     fn get_value(&self, path: Path<'_>) -> Result<array::ArrayValue> {
-        array::ArrayValue::from_path(path.strip_prefix(self.base.as_path())?.as_path())
+        array::ArrayValue::from_path(path.strip_prefix(self.array_path.as_path())?.as_path())
     }
 
     // [..].meta.<uid>.<last_update>.<last_move>.<pos>.<peer>.<nonce>
@@ -590,7 +590,7 @@ impl<'a> ArrayCursor<'a> {
         p.prim_u64(Cursor::nonce()?);
         p.prim_u64(Cursor::nonce()?);
         p.position(&self.pos);
-        p.peer(&self.peer_id);
+        p.peer(&self.cursor.peer_id);
         p.nonce(Cursor::nonce()?);
         inner.store.insert(p);
         Ok(inner)
@@ -600,9 +600,10 @@ impl<'a> ArrayCursor<'a> {
         let mut expired = DotStore::default();
 
         for e in self
+            .cursor
             .crdt
             .scan_path(self.value().as_path())
-            .chain(self.crdt.scan_path(self.meta().as_path()))
+            .chain(self.cursor.crdt.scan_path(self.meta().as_path()))
         {
             let e = e?;
             expired.insert(Path::new(&e).to_owned());
@@ -621,12 +622,12 @@ impl<'a> ArrayCursor<'a> {
         // and adding a single tree of height 3 with the current position. This position is chosen
         // deterministically from the set of current possible positions.
         // update VALUES
-        for e in self.crdt.scan_path(self.value().as_path()) {
+        for e in self.cursor.crdt.scan_path(self.value().as_path()) {
             let e = e?;
             inner.expired.insert(Path::new(&e).to_owned());
         }
         // clean up meta
-        for e in self.crdt.scan_path(self.meta().as_path()) {
+        for e in self.cursor.crdt.scan_path(self.meta().as_path()) {
             let e = e?;
             inner.expired.insert(Path::new(&e).to_owned());
         }
@@ -636,27 +637,17 @@ impl<'a> ArrayCursor<'a> {
         p.prim_u64(Cursor::nonce()?);
         p.prim_u64(Cursor::nonce()?);
         p.position(&self.pos);
-        p.peer(&self.peer_id);
+        p.peer(&self.cursor.peer_id);
         p.nonce(Cursor::nonce()?);
         inner.store.insert(p);
         Ok(inner)
     }
 
-    /// Assigns a value to a register.
-    pub fn assign_u64(&self, value: u64) -> Result<Causal> {
-        let path = self.value();
-        let inner = Cursor {
-            key: self.key,
-            id: self.id,
-            peer_id: self.peer_id,
-            schema: self.schema,
-            crdt: self.crdt,
-            path,
-        }
-        .assign_u64(value)?;
+    fn augment_causal(&self, inner: Causal) -> Result<Causal> {
         if self
+            .cursor
             .crdt
-            .scan_path(self.value_path().as_path())
+            .scan_path(self.value().as_path())
             .next()
             .is_some()
         {
@@ -666,19 +657,193 @@ impl<'a> ArrayCursor<'a> {
         }
     }
 
-    pub fn u64s(&self) -> Result<impl Iterator<Item = Result<u64>> + '_> {
-        // TODO DRY with `Cursor`
-        let path = self.value();
-        println!("{} {:?}", self.pos, path);
+    // Copied Cursor API
+    /// Subscribe to a path.
+    pub fn subscribe(&self) -> Subscriber {
+        self.cursor.subscribe()
+    }
 
-        if let ArchivedSchema::Reg(PrimitiveKind::U64) = &self.schema {
-            Ok(self.crdt.scan_path(path.as_path()).filter_map(|r| match r {
-                Ok(path) => Some(Ok(Path::new(&path).last()?.prim_u64()?)),
-                Err(err) => Some(Err(err)),
-            }))
-        } else {
-            Err(anyhow!("not a Reg<u64>"))
+    /// Checks permissions.
+    pub fn can(&self, peer: &PeerId, perm: Permission) -> Result<bool> {
+        self.cursor.can(peer, perm)
+    }
+
+    /// Returns if a flag is enabled.
+    pub fn enabled(&self) -> Result<bool> {
+        Cursor {
+            path: self.value(),
+            ..self.cursor
         }
+        .enabled()
+    }
+
+    /// Returns an iterator of bools.
+    pub fn bools(&self) -> Result<impl Iterator<Item = Result<bool>>> {
+        Cursor {
+            path: self.value(),
+            ..self.cursor
+        }
+        .bools()
+    }
+
+    /// Returns an iterator of u64s.
+    pub fn u64s(&self) -> Result<impl Iterator<Item = Result<u64>>> {
+        Cursor {
+            path: self.value(),
+            ..self.cursor
+        }
+        .u64s()
+    }
+
+    /// Returns an iterator of i64s.
+    pub fn i64s(&self) -> Result<impl Iterator<Item = Result<i64>>> {
+        Cursor {
+            path: self.value(),
+            ..self.cursor
+        }
+        .i64s()
+    }
+
+    /// Returns an iterator of strs.
+    pub fn strs(&self) -> Result<impl Iterator<Item = Result<String>>> {
+        Cursor {
+            path: self.value(),
+            ..self.cursor
+        }
+        .strs()
+    }
+
+    /// Returns a cursor to a value in a table.
+    pub fn key_bool(mut self, key: bool) -> Result<Self> {
+        self.cursor = self.cursor.key_bool(key)?;
+        Ok(self)
+    }
+
+    /// Returns a cursor to a value in a table.
+    pub fn key_u64(mut self, key: u64) -> Result<Self> {
+        self.cursor = self.cursor.key_u64(key)?;
+        Ok(self)
+    }
+
+    /// Returns a cursor to a value in a table.
+    pub fn key_i64(mut self, key: i64) -> Result<Self> {
+        self.cursor = self.cursor.key_i64(key)?;
+        Ok(self)
+    }
+
+    /// Returns a cursor to a value in a table.
+    pub fn key_str(mut self, key: &str) -> Result<Self> {
+        self.cursor = self.cursor.key_str(key)?;
+        Ok(self)
+    }
+
+    /// Returns a cursor to a field in a struct.
+    pub fn field(mut self, key: &str) -> Result<Self> {
+        self.cursor = self.cursor.field(key)?;
+        Ok(self)
+    }
+
+    /// Enables a flag.
+    pub fn enable(&self) -> Result<Causal> {
+        let inner = Cursor {
+            path: self.value(),
+            ..self.cursor
+        }
+        .enable()?;
+        self.augment_causal(inner)
+    }
+
+    /// Disables a flag.
+    pub fn disable(&self) -> Result<Causal> {
+        let inner = Cursor {
+            path: self.value(),
+            ..self.cursor
+        }
+        .disable()?;
+        self.augment_causal(inner)
+    }
+
+    fn assign(&self, kind: PrimitiveKind) -> Result<(PathBuf, DotStore)> {
+        Cursor {
+            path: self.value(),
+            ..self.cursor
+        }
+        .assign(kind)
+    }
+
+    /// Assigns a value to a register.
+    pub fn assign_bool(&self, value: bool) -> Result<Causal> {
+        let (mut path, expired) = self.assign(PrimitiveKind::Bool)?;
+        let mut store = DotStore::new();
+        path.prim_bool(value);
+        store.insert(path);
+        Ok(Causal { store, expired })
+    }
+
+    /// Assigns a value to a register.
+    pub fn assign_u64(&self, value: u64) -> Result<Causal> {
+        let (mut path, expired) = self.assign(PrimitiveKind::U64)?;
+        let mut store = DotStore::new();
+        path.prim_u64(value);
+        store.insert(path);
+        Ok(Causal { store, expired })
+    }
+
+    /// Assigns a value to a register.
+    pub fn assign_i64(&self, value: i64) -> Result<Causal> {
+        let (mut path, expired) = self.assign(PrimitiveKind::I64)?;
+        let mut store = DotStore::new();
+        path.prim_i64(value);
+        store.insert(path);
+        Ok(Causal { store, expired })
+    }
+
+    /// Assigns a value to a register.
+    pub fn assign_str(&self, value: &str) -> Result<Causal> {
+        let (mut path, expired) = self.assign(PrimitiveKind::Str)?;
+        let mut store = DotStore::new();
+        path.prim_str(value);
+        store.insert(path);
+        Ok(Causal { store, expired })
+    }
+
+    /// Removes a value from a map.
+    pub fn remove(&self) -> Result<Causal> {
+        let inner = Cursor {
+            path: self.value(),
+            ..self.cursor
+        }
+        .remove()?;
+        self.augment_causal(inner)
+    }
+
+    fn say(&self, policy: &Policy) -> Result<Causal> {
+        let inner = Cursor {
+            path: self.value(),
+            ..self.cursor
+        }
+        .say(policy)?;
+        self.augment_causal(inner)
+    }
+
+    /// Gives permission to a peer.
+    pub fn say_can(&self, actor: Option<PeerId>, perm: Permission) -> Result<Causal> {
+        self.say(&Policy::Can(actor.into(), perm))
+    }
+
+    /// Constructs a new condition.
+    pub fn cond(&self, actor: Actor, perm: Permission) -> Can {
+        Can::new(actor, perm, self.cursor.path.clone())
+    }
+
+    /// Gives conditional permission to a peer.
+    pub fn say_can_if(&self, actor: Actor, perm: Permission, cond: Can) -> Result<Causal> {
+        self.say(&Policy::CanIf(actor, perm, cond))
+    }
+
+    /// Revokes a policy.
+    pub fn revoke(&self, claim: Dot) -> Result<Causal> {
+        self.say(&Policy::Revokes(claim))
     }
 }
 
