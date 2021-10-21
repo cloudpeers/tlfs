@@ -1,9 +1,9 @@
-//! This module contains an efficient set of dots for use as both a dot store and a causal context
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::iter::FromIterator;
 
+/// Path identifier is the blake3 hash of a path.
 #[derive(
     Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd, Archive, CheckBytes, Deserialize, Serialize,
 )]
@@ -58,6 +58,7 @@ impl std::str::FromStr for Dot {
     }
 }
 
+/// Set of path identifiers.
 #[derive(
     Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Archive, Deserialize, Serialize,
 )]
