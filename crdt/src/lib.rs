@@ -1,13 +1,13 @@
 //! # The local first sdk's crdt
 //!
 //! ## ORSet
-//! The workhorse of this crate is an ORSet (Observed-Remove Set). An ORSet has a store set and
-//! an expired set. When an element is added it is added to the store set. When it's removed it's
-//! removed from the store and added to the expired set.
+//! The workhorse of this crate is an ORSet (Observed-Remove Set). An ORSet contains a store set and
+//! an expired set. When an element is added it is added to the store set and moved to the
+//! expired set upon deletion.
 //!
 //! ## Path
 //! The elements stored in this ORSet are called paths. These paths are used to represent other
-//! crdts like the EWFlag, MVReg, ORMap and ORArray. The path has the following logical format:
+//! crdts like the EWFlag, MVReg, ORMap, and ORArray. The path has the following logical format:
 //! ```bnf
 //! prim := prim_bool | prim_u64 | prim_i64 | prim_str
 //! key := prim
@@ -19,7 +19,7 @@
 //! ```
 //!
 //! ## Case study: Using ORSet<Path> to construct an MVReg
-//! An MVReg is a set of concurrently written values. When a value is assigned all previous
+//! An MVReg (Multi-Value) is a set of concurrently written values. When a value is assigned all previous
 //! values are cleared. To create an ORSet that performs an MVReg assign when joined with
 //! another ORSet we add each value currently in the MVReg to the expired set and add the new
 //! value to the store set. When this delta is joined with the previous state, or with other
@@ -29,7 +29,7 @@
 //! are not required for convergence.
 //!
 //! ## Byzantine Eventual Consistency
-//! In distributed systems without coordination only some properties are achivable. The strongest
+//! In distributed systems without coordination only some properties are achievable. The strongest
 //! properties that a distributed system without coordination can achive is called BEC. BEC has
 //! the following properties that are guaranteed in the presence of an arbitrary number of byzantine
 //! nodes assuming that correct replicas form a connected component:
@@ -75,7 +75,7 @@
 //! a path in the ORSet:
 //!
 //! - unconditional: {actor} says {actor} can {permission} {path}
-//! - conditional: {actor} says {actor} can {permission} {path} if C can {permission} {path}
+//! - conditional: {actor} says {actor} can {permission} {path} if {actor} can {permission} {path}
 //! - revocation: {actor} revokes {hash(path)}
 //!
 //! where permission is one of read/write/control/own. control allows delegating read and write
