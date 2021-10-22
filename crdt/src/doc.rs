@@ -268,7 +268,7 @@ impl Backend {
         if !schema.as_ref().validate(&causal) {
             return Err(anyhow!("crdt failed schema validation"));
         }
-        causal.transform(doc_lenses.as_ref(), lenses.as_ref());
+        causal.transform(lenses.as_ref(), doc_lenses.as_ref());
         self.crdt.join_policy(&causal)?;
         self.update_acl()?;
         self.crdt.join(peer_id, &causal)?;

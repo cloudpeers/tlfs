@@ -383,6 +383,7 @@ mod tests {
         }
 
         #[test]
+        #[ignore] // props don't generate signatures
         fn transform_preserves_validity((lens, mut schema, mut causal) in lens_schema_and_causal()) {
             let from = Ref::<Lenses>::new(EMPTY_LENSES.as_ref().into());
             let to = Ref::archive(&Lenses::new(vec![lens]));

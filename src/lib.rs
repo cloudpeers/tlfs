@@ -222,7 +222,9 @@ mod tests {
         assert_eq!(value, title);
 
         let sdk2 = Migrate::memory()?;
-        sdk2.register(lenses)?;
+        let mut lenses2 = lenses.clone();
+        lenses2.push(Lens::RenameProperty("todos".into(), "tasks".into()));
+        let hash2 = sdk2.register(lenses2)?;
         let sdk2 = sdk2.finish().await?;
         let op = doc
             .cursor()
@@ -232,9 +234,9 @@ mod tests {
         for addr in sdk.addresses().await {
             sdk2.add_address(*sdk.peer_id(), addr);
         }
-        let doc2 = sdk2.add_doc(*doc.id(), &hash)?;
+        let doc2 = sdk2.add_doc(*doc.id(), &hash2)?;
 
-        let mut sub = doc2.cursor().field("todos")?.subscribe();
+        let mut sub = doc2.cursor().field("tasks")?.subscribe();
         sdk2.unjoin(*doc.id(), *sdk.peer_id());
 
         let mut exit = false;
@@ -251,7 +253,7 @@ mod tests {
 
         let value = doc2
             .cursor()
-            .field("todos")?
+            .field("tasks")?
             .key_u64(0)?
             .field("title")?
             .strs()?

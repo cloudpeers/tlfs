@@ -51,7 +51,7 @@ impl<'a> Cursor<'a> {
                 .crdt
                 .scan_path(self.path.as_path())
                 .find_map(|r| match r {
-                    Ok(path) => Some(Ok(Path::new(&path).last()?.nonce()?)),
+                    Ok(path) => Some(Ok(Path::new(&path).parent()?.parent()?.last()?.nonce()?)),
                     Err(err) => Some(Err(err)),
                 })
                 .is_some())
@@ -67,7 +67,11 @@ impl<'a> Cursor<'a> {
                 .crdt
                 .scan_path(self.path.as_path())
                 .filter_map(|r| match r {
-                    Ok(path) => Some(Ok(Path::new(&path).last()?.prim_bool()?)),
+                    Ok(path) => Some(Ok(Path::new(&path)
+                        .parent()?
+                        .parent()?
+                        .last()?
+                        .prim_bool()?)),
                     Err(err) => Some(Err(err)),
                 }))
         } else {
@@ -82,7 +86,11 @@ impl<'a> Cursor<'a> {
                 .crdt
                 .scan_path(self.path.as_path())
                 .filter_map(|r| match r {
-                    Ok(path) => Some(Ok(Path::new(&path).last()?.prim_u64()?)),
+                    Ok(path) => Some(Ok(Path::new(&path)
+                        .parent()?
+                        .parent()?
+                        .last()?
+                        .prim_u64()?)),
                     Err(err) => Some(Err(err)),
                 }))
         } else {
@@ -97,7 +105,11 @@ impl<'a> Cursor<'a> {
                 .crdt
                 .scan_path(self.path.as_path())
                 .filter_map(|r| match r {
-                    Ok(path) => Some(Ok(Path::new(&path).last()?.prim_i64()?)),
+                    Ok(path) => Some(Ok(Path::new(&path)
+                        .parent()?
+                        .parent()?
+                        .last()?
+                        .prim_i64()?)),
                     Err(err) => Some(Err(err)),
                 }))
         } else {
@@ -112,7 +124,12 @@ impl<'a> Cursor<'a> {
                 .crdt
                 .scan_path(self.path.as_path())
                 .filter_map(|r| match r {
-                    Ok(path) => Some(Ok(Path::new(&path).last()?.prim_str()?.to_owned())),
+                    Ok(path) => Some(Ok(Path::new(&path)
+                        .parent()?
+                        .parent()?
+                        .last()?
+                        .prim_str()?
+                        .to_owned())),
                     Err(err) => Some(Err(err)),
                 }))
         } else {
@@ -191,10 +208,48 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    fn nonce() -> Result<u64> {
+    fn nonce_2() -> Result<u64> {
         let mut nonce = [0; 8];
-        getrandom::getrandom(&mut nonce)?;
-        Ok(u64::from_le_bytes(nonce))
+        getrandom::getrandom(&mut nonce).unwrap();
+        let nonce = u64::from_le_bytes(nonce);
+        Ok(nonce)
+    }
+
+    fn nonce(path: &mut PathBuf) {
+        let mut nonce = [0; 8];
+        getrandom::getrandom(&mut nonce).unwrap();
+        let nonce = u64::from_le_bytes(nonce);
+        path.nonce(nonce);
+    }
+
+    fn sign(&self, path: &mut PathBuf) {
+        tracing::debug!("signing {} as {:?}", path.as_path(), self.peer_id);
+        let sig = self.key.sign(path.as_ref());
+        path.peer(&self.peer_id);
+        path.sig(sig);
+    }
+
+    fn tombstone(&self) -> Result<DotStore> {
+        let mut expired = DotStore::new();
+        for r in self.crdt.scan_path(self.path.as_path()) {
+            let k = r?;
+            let path = Path::new(&k);
+            if path
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .last()
+                .unwrap()
+                .policy()
+                .is_none()
+            {
+                let mut path = path.to_owned();
+                self.sign(&mut path);
+                expired.insert(path);
+            }
+        }
+        Ok(expired)
     }
 
     /// Enables a flag.
@@ -206,8 +261,8 @@ impl<'a> Cursor<'a> {
             return Err(anyhow!("unauthorized"));
         }
         let mut path = self.path.to_owned();
-        path.peer(&self.peer_id);
-        path.nonce(Self::nonce()?);
+        Self::nonce(&mut path);
+        self.sign(&mut path);
         let mut store = DotStore::new();
         store.insert(path);
         Ok(Causal {
@@ -224,18 +279,9 @@ impl<'a> Cursor<'a> {
         if !self.can(&self.peer_id, Permission::Write)? {
             return Err(anyhow!("unauthorized"));
         }
-        let mut expired = DotStore::new();
-        // add all dots to be tombstoned into the context
-        for r in self.crdt.scan_path(self.path.as_path()) {
-            let k = r?;
-            let path = Path::new(&k);
-            if path.last().unwrap().nonce().is_some() {
-                expired.insert(path.to_owned());
-            }
-        }
         Ok(Causal {
             store: DotStore::new(),
-            expired,
+            expired: self.tombstone()?,
         })
     }
 
@@ -256,9 +302,8 @@ impl<'a> Cursor<'a> {
             }
         }
         let mut path = self.path.to_owned();
-        path.peer(&self.peer_id);
-        path.nonce(Self::nonce()?);
-        Ok((path, expired))
+        Self::nonce(&mut path);
+        Ok((path, self.tombstone()?))
     }
 
     /// Assigns a value to a register.
@@ -266,6 +311,7 @@ impl<'a> Cursor<'a> {
         let (mut path, expired) = self.assign(PrimitiveKind::Bool)?;
         let mut store = DotStore::new();
         path.prim_bool(value);
+        self.sign(&mut path);
         store.insert(path);
         Ok(Causal { store, expired })
     }
@@ -275,6 +321,7 @@ impl<'a> Cursor<'a> {
         let (mut path, expired) = self.assign(PrimitiveKind::U64)?;
         let mut store = DotStore::new();
         path.prim_u64(value);
+        self.sign(&mut path);
         store.insert(path);
         Ok(Causal { store, expired })
     }
@@ -284,6 +331,7 @@ impl<'a> Cursor<'a> {
         let (mut path, expired) = self.assign(PrimitiveKind::I64)?;
         let mut store = DotStore::new();
         path.prim_i64(value);
+        self.sign(&mut path);
         store.insert(path);
         Ok(Causal { store, expired })
     }
@@ -293,6 +341,7 @@ impl<'a> Cursor<'a> {
         let (mut path, expired) = self.assign(PrimitiveKind::Str)?;
         let mut store = DotStore::new();
         path.prim_str(value);
+        self.sign(&mut path);
         store.insert(path);
         Ok(Causal { store, expired })
     }
@@ -302,15 +351,9 @@ impl<'a> Cursor<'a> {
         if !self.can(&self.peer_id, Permission::Write)? {
             return Err(anyhow!("unauthorized"));
         }
-        let mut expired = DotStore::new();
-        for r in self.crdt.scan_path(self.path.as_path()) {
-            let k = r?;
-            let path = Path::new(&k);
-            expired.insert(path.to_owned());
-        }
         Ok(Causal {
             store: DotStore::new(),
-            expired,
+            expired: self.tombstone()?,
         })
     }
 
@@ -328,8 +371,8 @@ impl<'a> Cursor<'a> {
             return Err(anyhow!("unauthorized"));
         }
         let mut path = self.path.clone();
-        path.peer(&self.peer_id);
         path.policy(policy);
+        self.sign(&mut path);
         let mut store = DotStore::new();
         store.insert(path);
         Ok(Causal {
@@ -447,7 +490,7 @@ impl<'a> ArrayCursor<'a> {
             } else {
                 left.succ()
             };
-            (pos, Cursor::nonce()?)
+            (pos, Cursor::nonce_2()?)
         };
 
         Ok(Self {
@@ -463,7 +506,6 @@ impl<'a> ArrayCursor<'a> {
         // On a Move, the replica deletes all children of all existing roots, and adds a single
         // child tree to all roots with the new position.
 
-        println!("move: {}", self.cursor.path);
         let new_pos = {
             let value_path = self.value_path();
             // TODO: use sled's size hint
@@ -507,7 +549,6 @@ impl<'a> ArrayCursor<'a> {
                 }
             };
 
-            println!("left {:?}, right {:?}", left, right);
             let left = left.transpose()?.unwrap_or_else(Fraction::zero);
             if let Some(r) = right.transpose()? {
                 left.mid(&r)
@@ -530,7 +571,7 @@ impl<'a> ArrayCursor<'a> {
 
         let mut store = DotStore::new();
         let mut expired = DotStore::new();
-        let move_op = Cursor::nonce()?;
+        let move_op = Cursor::nonce_2()?;
         for e in existing_meta {
             let p = Path::new(&e);
             expired.insert(p.to_owned());
@@ -540,8 +581,9 @@ impl<'a> ArrayCursor<'a> {
             path.prim_u64(meta.last_update);
             path.prim_u64(move_op);
             path.position(&meta.pos);
-            path.peer(&self.cursor.peer_id);
-            path.nonce(Cursor::nonce()?);
+
+            path.nonce(Cursor::nonce_2()?);
+            self.cursor.sign(&mut path);
 
             store.insert(path);
         }
@@ -564,11 +606,10 @@ impl<'a> ArrayCursor<'a> {
         let v = self.get_value(p)?;
 
         // add new pos
-        println!("new pos: {:?}", new_pos.as_ref());
         new_value_path.position(&new_pos);
         new_value_path.prim_u64(self.uid);
-        new_value_path.peer(&self.cursor.peer_id);
-        new_value_path.nonce(Cursor::nonce()?);
+        new_value_path.nonce(Cursor::nonce_2()?);
+        self.cursor.sign(&mut new_value_path);
         new_value_path.push_segment(v.value);
         store.insert(new_value_path);
 
@@ -583,15 +624,13 @@ impl<'a> ArrayCursor<'a> {
         array::ArrayValue::from_path(path.strip_prefix(self.array_path.as_path())?.as_path())
     }
 
-    // [..].meta.<uid>.<last_update>.<last_move>.<pos>.<peer>.<nonce>
-    // [..].values.<pos>.<uid>.<value>.<peer>.<nonce>
     fn insert(&self, mut inner: Causal) -> Result<Causal> {
         let mut p = self.meta();
-        p.prim_u64(Cursor::nonce()?);
-        p.prim_u64(Cursor::nonce()?);
+        p.prim_u64(Cursor::nonce_2()?);
+        p.prim_u64(Cursor::nonce_2()?);
         p.position(&self.pos);
         p.peer(&self.cursor.peer_id);
-        p.nonce(Cursor::nonce()?);
+        p.nonce(Cursor::nonce_2()?);
         inner.store.insert(p);
         Ok(inner)
     }
@@ -606,7 +645,9 @@ impl<'a> ArrayCursor<'a> {
             .chain(self.cursor.crdt.scan_path(self.meta().as_path()))
         {
             let e = e?;
-            expired.insert(Path::new(&e).to_owned());
+            let mut p = Path::new(&e).to_owned();
+            self.cursor.sign(&mut p);
+            expired.insert(p);
         }
         Ok(Causal {
             expired,
@@ -634,11 +675,11 @@ impl<'a> ArrayCursor<'a> {
 
         // Commit current position
         let mut p = self.meta();
-        p.prim_u64(Cursor::nonce()?);
-        p.prim_u64(Cursor::nonce()?);
+        p.prim_u64(Cursor::nonce_2()?);
+        p.prim_u64(Cursor::nonce_2()?);
         p.position(&self.pos);
-        p.peer(&self.cursor.peer_id);
-        p.nonce(Cursor::nonce()?);
+        p.nonce(Cursor::nonce_2()?);
+        self.cursor.sign(&mut p);
         inner.store.insert(p);
         Ok(inner)
     }
@@ -763,48 +804,44 @@ impl<'a> ArrayCursor<'a> {
         self.augment_causal(inner)
     }
 
-    fn assign(&self, kind: PrimitiveKind) -> Result<(PathBuf, DotStore)> {
-        Cursor {
-            path: self.value(),
-            ..self.cursor
-        }
-        .assign(kind)
-    }
-
     /// Assigns a value to a register.
     pub fn assign_bool(&self, value: bool) -> Result<Causal> {
-        let (mut path, expired) = self.assign(PrimitiveKind::Bool)?;
-        let mut store = DotStore::new();
-        path.prim_bool(value);
-        store.insert(path);
-        Ok(Causal { store, expired })
+        let c = Cursor {
+            path: self.value(),
+            ..self.cursor
+        };
+        let inner = c.assign_bool(value)?;
+        self.augment_causal(inner)
     }
 
     /// Assigns a value to a register.
     pub fn assign_u64(&self, value: u64) -> Result<Causal> {
-        let (mut path, expired) = self.assign(PrimitiveKind::U64)?;
-        let mut store = DotStore::new();
-        path.prim_u64(value);
-        store.insert(path);
-        Ok(Causal { store, expired })
+        let c = Cursor {
+            path: self.value(),
+            ..self.cursor
+        };
+        let inner = c.assign_u64(value)?;
+        self.augment_causal(inner)
     }
 
     /// Assigns a value to a register.
     pub fn assign_i64(&self, value: i64) -> Result<Causal> {
-        let (mut path, expired) = self.assign(PrimitiveKind::I64)?;
-        let mut store = DotStore::new();
-        path.prim_i64(value);
-        store.insert(path);
-        Ok(Causal { store, expired })
+        let c = Cursor {
+            path: self.value(),
+            ..self.cursor
+        };
+        let inner = c.assign_i64(value)?;
+        self.augment_causal(inner)
     }
 
     /// Assigns a value to a register.
     pub fn assign_str(&self, value: &str) -> Result<Causal> {
-        let (mut path, expired) = self.assign(PrimitiveKind::Str)?;
-        let mut store = DotStore::new();
-        path.prim_str(value);
-        store.insert(path);
-        Ok(Causal { store, expired })
+        let c = Cursor {
+            path: self.value(),
+            ..self.cursor
+        };
+        let inner = c.assign_str(value)?;
+        self.augment_causal(inner)
     }
 
     /// Removes a value from a map.
@@ -863,7 +900,6 @@ mod array {
     impl ArrayValue {
         /// `path` needs to point into the array root dir
         pub(crate) fn from_path(path: Path<'_>) -> Result<ArrayValue> {
-            println!("{}", path);
             let mut path = path.into_iter();
             anyhow::ensure!(
                 path.next()
@@ -886,8 +922,6 @@ mod array {
                 .prim_u64()
                 .context("Unexpected layout")?;
 
-            // peer
-            path.next();
             // nonce
             path.next();
 
@@ -895,6 +929,7 @@ mod array {
             Ok(Self { uid, pos, value })
         }
     }
+    
     pub(crate) struct ArrayMeta {
         pub(crate) last_update: u64,
         pub(crate) last_move: u64,
@@ -906,7 +941,6 @@ mod array {
     impl ArrayMeta {
         /// `path` needs to point into the array root dir
         pub(crate) fn from_path(path: Path) -> Result<Self> {
-            println!("ArrayMeta::from_path: {}", path);
             let mut path = path.into_iter();
             anyhow::ensure!(
                 path.next()

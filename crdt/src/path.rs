@@ -5,6 +5,7 @@ use crate::id::{DocId, PeerId};
 use crate::util::Ref;
 use anyhow::Context;
 use bytecheck::CheckBytes;
+use ed25519_dalek::Signature;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::convert::TryInto;
@@ -26,6 +27,7 @@ pub enum SegmentType {
     Policy,
     Dot,
     Position,
+    Sig,
 }
 
 impl SegmentType {
@@ -42,23 +44,35 @@ impl SegmentType {
             u if u == Policy as u8 => Some(Policy),
             u if u == Dot as u8 => Some(Dot),
             u if u == Position as u8 => Some(Position),
+            u if u == Sig as u8 => Some(Sig),
             _ => unreachable!("Unexpected SegmentType: {}", u),
         }
     }
 }
 
+/// A segment of a path.
 #[derive(Clone, Eq, PartialEq)]
 pub enum Segment {
+    /// Document identifier.
     Doc(DocId),
+    /// Peer identifier.
     Peer(PeerId),
+    /// Randomness used to ensure path uniqueness.
     Nonce(u64),
+    /// Boolean primitive.
     Bool(bool),
+    /// Unsigned integer primitive.
     U64(u64),
+    /// Signed integer primitive.
     I64(i64),
+    /// Utf8 string primitive.
     Str(String),
+    /// Policy statement.
     Policy(Policy),
+    /// Path identifier.
     Dot(Dot),
     Position(Fraction),
+    Sig(Signature),
 }
 
 impl Segment {
@@ -79,9 +93,11 @@ impl Segment {
             }
             SegmentType::Dot => Self::Dot(Dot::new(data.try_into().unwrap())),
             SegmentType::Position => Self::Position(Fraction::new(data.into())),
+            SegmentType::Sig => Self::Sig(Signature::new(data.try_into().unwrap())),
         }
     }
 
+    /// Returns the `DocId`.
     pub fn doc(self) -> Option<DocId> {
         if let Segment::Doc(doc) = self {
             Some(doc)
@@ -90,6 +106,7 @@ impl Segment {
         }
     }
 
+    /// Returns the `PeerId`.
     pub fn peer(self) -> Option<PeerId> {
         if let Segment::Peer(peer) = self {
             Some(peer)
@@ -98,6 +115,7 @@ impl Segment {
         }
     }
 
+    /// Returns the nonce.
     pub fn nonce(self) -> Option<u64> {
         if let Segment::Nonce(nonce) = self {
             Some(nonce)
@@ -106,6 +124,7 @@ impl Segment {
         }
     }
 
+    /// Returns the `bool`.
     pub fn prim_bool(self) -> Option<bool> {
         if let Segment::Bool(b) = self {
             Some(b)
@@ -114,6 +133,7 @@ impl Segment {
         }
     }
 
+    /// Returns the `u64`.
     pub fn prim_u64(self) -> Option<u64> {
         if let Segment::U64(u) = self {
             Some(u)
@@ -122,6 +142,7 @@ impl Segment {
         }
     }
 
+    /// Returns the `i64`.
     pub fn prim_i64(self) -> Option<i64> {
         if let Segment::I64(u) = self {
             Some(u)
@@ -130,6 +151,7 @@ impl Segment {
         }
     }
 
+    /// Returns the `&str`.
     pub fn prim_str(&self) -> Option<&str> {
         if let Segment::Str(s) = self {
             Some(s.as_str())
@@ -138,6 +160,7 @@ impl Segment {
         }
     }
 
+    /// Returns the `String`.
     pub fn prim_string(self) -> Option<String> {
         if let Segment::Str(s) = self {
             Some(s)
@@ -146,6 +169,7 @@ impl Segment {
         }
     }
 
+    /// Returns the `Policy`.
     pub fn policy(self) -> Option<Policy> {
         if let Segment::Policy(policy) = self {
             Some(policy)
@@ -154,6 +178,7 @@ impl Segment {
         }
     }
 
+    /// Returns the `Dot`.
     pub fn dot(self) -> Option<Dot> {
         if let Segment::Dot(dot) = self {
             Some(dot)
@@ -165,6 +190,14 @@ impl Segment {
     pub fn position(self) -> Option<Fraction> {
         if let Segment::Position(frac) = self {
             Some(frac)
+        } else {
+            None
+        }
+    }
+    /// Returns the `Signature`.
+    pub fn sig(self) -> Option<Signature> {
+        if let Segment::Sig(sig) = self {
+            Some(sig)
         } else {
             None
         }
@@ -184,10 +217,12 @@ impl std::fmt::Debug for Segment {
             Self::Policy(s) => write!(f, "{:?}", s),
             Self::Dot(s) => write!(f, "{:?}", s),
             Self::Position(s) => write!(f, "Position({})", base64::encode(s)),
+            Self::Sig(_) => write!(f, "Sig"),
         }
     }
 }
 
+/// An owned concatentation of binary encoded segments.
 #[derive(Clone, Default, Eq, PartialEq, Hash, Ord, PartialOrd, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(Debug, Eq, Hash, PartialEq, Ord, PartialOrd, CheckBytes))]
 #[repr(C)]
@@ -200,6 +235,7 @@ impl Borrow<[u8]> for PathBuf {
 }
 
 impl PathBuf {
+    /// Creates an empty path buffer.
     pub fn new() -> Self {
         Self::default()
     }
@@ -229,50 +265,67 @@ impl PathBuf {
             Segment::Policy(d) => self.policy(&d),
             Segment::Dot(d) => self.dot(&d),
             Segment::Position(d) => self.position(&d),
+            Segment::Sig(d) => self.sig(d),
         }
     }
 
+    /// Appends a doc segment.
     pub fn doc(&mut self, doc: &DocId) {
         self.push(SegmentType::Doc, doc.as_ref());
     }
 
+    /// Appends a peer segment.
     pub fn peer(&mut self, peer: &PeerId) {
         self.push(SegmentType::Peer, peer.as_ref());
     }
 
+    /// Appends a nonce segment.
     pub fn nonce(&mut self, nonce: u64) {
         self.push(SegmentType::Nonce, nonce.to_be_bytes().as_ref());
     }
 
+    /// Appends a bool segment.
     pub fn prim_bool(&mut self, b: bool) {
         let b = if b { 1 } else { 0 };
         self.push(SegmentType::Bool, &[b]);
     }
 
+    /// Appends a u64 segment.
     pub fn prim_u64(&mut self, u: u64) {
         self.push(SegmentType::U64, u.to_be_bytes().as_ref());
     }
 
+    /// Appends an i64 segment.
     pub fn prim_i64(&mut self, i: i64) {
         self.push(SegmentType::I64, i.to_be_bytes().as_ref());
     }
 
+    /// Appends a utf8 segment.
     pub fn prim_str(&mut self, s: &str) {
         self.push(SegmentType::Str, s.as_bytes());
     }
 
+    /// Appends a policy segment.
     pub fn policy(&mut self, policy: &Policy) {
         self.push(SegmentType::Policy, Ref::archive(policy).as_bytes());
     }
 
+    /// Appends a dot segment.
     pub fn dot(&mut self, dot: &Dot) {
         self.push(SegmentType::Dot, dot.as_ref());
     }
 
+    // Apends a position segment.
     pub fn position(&mut self, data: &Fraction) {
         self.push(SegmentType::Position, data.as_ref());
     }
 
+    /// Appends a sig segment.
+    pub fn sig(&mut self, sig: Signature) {
+        self.push(SegmentType::Sig, sig.as_ref());
+    }
+
+    /// Pops the last segment.
     pub fn pop(&mut self) {
         if let Some(path) = self.as_path().parent() {
             let len = path.0.len();
@@ -280,10 +333,12 @@ impl PathBuf {
         }
     }
 
+    /// Returns a borrowed path.
     pub fn as_path(&self) -> Path<'_> {
         Path(&self.0)
     }
 
+    /// Extends the buffer with the segments of a path.
     pub fn extend(&mut self, path: Path) {
         self.0.extend_from_slice(path.as_ref());
     }
@@ -326,22 +381,27 @@ impl FromIterator<Segment> for PathBuf {
     }
 }
 
+/// A borrowed binary encoded path.
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct Path<'a>(&'a [u8]);
 
 impl<'a> Path<'a> {
+    /// Creates a new path from an encoded byte slice.
     pub fn new(p: &'a [u8]) -> Self {
         Self(p)
     }
 
+    /// Retrns true if the path contains no segments.
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
+    /// Returns true if the path is an ancestor of `other`.
     pub fn is_ancestor(&self, other: Path) -> bool {
         other.as_ref().starts_with(self.as_ref())
     }
 
+    /// Returns an owned `PathBuf`.
     pub fn to_owned(&self) -> PathBuf {
         PathBuf(self.0.to_vec())
     }
@@ -365,6 +425,7 @@ impl<'a> Path<'a> {
         Some(u16::from_be_bytes(len) as usize)
     }
 
+    /// Returns the last segment.
     pub fn last(&self) -> Option<Segment> {
         let len = self.last_len()?;
         let end = self.0.len();
@@ -372,23 +433,27 @@ impl<'a> Path<'a> {
         Some(Segment::new(ty, &self.0[(end - 3 - len)..(end - 3)]))
     }
 
+    /// Returns the first segment.
     pub fn first(&self) -> Option<Segment> {
         let len = self.first_len()?;
         let ty = SegmentType::new(self.0[0])?;
         Some(Segment::new(ty, &self.0[3..(len + 3)]))
     }
 
+    /// Returns the path without the first segment.
     pub fn child(&self) -> Option<Path<'a>> {
         let len = self.first_len()?;
         Some(Path(&self.0[(len + 6)..]))
     }
 
+    /// Returns the path without the last segment.
     pub fn parent(&self) -> Option<Path<'a>> {
         let len = self.last_len()?;
         let end = self.0.len();
         Some(Path(&self.0[..(end - len - 6)]))
     }
 
+    /// Returns an identifier for the path.
     pub fn dot(&self) -> Dot {
         Dot::new(blake3::hash(self.as_ref()).into())
     }
@@ -400,12 +465,14 @@ impl<'a> Path<'a> {
             .collect())
     }
 
+    /// Returns the first segment and the path without the first segment.
     pub fn split_first(&self) -> Option<(Segment, Path<'a>)> {
         let first = self.first()?;
         let child = self.child()?;
         Some((first, child))
     }
 
+    /// Returns the last segment and the path without the last segment.
     pub fn split_last(&self) -> Option<(Path<'a>, Segment)> {
         let parent = self.parent()?;
         let last = self.last()?;
@@ -432,6 +499,7 @@ where
 }
 
 #[derive(Clone)]
+/// Iterator over path segments.
 pub struct PathIter<'a>(Path<'a>);
 
 impl<'a> Iterator for PathIter<'a> {

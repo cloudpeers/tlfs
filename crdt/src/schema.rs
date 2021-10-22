@@ -1,6 +1,7 @@
 use crate::crdt::Causal;
 use crate::path::{Path, Segment};
 use bytecheck::CheckBytes;
+use ed25519_dalek::{PublicKey, Verifier};
 use rkyv::{Archive, Serialize};
 use std::collections::BTreeMap;
 
@@ -43,64 +44,85 @@ pub enum Schema {
 
 impl ArchivedSchema {
     pub fn validate(&self, causal: &Causal) -> bool {
+        self._validate(causal) == Some(true)
+    }
+
+    fn _validate(&self, causal: &Causal) -> Option<bool> {
         for path in causal.store.iter() {
-            if let Some((seg, child)) = path.split_first() {
-                if seg.doc().is_none() {
-                    return false;
-                }
-                if self.validate_path(child) != Some(true) {
-                    return false;
-                }
-            } else {
-                return false;
+            let path = verify_sig(path)?;
+            let (doc, path) = path.split_first()?;
+            doc.doc()?;
+            if self.validate_path(path) != Some(true) {
+                tracing::error!("invalid path {}", path);
+                return Some(false);
             }
         }
-        true
+        for path in causal.expired.iter() {
+            let path = verify_sig(path)?;
+            let path = verify_sig(path)?;
+            let (doc, path) = path.split_first()?;
+            doc.doc()?;
+            if path.last()?.policy().is_some() {
+                tracing::error!("policy cannot be expired");
+                return Some(false);
+            }
+            if self.validate_path(path) != Some(true) {
+                tracing::error!("invalid expired path {}", path);
+                return Some(false);
+            }
+        }
+        Some(true)
     }
 
     fn validate_path(&self, path: Path) -> Option<bool> {
-        if self.validate_policy(path) == Some(true) {
+        if validate_policy(path) == Some(true) {
             return Some(true);
         }
         match self {
-            Self::Null => {
-                let eof = path.is_empty();
-                Some(eof)
-            }
+            Self::Null => Some(path.is_empty()),
             Self::Flag => {
-                let peer = path.first()?.peer().is_some();
-                let nonce = path.child()?.first()?.nonce().is_some();
-                let eof = path.child()?.child()?.is_empty();
-                Some(peer && nonce && eof)
+                let (nonce, path) = path.split_first()?;
+                nonce.nonce()?;
+                Some(path.is_empty())
             }
             Self::Reg(kind) => {
-                let peer = path.first()?.peer().is_some();
-                let nonce = path.child()?.first()?.nonce().is_some();
-                let prim = path.child()?.child()?.first()?;
-                let eof = path.child()?.child()?.child()?.is_empty();
-                Some(peer && nonce && kind.validate(prim) && eof)
+                let (nonce, path) = path.split_first()?;
+                nonce.nonce()?;
+                let (prim, path) = path.split_first()?;
+                Some(kind.validate(prim) && path.is_empty())
             }
             Self::Table(kind, schema) => {
-                let key = path.first()?;
-                let value = path.child()?;
-                Some(kind.validate(key) && schema.validate_path(value)?)
+                let (key, path) = path.split_first()?;
+                Some(kind.validate(key) && schema.validate_path(path)?)
             }
             Self::Struct(fields) => {
-                let field = path.first()?.prim_string()?;
-                let value = path.child()?;
-                let schema = fields.get(field.as_str())?;
-                Some(schema.validate_path(value)?)
+                let (field, path) = path.split_first()?;
+                let field = field.prim_str()?;
+                let schema = fields.get(field)?;
+                Some(schema.validate_path(path)?)
             }
             Self::Array(schema) => {
                 todo!("validate Array");
             }
         }
     }
+}
 
-    fn validate_policy(&self, path: Path) -> Option<bool> {
-        let peer = path.first()?.peer().is_some();
-        let policy = path.child()?.first()?.policy().is_some();
-        let eof = path.child()?.child()?.is_empty();
-        Some(peer && policy && eof)
+fn validate_policy(path: Path) -> Option<bool> {
+    let (policy, path) = path.split_first()?;
+    policy.policy()?;
+    Some(path.is_empty())
+}
+
+fn verify_sig(path: Path) -> Option<Path> {
+    let (path, sig) = path.split_last()?;
+    let (path, peer) = path.split_last()?;
+    let sig = sig.sig()?;
+    let peer = peer.peer()?;
+    let pubkey = PublicKey::from_bytes(peer.as_ref()).unwrap();
+    if pubkey.verify(path.as_ref(), &sig).is_err() {
+        tracing::error!("invalid signature of {:?} for {}", peer, path);
+        return None;
     }
+    Some(path)
 }
