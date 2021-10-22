@@ -929,7 +929,7 @@ mod array {
             Ok(Self { uid, pos, value })
         }
     }
-    
+
     pub(crate) struct ArrayMeta {
         pub(crate) last_update: u64,
         pub(crate) last_move: u64,
