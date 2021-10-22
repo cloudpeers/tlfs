@@ -40,6 +40,11 @@ pub enum Lens {
         #[archive_attr(omit_bounds)]
         Box<Lens>,
     ),
+    LensMap(
+        #[omit_bounds]
+        #[archive_attr(omit_bounds)]
+        Box<Lens>,
+    ),
     LensMapValue(
         #[omit_bounds]
         #[archive_attr(omit_bounds)]
@@ -68,6 +73,7 @@ impl ArchivedLens {
             Self::HoistProperty(h, t) => LensRef::HoistProperty(h, t),
             Self::PlungeProperty(h, t) => LensRef::PlungeProperty(h, t),
             Self::LensIn(k, l) => LensRef::LensIn(false, k, l),
+            Self::LensMap(l) => LensRef::LensMap(false, l),
             Self::LensMapValue(l) => LensRef::LensMapValue(false, l),
         }
     }
@@ -83,6 +89,7 @@ pub enum LensRef<'a> {
     HoistProperty(&'a ArchivedString, &'a ArchivedString),
     PlungeProperty(&'a ArchivedString, &'a ArchivedString),
     LensIn(bool, &'a ArchivedString, &'a ArchivedLens),
+    LensMap(bool, &'a ArchivedLens),
     LensMapValue(bool, &'a ArchivedLens),
 }
 
@@ -97,6 +104,7 @@ impl<'a> LensRef<'a> {
             Self::HoistProperty(host, target) => Self::PlungeProperty(host, target),
             Self::PlungeProperty(host, target) => Self::HoistProperty(host, target),
             Self::LensIn(rev, key, lens) => Self::LensIn(!rev, key, lens),
+            Self::LensMap(rev, lens) => Self::LensMap(!rev, lens),
             Self::LensMapValue(rev, lens) => Self::LensMapValue(!rev, lens),
         }
     }
@@ -219,7 +227,7 @@ impl<'a> LensRef<'a> {
                 lens.to_ref().maybe_reverse(*rev).transform_schema(schema)?
             }
 
-            (Self::LensMapValue(rev, lens), Schema::Array(schema)) => {
+            (Self::LensMap(rev, lens), Schema::Array(schema)) => {
                 lens.to_ref().maybe_reverse(*rev).transform_schema(schema)?
             }
             (_, s) => return Err(anyhow!("invalid lens for schema: {:?} {:?}", self, s)),
@@ -268,6 +276,15 @@ impl<'a> LensRef<'a> {
                     p2.extend(path);
                     return p2;
                 }
+            }
+            Self::LensMap(rev, lens) => {
+                let path = lens.to_ref().maybe_reverse(*rev).transform_path(&path[1..]);
+                if path.is_empty() {
+                    return path;
+                }
+                let mut p2 = vec![path[0].clone()];
+                p2.extend(path);
+                return p2;
             }
             Self::LensMapValue(rev, lens) => {
                 let path = lens.to_ref().maybe_reverse(*rev).transform_path(&path[1..]);

@@ -516,7 +516,7 @@ mod tests {
         let mut sdk = Backend::memory()?;
         let hash = sdk.register(vec![
             Lens::Make(Kind::Array),
-            Lens::LensMapValue(Box::new(Lens::Make(Kind::Reg(PrimitiveKind::U64)))),
+            Lens::LensMap(Box::new(Lens::Make(Kind::Reg(PrimitiveKind::U64)))),
         ])?;
         let peer = sdk.frontend().generate_keypair()?;
         let doc = sdk
@@ -561,8 +561,8 @@ mod tests {
         let mut sdk = Backend::memory()?;
         let hash = sdk.register(vec![
             Lens::Make(Kind::Array),
-            Lens::LensMapValue(Box::new(Lens::Make(Kind::Table(PrimitiveKind::Str)))),
-            Lens::LensMapValue(Box::new(Lens::LensMapValue(Box::new(Lens::Make(
+            Lens::LensMap(Box::new(Lens::Make(Kind::Table(PrimitiveKind::Str)))),
+            Lens::LensMap(Box::new(Lens::LensMapValue(Box::new(Lens::Make(
                 Kind::Reg(PrimitiveKind::U64),
             ))))),
         ])?;
@@ -620,7 +620,7 @@ mod tests {
         let peer = PeerId::new([1; 32]);
         let hash = sdk.register(vec![
             Lens::Make(Kind::Array),
-            Lens::LensMapValue(Box::new(Lens::Make(Kind::Reg(PrimitiveKind::U64)))),
+            Lens::LensMap(Box::new(Lens::Make(Kind::Reg(PrimitiveKind::U64)))),
         ])?;
         let doc = sdk
             .frontend()
@@ -672,8 +672,6 @@ mod tests {
         let values = cur.u64s()?.collect::<Result<BTreeSet<u64>>>()?;
         assert_eq!(values.len(), 1);
         assert!(values.contains(&42));
-        println!("{:#?}", doc);
-        assert!(false);
 
         let op = doc.cursor().key_str("a")?.key_str("b")?.remove()?;
         doc.apply(&op)?;
