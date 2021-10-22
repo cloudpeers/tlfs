@@ -54,6 +54,7 @@ impl<'a> Cursor<'a> {
                     Ok(path) => Some(Ok(Path::new(&path).parent()?.parent()?.last()?.nonce()?)),
                     Err(err) => Some(Err(err)),
                 })
+                .transpose()?
                 .is_some())
         } else {
             Err(anyhow!("not a flag"))
@@ -284,15 +285,6 @@ impl<'a> Cursor<'a> {
         }
         if *self.schema != ArchivedSchema::Reg(kind) {
             return Err(anyhow!("not a Reg<{:?}>", kind));
-        }
-        let mut expired = DotStore::new();
-        // add all dots to be tombstoned into the context
-        for r in self.crdt.scan_path(self.path.as_path()) {
-            let k = r?;
-            let path = Path::new(&k);
-            if path.last().unwrap().policy().is_none() {
-                expired.insert(path.to_owned());
-            }
         }
         let mut path = self.path.to_owned();
         self.nonce(&mut path);
