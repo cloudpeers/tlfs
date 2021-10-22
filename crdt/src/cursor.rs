@@ -208,14 +208,7 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    fn nonce_2() -> Result<u64> {
-        let mut nonce = [0; 8];
-        getrandom::getrandom(&mut nonce).unwrap();
-        let nonce = u64::from_le_bytes(nonce);
-        Ok(nonce)
-    }
-
-    fn nonce(path: &mut PathBuf) {
+    fn nonce(&self, path: &mut PathBuf) {
         let mut nonce = [0; 8];
         getrandom::getrandom(&mut nonce).unwrap();
         let nonce = u64::from_le_bytes(nonce);
@@ -261,7 +254,7 @@ impl<'a> Cursor<'a> {
             return Err(anyhow!("unauthorized"));
         }
         let mut path = self.path.to_owned();
-        Self::nonce(&mut path);
+        self.nonce(&mut path);
         self.sign(&mut path);
         let mut store = DotStore::new();
         store.insert(path);
@@ -302,7 +295,7 @@ impl<'a> Cursor<'a> {
             }
         }
         let mut path = self.path.to_owned();
-        Self::nonce(&mut path);
+        self.nonce(&mut path);
         Ok((path, self.tombstone()?))
     }
 
@@ -490,7 +483,7 @@ impl<'a> ArrayCursor<'a> {
             } else {
                 left.succ()
             };
-            (pos, Cursor::nonce_2()?)
+            (pos, nonce())
         };
 
         Ok(Self {
@@ -571,7 +564,7 @@ impl<'a> ArrayCursor<'a> {
 
         let mut store = DotStore::new();
         let mut expired = DotStore::new();
-        let move_op = Cursor::nonce_2()?;
+        let move_op = nonce();
         for e in existing_meta {
             let p = Path::new(&e);
             expired.insert(p.to_owned());
@@ -582,7 +575,7 @@ impl<'a> ArrayCursor<'a> {
             path.prim_u64(move_op);
             path.position(&meta.pos);
 
-            path.nonce(Cursor::nonce_2()?);
+            self.cursor.nonce(&mut path);
             self.cursor.sign(&mut path);
 
             store.insert(path);
@@ -608,7 +601,7 @@ impl<'a> ArrayCursor<'a> {
         // add new pos
         new_value_path.position(&new_pos);
         new_value_path.prim_u64(self.uid);
-        new_value_path.nonce(Cursor::nonce_2()?);
+        new_value_path.nonce(nonce());
         self.cursor.sign(&mut new_value_path);
         new_value_path.push_segment(v.value);
         store.insert(new_value_path);
@@ -626,11 +619,11 @@ impl<'a> ArrayCursor<'a> {
 
     fn insert(&self, mut inner: Causal) -> Result<Causal> {
         let mut p = self.meta();
-        p.prim_u64(Cursor::nonce_2()?);
-        p.prim_u64(Cursor::nonce_2()?);
+        p.prim_u64(nonce());
+        p.prim_u64(nonce());
         p.position(&self.pos);
         p.peer(&self.cursor.peer_id);
-        p.nonce(Cursor::nonce_2()?);
+        p.nonce(nonce());
         inner.store.insert(p);
         Ok(inner)
     }
@@ -675,10 +668,10 @@ impl<'a> ArrayCursor<'a> {
 
         // Commit current position
         let mut p = self.meta();
-        p.prim_u64(Cursor::nonce_2()?);
-        p.prim_u64(Cursor::nonce_2()?);
+        p.prim_u64(nonce());
+        p.prim_u64(nonce());
         p.position(&self.pos);
-        p.nonce(Cursor::nonce_2()?);
+        p.nonce(nonce());
         self.cursor.sign(&mut p);
         inner.store.insert(p);
         Ok(inner)
@@ -884,14 +877,18 @@ impl<'a> ArrayCursor<'a> {
     }
 }
 
+fn nonce() -> u64 {
+    let mut nonce = [0; 8];
+    getrandom::getrandom(&mut nonce).unwrap();
+    u64::from_le_bytes(nonce)
+}
+
 mod array {
     use anyhow::Context;
 
     use crate::Segment;
 
     use super::*;
-    // [..].crdt.<uid>.<last_update>.<last_move>.<pos>.<peer>.<nonce>
-    // [..].values.<pos>.<uid>.<value>.<peer>.<nonce>
     pub(crate) struct ArrayValue {
         pub(crate) uid: u64,
         pub(crate) pos: Fraction,
@@ -930,6 +927,7 @@ mod array {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) struct ArrayMeta {
         pub(crate) last_update: u64,
         pub(crate) last_move: u64,

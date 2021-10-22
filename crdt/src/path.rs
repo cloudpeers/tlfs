@@ -71,7 +71,9 @@ pub enum Segment {
     Policy(Policy),
     /// Path identifier.
     Dot(Dot),
+    // Positional identifier.
     Position(Fraction),
+    // Signature.
     Sig(Signature),
 }
 
@@ -187,6 +189,7 @@ impl Segment {
         }
     }
 
+    /// Returns the position.
     pub fn position(self) -> Option<Fraction> {
         if let Segment::Position(frac) = self {
             Some(frac)
