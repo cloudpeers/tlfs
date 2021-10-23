@@ -217,10 +217,7 @@ impl<'a> Cursor<'a> {
     }
 
     fn nonce(&self, path: &mut PathBuf) {
-        let mut nonce = [0; 8];
-        getrandom::getrandom(&mut nonce).unwrap();
-        let nonce = u64::from_le_bytes(nonce);
-        path.nonce(nonce);
+        path.nonce(nonce());
     }
 
     fn sign(&self, path: &mut PathBuf) {
@@ -457,6 +454,7 @@ impl ArrayWrapper {
             .crdt
             .scan_path(self.value_path.as_path())
             .next()
+            .transpose()?
             .is_some()
         {
             self.update(cursor, inner)
