@@ -18,6 +18,8 @@ pub struct Cursor<'a> {
     schema: &'a Archived<Schema>,
     crdt: &'a Crdt,
     path: PathBuf,
+    /// If the cursor points into an array, this struct help with manipulating the outer ORArray
+    array: Option<ArrayWrapper>,
 }
 
 impl<'a> Cursor<'a> {
@@ -31,6 +33,7 @@ impl<'a> Cursor<'a> {
             schema,
             path,
             crdt,
+            array: None,
         }
     }
 
@@ -183,12 +186,14 @@ impl<'a> Cursor<'a> {
     }
 
     /// Returns a cursor to a value in an array.
-    // [..].crdt.<uid>.<last_update>.<last_move>.<pos>.<peer>.<nonce>
-    // [..].values.<pos>.<uid>.<value>.<peer>.<nonce>
-    pub fn index(mut self, ix: usize) -> Result<ArrayCursor<'a>> {
+    pub fn index(mut self, ix: usize) -> Result<Self> {
         if let ArchivedSchema::Array(schema) = &self.schema {
+            anyhow::ensure!(self.array.is_none(), "Nested ORArrays not supported");
             self.schema = schema;
-            ArrayCursor::new(self, ix)
+            let (array, path) = ArrayWrapper::new(&self, ix)?;
+            self.array.replace(array);
+            self.path = path;
+            Ok(self)
         } else {
             anyhow::bail!("not an Array<_>");
         }
@@ -259,10 +264,11 @@ impl<'a> Cursor<'a> {
         self.sign(&mut path);
         let mut store = DotStore::new();
         store.insert(path);
-        Ok(Causal {
+        let c = Causal {
             store,
             expired: Default::default(),
-        })
+        };
+        self.augment_array(c)
     }
 
     /// Disables a flag.
@@ -273,10 +279,12 @@ impl<'a> Cursor<'a> {
         if !self.can(&self.peer_id, Permission::Write)? {
             return Err(anyhow!("unauthorized"));
         }
-        Ok(Causal {
+
+        let c = Causal {
             store: DotStore::new(),
             expired: self.tombstone()?,
-        })
+        };
+        self.augment_array(c)
     }
 
     fn assign(&self, kind: PrimitiveKind) -> Result<(PathBuf, DotStore)> {
@@ -298,7 +306,9 @@ impl<'a> Cursor<'a> {
         path.prim_bool(value);
         self.sign(&mut path);
         store.insert(path);
-        Ok(Causal { store, expired })
+
+        let c = Causal { store, expired };
+        self.augment_array(c)
     }
 
     /// Assigns a value to a register.
@@ -308,7 +318,9 @@ impl<'a> Cursor<'a> {
         path.prim_u64(value);
         self.sign(&mut path);
         store.insert(path);
-        Ok(Causal { store, expired })
+
+        let c = Causal { store, expired };
+        self.augment_array(c)
     }
 
     /// Assigns a value to a register.
@@ -318,7 +330,9 @@ impl<'a> Cursor<'a> {
         path.prim_i64(value);
         self.sign(&mut path);
         store.insert(path);
-        Ok(Causal { store, expired })
+
+        let c = Causal { store, expired };
+        self.augment_array(c)
     }
 
     /// Assigns a value to a register.
@@ -328,7 +342,9 @@ impl<'a> Cursor<'a> {
         path.prim_str(value);
         self.sign(&mut path);
         store.insert(path);
-        Ok(Causal { store, expired })
+
+        let c = Causal { store, expired };
+        self.augment_array(c)
     }
 
     /// Removes a value from a map.
@@ -336,10 +352,11 @@ impl<'a> Cursor<'a> {
         if !self.can(&self.peer_id, Permission::Write)? {
             return Err(anyhow!("unauthorized"));
         }
-        Ok(Causal {
+        let c = Causal {
             store: DotStore::new(),
             expired: self.tombstone()?,
-        })
+        };
+        self.augment_array(c)
     }
 
     fn say(&self, policy: &Policy) -> Result<Causal> {
@@ -360,10 +377,12 @@ impl<'a> Cursor<'a> {
         self.sign(&mut path);
         let mut store = DotStore::new();
         store.insert(path);
-        Ok(Causal {
+
+        let c = Causal {
             store,
             expired: DotStore::new(),
-        })
+        };
+        self.augment_array(c)
     }
 
     /// Gives permission to a peer.
@@ -385,53 +404,79 @@ impl<'a> Cursor<'a> {
     pub fn revoke(&self, claim: Dot) -> Result<Causal> {
         self.say(&Policy::Revokes(claim))
     }
+
+    /// Moves the entry inside an array.
+    pub fn r#move(mut self, to: usize) -> Result<Causal> {
+        let array = self.array.take().context("Not inside an ORArray")?;
+        array.r#move(&self, to)
+    }
+
+    /// Deletes the entry from an array.
+    pub fn delete(mut self) -> Result<Causal> {
+        let array = self.array.take().context("Not inside an ORArray")?;
+        array.delete(&self)
+    }
+
+    /// Augments a causal with array metadata if in an array, otherwise just returns the causal
+    /// unchanged
+    fn augment_array(&self, inner: Causal) -> Result<Causal> {
+        if let Some(array) = self.array.as_ref() {
+            array.augment_causal(self, inner)
+        } else {
+            Ok(inner)
+        }
+    }
+}
+
+//
+fn nonce() -> u64 {
+    let mut nonce = [0; 8];
+    getrandom::getrandom(&mut nonce).unwrap();
+    u64::from_le_bytes(nonce)
 }
 
 #[derive(Clone, Debug)]
-// TODO: Can't yet nest Arrays
-pub struct ArrayCursor<'a> {
-    cursor: Cursor<'a>,
+struct ArrayWrapper {
+    /// Absolute path to the array root
     array_path: PathBuf,
+    /// Position of the array element this struct is pointing to
     pos: Fraction,
+    /// Uid of the array element this struct is pointing to
     uid: u64,
+    /// value path
+    value_path: PathBuf,
+    /// meta path
+    meta_path: PathBuf,
 }
-
-// FIXME: Nested cursors
-impl<'a> ArrayCursor<'a> {
-    fn meta_path(&self) -> PathBuf {
-        let mut p = self.array_path.clone();
-        p.prim_str(array::ARRAY_META);
-        p
+impl ArrayWrapper {
+    /// Augments a `Causal` embedded into an `ORArray`.
+    fn augment_causal(&self, cursor: &Cursor, inner: Causal) -> Result<Causal> {
+        if cursor
+            .crdt
+            .scan_path(self.value_path.as_path())
+            .next()
+            .is_some()
+        {
+            self.update(cursor, inner)
+        } else {
+            self.insert(cursor, inner)
+        }
     }
 
-    fn value_path(&self) -> PathBuf {
-        let mut p = self.array_path.clone();
-        p.prim_str(array::ARRAY_VALUES);
-        p
-    }
-
-    fn value(&self) -> PathBuf {
-        let mut p = self.value_path();
-        p.position(&self.pos);
-        p.prim_u64(self.uid);
-        p
-    }
-
-    fn meta(&self) -> PathBuf {
-        let mut p = self.meta_path();
-        p.prim_u64(self.uid);
-        p
-    }
-
-    fn new(cursor: Cursor<'a>, mut ix: usize) -> Result<ArrayCursor<'a>> {
-        let mut p = cursor.path.clone();
-        p.prim_str(array::ARRAY_VALUES);
+    fn new(cursor: &Cursor, mut ix: usize) -> Result<(Self, PathBuf)> {
+        let array_path = cursor.path.clone();
+        let array_value_root = {
+            let mut p = array_path.clone();
+            p.prim_str(array::ARRAY_VALUES);
+            p
+        };
         // TODO: use sled's size hint
-        let len = cursor.crdt.scan_path(p.as_path()).count();
-        let mut iter = cursor.crdt.scan_path(p.as_path());
+        let len = cursor.crdt.scan_path(array_value_root.as_path()).count();
+        let mut iter = cursor.crdt.scan_path(array_value_root.as_path());
 
         ix = ix.min(len);
         let (pos, uid) = if let Some(entry) = iter.nth(ix) {
+            // Existing entry
             let entry = entry?;
             let p_c = cursor.path.clone();
             let data = array::ArrayValue::from_path(
@@ -440,30 +485,38 @@ impl<'a> ArrayCursor<'a> {
             .context("Reading array data")?;
             (data.pos, data.uid)
         } else {
-            // No entry :-(
+            // No entry, find position to insert
             let (left, right) = match ix.checked_sub(1) {
                 Some(s) => {
                     let p_c = cursor.path.clone();
-                    let mut iter = cursor.crdt.scan_path(p.as_path()).skip(s).map(move |p| {
-                        p.and_then(|iv| {
-                            let meta = array::ArrayValue::from_path(
-                                Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
-                            )?;
-                            Ok(meta.pos)
-                        })
-                    });
+                    let mut iter = cursor
+                        .crdt
+                        .scan_path(array_value_root.as_path())
+                        .skip(s)
+                        .map(move |p| {
+                            p.and_then(|iv| {
+                                let meta = array::ArrayValue::from_path(
+                                    Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
+                                )?;
+                                Ok(meta.pos)
+                            })
+                        });
                     (iter.next(), iter.next())
                 }
                 None => {
                     let p_c = cursor.path.clone();
-                    let mut iter = cursor.crdt.scan_path(p.as_path()).map(move |p| {
-                        p.and_then(|iv| {
-                            let meta = array::ArrayValue::from_path(
-                                Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
-                            )?;
-                            Ok(meta.pos)
-                        })
-                    });
+                    let mut iter =
+                        cursor
+                            .crdt
+                            .scan_path(array_value_root.as_path())
+                            .map(move |p| {
+                                p.and_then(|iv| {
+                                    let meta = array::ArrayValue::from_path(
+                                        Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
+                                    )?;
+                                    Ok(meta.pos)
+                                })
+                            });
 
                     (None, iter.next())
                 }
@@ -478,32 +531,48 @@ impl<'a> ArrayCursor<'a> {
             (pos, nonce())
         };
 
-        Ok(Self {
-            array_path: cursor.path.clone(),
-            cursor,
-            pos,
-            uid,
-        })
+        let value_path = {
+            let mut p = array_path.clone();
+            p.prim_str(array::ARRAY_VALUES);
+            p.position(&pos);
+            p.prim_u64(uid);
+            p
+        };
+
+        let meta_path = {
+            let mut p = array_path.clone();
+            p.prim_str(array::ARRAY_META);
+            p.prim_u64(uid);
+            p
+        };
+
+        Ok((
+            Self {
+                array_path,
+                pos,
+                uid,
+                value_path: value_path.clone(),
+                meta_path,
+            },
+            value_path,
+        ))
     }
-    // [..].crdt.<uid>.<last_update>.<last_move>.<pos>.<peer>.<nonce>
-    // [..].values.<pos>.<uid>.<value>.<peer>.<nonce>
-    pub fn r#move(self, mut to: usize) -> Result<Causal> {
+
+    pub fn r#move(self, cursor: &Cursor, mut to: usize) -> Result<Causal> {
         // On a Move, the replica deletes all children of all existing roots, and adds a single
         // child tree to all roots with the new position.
 
         let new_pos = {
-            let value_path = self.value_path();
             // TODO: use sled's size hint
-            let len = self.cursor.crdt.scan_path(value_path.as_path()).count();
+            let len = cursor.crdt.scan_path(self.value_path.as_path()).count();
 
             to = to.min(len);
             let (left, right) = match to.checked_sub(1) {
                 Some(s) => {
                     let p_c = self.array_path.clone();
-                    let mut iter = self
-                        .cursor
+                    let mut iter = cursor
                         .crdt
-                        .scan_path(value_path.as_path())
+                        .scan_path(self.value_path.as_path())
                         .skip(s)
                         .map(move |p| {
                             p.and_then(|iv| {
@@ -517,10 +586,9 @@ impl<'a> ArrayCursor<'a> {
                 }
                 None => {
                     let p_c = self.array_path.clone();
-                    let mut iter = self
-                        .cursor
+                    let mut iter = cursor
                         .crdt
-                        .scan_path(value_path.as_path())
+                        .scan_path(self.value_path.as_path())
                         .map(move |p| {
                             p.and_then(|iv| {
                                 let meta = array::ArrayValue::from_path(
@@ -542,15 +610,9 @@ impl<'a> ArrayCursor<'a> {
             }
         };
         // --
-        let meta_path_with_uid = {
-            let mut p = self.meta_path();
-            p.prim_u64(self.uid);
-            p
-        };
-        let existing_meta = self
-            .cursor
+        let existing_meta = cursor
             .crdt
-            .scan_path(meta_path_with_uid.as_path())
+            .scan_path(self.meta_path.as_path())
             .collect::<Result<Vec<_>>>()?;
         anyhow::ensure!(!existing_meta.is_empty(), "Value does not exist!");
 
@@ -561,31 +623,28 @@ impl<'a> ArrayCursor<'a> {
             let p = Path::new(&e);
             expired.insert(p.to_owned());
 
-            let meta = self.get_meta(p)?;
-            let mut path = meta_path_with_uid.clone();
+            let meta = self.get_meta_data(p)?;
+            let mut path = self.meta_path.clone();
             path.prim_u64(meta.last_update);
             path.prim_u64(move_op);
             path.position(&meta.pos);
 
-            self.cursor.nonce(&mut path);
-            self.cursor.sign(&mut path);
+            cursor.nonce(&mut path);
+            cursor.sign(&mut path);
 
             store.insert(path);
         }
-        let old_value_path = {
-            let mut p = self.value_path();
-
-            p.position(&self.pos);
+        let mut new_value_path = {
+            let mut p = self.array_path.clone();
+            p.prim_str(array::ARRAY_VALUES);
             p
         };
-        let mut new_value_path = self.value_path();
         // remove old pos
-        let old = self
-            .cursor
+        let old = cursor
             .crdt
-            .scan_path(old_value_path.as_path())
+            .scan_path(self.value_path.as_path())
             .next()
-            .expect("non empty")?;
+            .context("Concurrent access")??;
         let p = Path::new(&old);
         expired.insert(p.to_owned());
         let v = self.get_value(p)?;
@@ -594,293 +653,80 @@ impl<'a> ArrayCursor<'a> {
         new_value_path.position(&new_pos);
         new_value_path.prim_u64(self.uid);
         new_value_path.nonce(nonce());
-        self.cursor.sign(&mut new_value_path);
+        cursor.sign(&mut new_value_path);
         new_value_path.push_segment(v.value);
         store.insert(new_value_path);
 
         Ok(Causal { store, expired })
     }
 
-    fn get_meta(&self, path: Path) -> Result<array::ArrayMeta> {
+    fn tombstone(&self, cursor: &Cursor) -> Result<DotStore> {
+        let mut expired = DotStore::new();
+        for e in cursor
+            .crdt
+            .scan_path(self.value_path.as_path())
+            .chain(cursor.crdt.scan_path(self.meta_path.as_path()))
+        {
+            let e = e?;
+            let mut p = Path::new(&e).to_owned();
+            cursor.sign(&mut p);
+            expired.insert(p);
+        }
+        Ok(expired)
+    }
+
+    fn update(&self, cursor: &Cursor, mut inner: Causal) -> Result<Causal> {
+        // On an Update, besides updating the value of the top level pair, the replica also recommits the
+        // current position of that element. This is done by deleting all observed roots from the forest
+        // and adding a single tree of height 3 with the current position. This position is chosen
+        // deterministically from the set of current possible positions.
+
+        inner.expired.extend(self.tombstone(cursor)?);
+
+        // Commit current position
+        let mut p = self.meta_path.clone();
+        p.prim_u64(nonce());
+        p.prim_u64(nonce());
+        p.position(&self.pos);
+        p.nonce(nonce());
+        cursor.sign(&mut p);
+        inner.store.insert(p);
+        Ok(inner)
+    }
+
+    fn insert(&self, cursor: &Cursor, mut inner: Causal) -> Result<Causal> {
+        let mut p = self.meta_path.clone();
+        p.prim_u64(nonce());
+        p.prim_u64(nonce());
+        p.position(&self.pos);
+        p.nonce(nonce());
+        cursor.sign(&mut p);
+        inner.store.insert(p);
+        Ok(inner)
+    }
+
+    pub fn delete(&self, cursor: &Cursor) -> Result<Causal> {
+        Ok(Causal {
+            expired: self.tombstone(cursor)?,
+            store: Default::default(),
+        })
+    }
+    fn get_meta_data(&self, path: Path) -> Result<array::ArrayMeta> {
         array::ArrayMeta::from_path(path.strip_prefix(self.array_path.as_path())?.as_path())
     }
 
     fn get_value(&self, path: Path<'_>) -> Result<array::ArrayValue> {
         array::ArrayValue::from_path(path.strip_prefix(self.array_path.as_path())?.as_path())
     }
-
-    fn insert(&self, mut inner: Causal) -> Result<Causal> {
-        let mut p = self.meta();
-        p.prim_u64(nonce());
-        p.prim_u64(nonce());
-        p.position(&self.pos);
-        p.peer(&self.cursor.peer_id);
-        p.nonce(nonce());
-        inner.store.insert(p);
-        Ok(inner)
-    }
-
-    pub fn delete(&self) -> Result<Causal> {
-        let mut expired = DotStore::default();
-
-        for e in self
-            .cursor
-            .crdt
-            .scan_path(self.value().as_path())
-            .chain(self.cursor.crdt.scan_path(self.meta().as_path()))
-        {
-            let e = e?;
-            let mut p = Path::new(&e).to_owned();
-            self.cursor.sign(&mut p);
-            expired.insert(p);
-        }
-        Ok(Causal {
-            expired,
-            store: Default::default(),
-        })
-    }
-
-    // [..].meta.<uid>.<last_update>.<last_move>.<pos>.<peer>.<nonce>
-    // [..].values.<pos>.<uid>.<value>.<peer>.<nonce>
-    fn update(&self, mut inner: Causal) -> Result<Causal> {
-        // On an Update, besides updating the value of the top level pair, the replica also recommits the
-        // current position of that element. This is done by deleting all observed roots from the forest
-        // and adding a single tree of height 3 with the current position. This position is chosen
-        // deterministically from the set of current possible positions.
-        // update VALUES
-        for e in self.cursor.crdt.scan_path(self.value().as_path()) {
-            let e = e?;
-            inner.expired.insert(Path::new(&e).to_owned());
-        }
-        // clean up meta
-        for e in self.cursor.crdt.scan_path(self.meta().as_path()) {
-            let e = e?;
-            inner.expired.insert(Path::new(&e).to_owned());
-        }
-
-        // Commit current position
-        let mut p = self.meta();
-        p.prim_u64(nonce());
-        p.prim_u64(nonce());
-        p.position(&self.pos);
-        p.nonce(nonce());
-        self.cursor.sign(&mut p);
-        inner.store.insert(p);
-        Ok(inner)
-    }
-
-    fn augment_causal(&self, inner: Causal) -> Result<Causal> {
-        if self
-            .cursor
-            .crdt
-            .scan_path(self.value().as_path())
-            .next()
-            .is_some()
-        {
-            self.update(inner)
-        } else {
-            self.insert(inner)
-        }
-    }
-
-    // Copied Cursor API
-    /// Subscribe to a path.
-    pub fn subscribe(&self) -> Subscriber {
-        self.cursor.subscribe()
-    }
-
-    /// Checks permissions.
-    pub fn can(&self, peer: &PeerId, perm: Permission) -> Result<bool> {
-        self.cursor.can(peer, perm)
-    }
-
-    /// Returns if a flag is enabled.
-    pub fn enabled(&self) -> Result<bool> {
-        Cursor {
-            path: self.value(),
-            ..self.cursor
-        }
-        .enabled()
-    }
-
-    /// Returns an iterator of bools.
-    pub fn bools(&self) -> Result<impl Iterator<Item = Result<bool>>> {
-        Cursor {
-            path: self.value(),
-            ..self.cursor
-        }
-        .bools()
-    }
-
-    /// Returns an iterator of u64s.
-    pub fn u64s(&self) -> Result<impl Iterator<Item = Result<u64>>> {
-        Cursor {
-            path: self.value(),
-            ..self.cursor
-        }
-        .u64s()
-    }
-
-    /// Returns an iterator of i64s.
-    pub fn i64s(&self) -> Result<impl Iterator<Item = Result<i64>>> {
-        Cursor {
-            path: self.value(),
-            ..self.cursor
-        }
-        .i64s()
-    }
-
-    /// Returns an iterator of strs.
-    pub fn strs(&self) -> Result<impl Iterator<Item = Result<String>>> {
-        Cursor {
-            path: self.value(),
-            ..self.cursor
-        }
-        .strs()
-    }
-
-    /// Returns a cursor to a value in a table.
-    pub fn key_bool(mut self, key: bool) -> Result<Self> {
-        self.cursor = self.cursor.key_bool(key)?;
-        Ok(self)
-    }
-
-    /// Returns a cursor to a value in a table.
-    pub fn key_u64(mut self, key: u64) -> Result<Self> {
-        self.cursor = self.cursor.key_u64(key)?;
-        Ok(self)
-    }
-
-    /// Returns a cursor to a value in a table.
-    pub fn key_i64(mut self, key: i64) -> Result<Self> {
-        self.cursor = self.cursor.key_i64(key)?;
-        Ok(self)
-    }
-
-    /// Returns a cursor to a value in a table.
-    pub fn key_str(mut self, key: &str) -> Result<Self> {
-        self.cursor = self.cursor.key_str(key)?;
-        Ok(self)
-    }
-
-    /// Returns a cursor to a field in a struct.
-    pub fn field(mut self, key: &str) -> Result<Self> {
-        self.cursor = self.cursor.field(key)?;
-        Ok(self)
-    }
-
-    /// Enables a flag.
-    pub fn enable(&self) -> Result<Causal> {
-        let inner = Cursor {
-            path: self.value(),
-            ..self.cursor
-        }
-        .enable()?;
-        self.augment_causal(inner)
-    }
-
-    /// Disables a flag.
-    pub fn disable(&self) -> Result<Causal> {
-        let inner = Cursor {
-            path: self.value(),
-            ..self.cursor
-        }
-        .disable()?;
-        self.augment_causal(inner)
-    }
-
-    /// Assigns a value to a register.
-    pub fn assign_bool(&self, value: bool) -> Result<Causal> {
-        let c = Cursor {
-            path: self.value(),
-            ..self.cursor
-        };
-        let inner = c.assign_bool(value)?;
-        self.augment_causal(inner)
-    }
-
-    /// Assigns a value to a register.
-    pub fn assign_u64(&self, value: u64) -> Result<Causal> {
-        let c = Cursor {
-            path: self.value(),
-            ..self.cursor
-        };
-        let inner = c.assign_u64(value)?;
-        self.augment_causal(inner)
-    }
-
-    /// Assigns a value to a register.
-    pub fn assign_i64(&self, value: i64) -> Result<Causal> {
-        let c = Cursor {
-            path: self.value(),
-            ..self.cursor
-        };
-        let inner = c.assign_i64(value)?;
-        self.augment_causal(inner)
-    }
-
-    /// Assigns a value to a register.
-    pub fn assign_str(&self, value: &str) -> Result<Causal> {
-        let c = Cursor {
-            path: self.value(),
-            ..self.cursor
-        };
-        let inner = c.assign_str(value)?;
-        self.augment_causal(inner)
-    }
-
-    /// Removes a value from a map.
-    pub fn remove(&self) -> Result<Causal> {
-        let inner = Cursor {
-            path: self.value(),
-            ..self.cursor
-        }
-        .remove()?;
-        self.augment_causal(inner)
-    }
-
-    fn say(&self, policy: &Policy) -> Result<Causal> {
-        let inner = Cursor {
-            path: self.value(),
-            ..self.cursor
-        }
-        .say(policy)?;
-        self.augment_causal(inner)
-    }
-
-    /// Gives permission to a peer.
-    pub fn say_can(&self, actor: Option<PeerId>, perm: Permission) -> Result<Causal> {
-        self.say(&Policy::Can(actor.into(), perm))
-    }
-
-    /// Constructs a new condition.
-    pub fn cond(&self, actor: Actor, perm: Permission) -> Can {
-        Can::new(actor, perm, self.cursor.path.clone())
-    }
-
-    /// Gives conditional permission to a peer.
-    pub fn say_can_if(&self, actor: Actor, perm: Permission, cond: Can) -> Result<Causal> {
-        self.say(&Policy::CanIf(actor, perm, cond))
-    }
-
-    /// Revokes a policy.
-    pub fn revoke(&self, claim: Dot) -> Result<Causal> {
-        self.say(&Policy::Revokes(claim))
-    }
-}
-
-fn nonce() -> u64 {
-    let mut nonce = [0; 8];
-    getrandom::getrandom(&mut nonce).unwrap();
-    u64::from_le_bytes(nonce)
 }
 
 mod array {
+    use super::*;
+    use crate::Segment;
     use anyhow::Context;
 
-    use crate::Segment;
-
-    use super::*;
+    pub(crate) const ARRAY_VALUES: &str = "VALUES";
+    pub(crate) const ARRAY_META: &str = "META";
     pub(crate) struct ArrayValue {
         pub(crate) uid: u64,
         pub(crate) pos: Fraction,
@@ -926,8 +772,6 @@ mod array {
         pub(crate) uid: u64,
         pub(crate) pos: Fraction,
     }
-    pub(crate) const ARRAY_VALUES: &str = "VALUES";
-    pub(crate) const ARRAY_META: &str = "META";
     impl ArrayMeta {
         /// `path` needs to point into the array root dir
         pub(crate) fn from_path(path: Path) -> Result<Self> {

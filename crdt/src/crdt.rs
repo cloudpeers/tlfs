@@ -68,6 +68,12 @@ impl DotStore {
             self.insert(path.to_owned());
         }
     }
+
+    pub fn extend(&mut self, other: Self) {
+        for p in other.0.into_iter() {
+            self.insert(p);
+        }
+    }
 }
 
 impl FromIterator<PathBuf> for DotStore {
