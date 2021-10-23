@@ -12,10 +12,10 @@
 //! prim := prim_bool | prim_u64 | prim_i64 | prim_str
 //! key := prim
 //! field := prim_str
-//! ewflag := peer nonce
-//! mvreg := peer nonce prim
-//! gpolicy := peer policy
-//! path := doc (key | field)* (ewflag | mvreg | gpolicy)
+//! ewflag := nonce
+//! mvreg := nonce prim
+//! path := doc (key | field)* (ewflag | mvreg | policy) peer sig
+//! tombstone := path peer sig
 //! ```
 //!
 //! ## Case study: Using ORSet<Path> to construct an MVReg
