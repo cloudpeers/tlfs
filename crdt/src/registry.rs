@@ -25,7 +25,7 @@ impl Registry {
         Self(tree)
     }
 
-    /// Registers [`ArchivedLenses`] and returns the [`Hash`].
+    /// Registers archived [`Lenses`] and returns the [`struct@Hash`].
     pub fn register(&self, lenses: &[u8]) -> Result<Hash> {
         let lenses_ref = check_archived_root::<Lenses>(lenses).map_err(|err| anyhow!("{}", err))?;
         let schema = lenses_ref.to_schema()?;
@@ -42,28 +42,28 @@ impl Registry {
         Ok(hash)
     }
 
-    /// Returns true if the registry contains the [`Schema`] identified by [`Hash`].
+    /// Returns true if the registry contains the [`Schema`] identified by [`struct@Hash`].
     pub fn contains(&self, hash: &Hash) -> Result<bool> {
         let mut key = [0; 33];
         key[..32].copy_from_slice(hash.as_bytes());
         Ok(self.0.contains_key(key)?)
     }
 
-    /// Returns the [`ArchivedLenses`] identified by [`Hash`].
+    /// Returns the archived [`Lenses`] identified by [`struct@Hash`].
     pub fn lenses(&self, hash: &Hash) -> Result<Option<Ref<Lenses>>> {
         let mut key = [0; 33];
         key[..32].copy_from_slice(hash.as_bytes());
         Ok(self.0.get(key)?.map(Ref::new))
     }
 
-    /// Returns the [`ArchivedSchema`] identified by [`Hash`].
+    /// Returns the archived [`Schema`] identified by [`struct@Hash`].
     pub fn schema(&self, hash: &Hash) -> Result<Option<Ref<Schema>>> {
         let mut key = [1; 33];
         key[..32].copy_from_slice(hash.as_bytes());
         Ok(self.0.get(key)?.map(Ref::new))
     }
 
-    /// Removes the [`Schema`] identified by [`Hash`] from the registry.
+    /// Removes the [`Schema`] identified by [`struct@Hash`] from the registry.
     pub fn remove(&self, hash: &Hash) -> Result<()> {
         let mut key1 = [0; 33];
         key1[..32].copy_from_slice(hash.as_bytes());

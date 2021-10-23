@@ -1,4 +1,3 @@
-#![allow(missing_docs)]
 use crate::crdt::Causal;
 use crate::path::{Path, Segment};
 use bytecheck::CheckBytes;
@@ -35,6 +34,7 @@ impl PrimitiveKind {
 
 /// Schema defines the set of allowable paths.
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Serialize)]
+#[archive_attr(allow(missing_docs))]
 #[archive_attr(derive(Debug, Eq, PartialEq))]
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
 #[repr(C)]
