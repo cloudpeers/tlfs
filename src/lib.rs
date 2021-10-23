@@ -2,7 +2,8 @@ mod sync;
 
 pub use libp2p::Multiaddr;
 pub use tlfs_crdt::{
-    Causal, DocId, Event, Hash, Keypair, Kind, Lens, PeerId, Permission, PrimitiveKind, Subscriber,
+    Causal, Cursor, DocId, Event, Hash, Keypair, Kind, Lens, PeerId, Permission, PrimitiveKind,
+    Subscriber,
 };
 
 use crate::sync::{Behaviour, ToLibp2pKeypair, ToLibp2pPublic};
@@ -13,7 +14,7 @@ use futures::stream::Stream;
 use libp2p::Swarm;
 use std::pin::Pin;
 use std::task::Poll;
-use tlfs_crdt::{Backend, Doc, Frontend};
+use tlfs_crdt::{Backend, Frontend};
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::EnvFilter;
 
@@ -68,7 +69,7 @@ impl Sdk {
         let keypair = frontend.keypair(&peer)?;
 
         let transport = libp2p::development_transport(keypair.to_libp2p()).await?;
-        let behaviour = Behaviour::new(backend);
+        let behaviour = Behaviour::new(backend)?;
         let mut swarm = Swarm::new(transport, behaviour, peer.to_libp2p().into_peer_id());
         swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse().unwrap())?;
 
@@ -77,7 +78,10 @@ impl Sdk {
             while let Poll::Ready(Some(cmd)) = Pin::new(&mut rx).poll_next(cx) {
                 match cmd {
                     Command::AddAddress(peer, addr) => {
-                        swarm.behaviour_mut().add_address(&peer, addr)
+                        swarm.behaviour_mut().add_address(&peer, addr);
+                        if let Err(err) = swarm.dial(&peer.to_libp2p().into_peer_id()) {
+                            tracing::error!("{}", err);
+                        }
                     }
                     Command::RemoveAddress(peer, addr) => {
                         swarm.behaviour_mut().remove_address(&peer, &addr)
@@ -86,8 +90,11 @@ impl Sdk {
                         let addrs = swarm.listeners().cloned().collect::<Vec<_>>();
                         ch.send(addrs).ok();
                     }
-                    Command::Unjoin(doc, peer) => {
-                        swarm.behaviour_mut().request_unjoin(&peer, doc).ok();
+                    Command::Subscribe(doc) => {
+                        swarm.behaviour_mut().subscribe(&doc);
+                    }
+                    Command::Broadcast(doc, causal) => {
+                        swarm.behaviour_mut().broadcast(&doc, causal).ok();
                     }
                 };
             }
@@ -136,25 +143,61 @@ impl Sdk {
 
     pub fn create_doc(&mut self, schema: &Hash) -> Result<Doc> {
         let peer_id = self.peer_id();
-        self.frontend
-            .create_doc(*peer_id, schema, Keypair::generate())
+        let doc = self
+            .frontend
+            .create_doc(*peer_id, schema, Keypair::generate())?;
+        self.swarm
+            .unbounded_send(Command::Subscribe(*doc.id()))
+            .ok();
+        Ok(Doc::new(doc, self.swarm.clone()))
     }
 
     pub fn add_doc(&self, id: DocId, schema: &Hash) -> Result<Doc> {
         let peer_id = self.peer_id();
-        self.frontend.add_doc(id, peer_id, schema)
+        let doc = self.frontend.add_doc(id, peer_id, schema)?;
+        self.swarm
+            .unbounded_send(Command::Subscribe(*doc.id()))
+            .ok();
+        Ok(Doc::new(doc, self.swarm.clone()))
     }
 
     pub fn doc(&self, id: DocId) -> Result<Doc> {
-        self.frontend.doc(id)
+        let doc = self.frontend.doc(id)?;
+        Ok(Doc::new(doc, self.swarm.clone()))
     }
 
     pub fn remove_doc(&self, id: &DocId) -> Result<()> {
         self.frontend.remove_doc(id)
     }
+}
 
-    pub fn unjoin(&self, doc: DocId, peer: PeerId) {
-        self.swarm.unbounded_send(Command::Unjoin(doc, peer)).ok();
+pub struct Doc {
+    doc: tlfs_crdt::Doc,
+    swarm: mpsc::UnboundedSender<Command>,
+}
+
+impl Doc {
+    fn new(doc: tlfs_crdt::Doc, swarm: mpsc::UnboundedSender<Command>) -> Self {
+        Self { doc, swarm }
+    }
+
+    /// Returns the document identifier.
+    pub fn id(&self) -> &DocId {
+        self.doc.id()
+    }
+
+    /// Returns a cursor for the document.
+    pub fn cursor(&self) -> Cursor<'_> {
+        self.doc.cursor()
+    }
+
+    /// Applies a transaction to the document.
+    pub fn apply(&self, causal: Causal) -> Result<()> {
+        self.doc.apply(&causal)?;
+        self.swarm
+            .unbounded_send(Command::Broadcast(*self.id(), causal))
+            .ok();
+        Ok(())
     }
 }
 
@@ -162,7 +205,8 @@ enum Command {
     AddAddress(PeerId, Multiaddr),
     RemoveAddress(PeerId, Multiaddr),
     Addresses(oneshot::Sender<Vec<Multiaddr>>),
-    Unjoin(DocId, PeerId),
+    Subscribe(DocId),
+    Broadcast(DocId, Causal),
 }
 
 #[cfg(test)]
@@ -209,7 +253,7 @@ mod tests {
             .key_u64(0)?
             .field("title")?
             .assign_str(title)?;
-        doc.apply(&op)?;
+        doc.apply(op)?;
 
         let value = doc
             .cursor()
@@ -229,16 +273,13 @@ mod tests {
         let op = doc
             .cursor()
             .say_can(Some(*sdk2.peer_id()), Permission::Write)?;
-        doc.apply(&op)?;
+        doc.apply(op)?;
 
         for addr in sdk.addresses().await {
             sdk2.add_address(*sdk.peer_id(), addr);
         }
         let doc2 = sdk2.add_doc(*doc.id(), &hash2)?;
-
         let mut sub = doc2.cursor().field("tasks")?.subscribe();
-        sdk2.unjoin(*doc.id(), *sdk.peer_id());
-
         let mut exit = false;
         while !exit {
             if let Some(iter) = Pin::new(&mut sub).next().await {
