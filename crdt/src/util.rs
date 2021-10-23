@@ -15,6 +15,7 @@ where
     ser.into_serializer().into_inner().to_vec()
 }
 
+/// Owned zero copy bytes encoding `T`.
 #[derive(Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Ref<T> {
     marker: PhantomData<T>,
@@ -22,6 +23,7 @@ pub struct Ref<T> {
 }
 
 impl<T: Archive> Ref<T> {
+    /// Creates a new [`Ref`] from a [`sled::IVec`]
     pub fn new(bytes: sled::IVec) -> Self {
         Self {
             marker: PhantomData,
@@ -29,6 +31,7 @@ impl<T: Archive> Ref<T> {
         }
     }
 
+    /// Checks the byte slice and copies it into an owned buffer.
     pub fn checked<'a>(buffer: &'a [u8]) -> Result<Self>
     where
         Archived<T>: CheckBytes<DefaultValidator<'a>> + 'static,
@@ -37,6 +40,7 @@ impl<T: Archive> Ref<T> {
         Ok(Self::new(buffer.into()))
     }
 
+    /// Serializes `T` into a zero-copy byte slice.
     pub fn archive(t: &T) -> Self
     where
         T: Serialize<AllocSerializer<256>>,
@@ -44,6 +48,7 @@ impl<T: Archive> Ref<T> {
         Self::new(archive(t).into())
     }
 
+    /// Deserializes the owned bytes.
     pub fn to_owned(&self) -> Result<T>
     where
         Archived<T>: Deserialize<T, rkyv::Infallible>,
@@ -51,6 +56,7 @@ impl<T: Archive> Ref<T> {
         Ok(self.as_ref().deserialize(&mut rkyv::Infallible)?)
     }
 
+    /// Returns the serialized byte slice.
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes
     }

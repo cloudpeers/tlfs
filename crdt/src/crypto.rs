@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use crate::id::PeerId;
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;

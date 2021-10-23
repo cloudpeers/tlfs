@@ -128,6 +128,7 @@
 //! However for correct operation we need to also prove that encrypted updates don't violate the
 //! invariants and that the author had permission to make the change. In additon homomorphic
 //! transforms which preserve the zero knowledge proofs will be necessary.
+#![deny(missing_docs)]
 mod acl;
 mod crdt;
 mod crypto;
@@ -144,18 +145,18 @@ mod schema;
 mod subscriber;
 mod util;
 
-pub use crate::acl::{Permission, Policy};
+pub use crate::acl::{Actor, Permission, Policy};
 pub use crate::crdt::{Causal, CausalContext};
 pub use crate::crypto::{
     ArchivedEncrypted, ArchivedSigned, Encrypted, Key, KeyNonce, Keypair, Signed,
 };
 pub use crate::cursor::Cursor;
 pub use crate::doc::{Backend, Doc, Frontend};
-pub use crate::dotset::{AbstractDotSet, Dot, DotSet};
+pub use crate::dotset::{ArchivedDotSet, Dot, DotSet};
 pub use crate::id::{DocId, PeerId};
 pub use crate::lens::{ArchivedKind, ArchivedLens, ArchivedLenses, Kind, Lens, LensRef, Lenses};
 pub use crate::path::{Path, PathBuf, Segment};
-pub use crate::registry::{Hash, Registry, EMPTY_HASH, EMPTY_LENSES, EMPTY_SCHEMA};
-pub use crate::schema::{ArchivedSchema, PrimitiveKind, Prop, Schema};
-pub use crate::subscriber::{Event, Subscriber};
+pub use crate::registry::{Hash, EMPTY_HASH, EMPTY_LENSES, EMPTY_SCHEMA};
+pub use crate::schema::{ArchivedSchema, PrimitiveKind, Schema};
+pub use crate::subscriber::{Batch, Event, Iter, Subscriber};
 pub use crate::util::Ref;

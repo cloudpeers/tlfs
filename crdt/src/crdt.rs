@@ -1,5 +1,5 @@
 use crate::acl::{Acl, Permission};
-use crate::dotset::{AbstractDotSet, DotSet};
+use crate::dotset::DotSet;
 use crate::id::{DocId, PeerId};
 use crate::lens::ArchivedLenses;
 use crate::path::{Path, PathBuf};
@@ -83,17 +83,19 @@ impl FromIterator<PathBuf> for DotStore {
     }
 }
 
+/// Represents the state of a crdt.
 #[derive(Clone, Default, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(Debug, CheckBytes))]
 #[repr(C)]
 pub struct CausalContext {
-    /// the dots to be considered. These are the dots in the store.
+    /// Store dots. These are the dots in the store.
     pub(crate) store: DotSet,
-    /// the expired dots. The intersection of this and dots must be empty.
+    /// Expired dots. The intersection of this and dots must be empty.
     pub(crate) expired: DotSet,
 }
 
 impl CausalContext {
+    /// Creates an empty `CausalContext`.
     pub fn new() -> Self {
         Self {
             store: Default::default(),
@@ -101,20 +103,24 @@ impl CausalContext {
         }
     }
 
+    /// Returns the store dots. These are the active dots in the store.
     pub fn store(&self) -> &DotSet {
         &self.store
     }
 
+    /// Returns the expired dots. These are the tombstoned dots in the store.
     pub fn expired(&self) -> &DotSet {
         &self.expired
     }
 }
 
 impl ArchivedCausalContext {
+    /// Returns the store dots. These are the active dots in the store.
     pub fn store(&self) -> &Archived<DotSet> {
         &self.store
     }
 
+    /// Returns the expired dots. These are the tombstoned dots in the store.
     pub fn expired(&self) -> &Archived<DotSet> {
         &self.expired
     }
@@ -129,6 +135,8 @@ impl std::fmt::Debug for CausalContext {
     }
 }
 
+/// Represents a state transition of a crdt. Multiple state transitions can be combined
+/// together into an atomic transaction.
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(Debug, CheckBytes))]
 #[repr(C)]

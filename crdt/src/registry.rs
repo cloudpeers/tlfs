@@ -5,13 +5,17 @@ use anyhow::{anyhow, Result};
 pub use blake3::Hash;
 use rkyv::validation::validators::check_archived_root;
 
+/// Equivalent to `Ref::archive(&Lenses::new(vec![])).as_bytes()`.
 pub const EMPTY_LENSES: [u8; 8] = [0; 8];
+/// Equivalent to `Ref::archive(&Schema::Null).as_bytes()`.
 pub const EMPTY_SCHEMA: [u8; 12] = [0; 12];
+/// Equivalent to `blake3::hash(&EMPTY_LENSES)`.
 pub const EMPTY_HASH: [u8; 32] = [
     113, 224, 169, 145, 115, 86, 73, 49, 192, 184, 172, 197, 45, 38, 133, 168, 227, 156, 100, 220,
     82, 227, 208, 35, 144, 253, 172, 42, 18, 177, 85, 203,
 ];
 
+/// Lens registry.
 #[derive(Clone)]
 pub struct Registry(sled::Tree);
 

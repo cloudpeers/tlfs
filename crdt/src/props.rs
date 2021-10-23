@@ -3,7 +3,7 @@ use crate::crdt::{Causal, CausalContext, Crdt, DotStore};
 use crate::id::{DocId, PeerId};
 use crate::lens::{Kind, Lens};
 use crate::path::PathBuf;
-use crate::schema::{PrimitiveKind, Prop, Schema};
+use crate::schema::{PrimitiveKind, Schema};
 use crate::util::Ref;
 use proptest::collection::SizeRange;
 use proptest::prelude::*;
@@ -16,7 +16,7 @@ pub enum Primitive {
     Str(String),
 }
 
-pub fn arb_prop() -> impl Strategy<Value = Prop> {
+pub fn arb_prop() -> impl Strategy<Value = String> {
     "[a-z]"
 }
 
