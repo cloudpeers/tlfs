@@ -1,11 +1,14 @@
+#![allow(missing_docs)]
 use crate::path::{Path, PathBuf, Segment};
-use crate::schema::{PrimitiveKind, Prop, Schema};
+use crate::schema::{PrimitiveKind, Schema};
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
 use rkyv::ser::serializers::AllocSerializer;
 use rkyv::ser::Serializer;
 use rkyv::string::ArchivedString;
 use rkyv::{Archive, Serialize};
+
+type Prop = String;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Archive, Serialize)]
 #[archive_attr(derive(Clone, Copy, Debug, Eq, PartialEq, CheckBytes))]

@@ -8,6 +8,7 @@ use crepe::crepe;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::BTreeSet;
 
+/// Permission type.
 #[derive(
     Clone,
     Copy,
@@ -25,8 +26,6 @@ use std::collections::BTreeSet;
 #[archive(as = "Permission")]
 #[repr(u8)]
 pub enum Permission {
-    /// Permission to read ciphertext
-    Sync,
     /// Permission to read plaintext, implies sync
     Read,
     /// Permission to write, implies read
@@ -38,17 +37,23 @@ pub enum Permission {
 }
 
 impl Permission {
+    /// Permission can be delegated with `Control` permissions.
     pub fn controllable(self) -> bool {
-        matches!(self, Self::Sync | Self::Read | Self::Write)
+        matches!(self, Self::Read | Self::Write)
     }
 }
 
+/// Actor
 #[derive(Clone, Copy, Eq, Hash, PartialEq, Ord, PartialOrd, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Ord, PartialOrd, CheckBytes))]
 #[repr(C)]
 pub enum Actor {
+    /// A keypair identified by it's public key.
     Peer(PeerId),
+    /// Any public key.
     Anonymous,
+    /// Unbound public key which will be bound by the condition
+    /// in a conditional statement.
     Unbound,
 }
 
@@ -106,31 +111,35 @@ impl Can {
     }
 }
 
+/// Policy statement.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Ord, PartialOrd, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(Debug, Eq, Hash, PartialEq, Ord, PartialOrd, CheckBytes))]
 pub enum Policy {
+    /// Unconditional statement; An actor has permission.
     Can(Actor, Permission),
+    /// Conditional statement; An actor has permission if the condition is met.
     CanIf(Actor, Permission, Can),
+    /// Revocation statement.
     Revokes(Dot),
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct CanRef<'a> {
+struct CanRef<'a> {
     actor: Actor,
     perm: Permission,
     path: Path<'a>,
 }
 
 impl<'a> CanRef<'a> {
-    pub fn actor(self) -> Actor {
+    fn actor(self) -> Actor {
         self.actor
     }
 
-    pub fn perm(self) -> Permission {
+    fn perm(self) -> Permission {
         self.perm
     }
 
-    pub fn path(self) -> Path<'a> {
+    fn path(self) -> Path<'a> {
         self.path
     }
 

@@ -67,6 +67,7 @@ pub enum Segment {
     Policy(Policy),
     /// Path identifier.
     Dot(Dot),
+    /// Signature primitive.
     Sig(Signature),
 }
 

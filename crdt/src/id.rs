@@ -10,6 +10,7 @@ use rkyv::{Archive, Deserialize, Serialize};
 pub struct DocId([u8; 32]);
 
 impl DocId {
+    /// Creates a new [`DocId`] from a `[[u8; 32]]`.
     pub fn new(id: [u8; 32]) -> Self {
         Self(id)
     }
@@ -65,6 +66,7 @@ impl std::str::FromStr for DocId {
 pub struct PeerId([u8; 32]);
 
 impl PeerId {
+    /// Creates a new [`PeerId`] from a `[[u8; 32]]`.
     pub fn new(id: [u8; 32]) -> Self {
         Self(id)
     }

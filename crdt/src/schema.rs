@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use crate::crdt::Causal;
 use crate::path::{Path, Segment};
 use bytecheck::CheckBytes;
@@ -5,20 +6,23 @@ use ed25519_dalek::{PublicKey, Verifier};
 use rkyv::{Archive, Serialize};
 use std::collections::BTreeMap;
 
-pub type Prop = String;
-
+/// Kind of a primitive value.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Archive, CheckBytes, Serialize)]
 #[archive(as = "PrimitiveKind")]
 #[repr(u8)]
 pub enum PrimitiveKind {
+    /// Kind of [`bool`].
     Bool,
+    /// Kind of [`u64`].
     U64,
+    /// Kind of [`i64`].
     I64,
+    /// Kind of [`String`].
     Str,
 }
 
 impl PrimitiveKind {
-    pub fn validate(self, seg: Segment) -> bool {
+    fn validate(self, seg: Segment) -> bool {
         matches!(
             (self, seg),
             (Self::Bool, Segment::Bool(_))
@@ -29,19 +33,28 @@ impl PrimitiveKind {
     }
 }
 
+/// Schema defines the set of allowable paths.
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Serialize)]
 #[archive_attr(derive(Debug, Eq, PartialEq))]
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
 #[repr(C)]
 pub enum Schema {
+    /// Identity schema that contains only the empty [`Path`].
     Null,
+    /// Flag schema contains  paths with a single nonce segment.
     Flag,
+    /// Reg schema contains paths with a nonce and a primitive of kind [`PrimitiveKind`].
     Reg(PrimitiveKind),
+    /// Table schema contains paths with a primitive of kind [`PrimitiveKind`] and a sequence
+    /// of segments matching [`Schema`].
     Table(PrimitiveKind, #[omit_bounds] Box<Schema>),
-    Struct(#[omit_bounds] BTreeMap<Prop, Schema>),
+    /// Struct schema contains paths with a primitive of kind [`PrimitiveKind::Str`] and a
+    /// sequence of segments matching [`Schema`].
+    Struct(#[omit_bounds] BTreeMap<String, Schema>),
 }
 
 impl ArchivedSchema {
+    /// Returns if [`Causal`] matches [`ArchivedSchema`].
     pub fn validate(&self, causal: &Causal) -> bool {
         self._validate(causal) == Some(true)
     }

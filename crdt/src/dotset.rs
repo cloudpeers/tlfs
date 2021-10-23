@@ -12,6 +12,7 @@ use std::iter::FromIterator;
 pub struct Dot([u8; 32]);
 
 impl Dot {
+    /// Creates a new [`Dot`] from a [`[u8; 32]`].
     pub fn new(dot: [u8; 32]) -> Self {
         Self(dot)
     }
@@ -67,18 +68,47 @@ impl std::str::FromStr for Dot {
 pub struct DotSet(BTreeSet<Dot>);
 
 impl DotSet {
+    /// Creates a new empty set.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Returns an iterator of [`Dot`].
+    pub fn iter(&self) -> impl Iterator<Item = &Dot> + '_ {
+        self.0.iter()
+    }
+
+    /// Returns true if the [`DotSet`] contains the [`Dot`].
+    pub fn contains(&self, dot: &Dot) -> bool {
+        self.0.contains(dot)
+    }
+
+    /// Inserts a [`Dot`] into the [`DotSet`].
     pub fn insert(&mut self, dot: Dot) {
         self.0.insert(dot);
     }
 
-    pub fn union(&mut self, other: &impl AbstractDotSet) {
+    /// Inserts all [`Dot`]s from a [`DotSet`].
+    pub fn union(&mut self, other: &Self) {
         for dot in other.iter() {
             self.insert(*dot);
         }
+    }
+
+    /// Returns a new [`DotSet`] containing all [`Dot`]s not in [`ArchivedDotSet`].
+    pub fn difference(&self, other: &ArchivedDotSet) -> DotSet {
+        self.iter()
+            .filter(|dot| !other.0.contains_key(dot))
+            .copied()
+            .collect()
+    }
+
+    /// Returns a new [`DotSet`] containing all [`Dot`]s in [`DotSet`].
+    pub fn intersection(&self, other: &Self) -> DotSet {
+        self.iter()
+            .filter(|dot| other.contains(dot))
+            .copied()
+            .collect()
     }
 }
 
@@ -89,54 +119,5 @@ impl FromIterator<Dot> for DotSet {
             res.insert(dot);
         }
         res
-    }
-}
-
-pub trait AbstractDotSet {
-    fn iter(&self) -> Box<dyn Iterator<Item = &Dot> + '_>;
-    fn contains(&self, dot: &Dot) -> bool;
-
-    fn difference(&self, other: &impl AbstractDotSet) -> DotSet {
-        self.iter()
-            .filter(|dot| !other.contains(dot))
-            .copied()
-            .collect()
-    }
-
-    fn intersection(&self, other: &impl AbstractDotSet) -> DotSet {
-        self.iter()
-            .filter(|dot| other.contains(dot))
-            .copied()
-            .collect()
-    }
-
-    fn to_dotset(&self) -> DotSet;
-}
-
-impl AbstractDotSet for DotSet {
-    fn iter(&self) -> Box<dyn Iterator<Item = &Dot> + '_> {
-        Box::new(self.0.iter())
-    }
-
-    fn contains(&self, dot: &Dot) -> bool {
-        self.0.contains(dot)
-    }
-
-    fn to_dotset(&self) -> DotSet {
-        self.clone()
-    }
-}
-
-impl AbstractDotSet for ArchivedDotSet {
-    fn iter(&self) -> Box<dyn Iterator<Item = &Dot> + '_> {
-        Box::new(self.0.iter())
-    }
-
-    fn contains(&self, dot: &Dot) -> bool {
-        self.0.contains_key(dot)
-    }
-
-    fn to_dotset(&self) -> DotSet {
-        self.0.iter().copied().collect()
     }
 }
