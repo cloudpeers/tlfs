@@ -128,7 +128,7 @@
 //! However for correct operation we need to also prove that encrypted updates don't violate the
 //! invariants and that the author had permission to make the change. In additon homomorphic
 //! transforms which preserve the zero knowledge proofs will be necessary.
-#![deny(missing_docs)]
+#![warn(missing_docs)]
 mod acl;
 mod crdt;
 mod crypto;
@@ -147,9 +147,7 @@ mod util;
 
 pub use crate::acl::{Actor, Permission, Policy};
 pub use crate::crdt::{Causal, CausalContext};
-pub use crate::crypto::{
-    ArchivedEncrypted, ArchivedSigned, Encrypted, Key, KeyNonce, Keypair, Signed,
-};
+pub use crate::crypto::Keypair;
 pub use crate::cursor::Cursor;
 pub use crate::doc::{Backend, Doc, Frontend};
 pub use crate::dotset::{ArchivedDotSet, Dot, DotSet};

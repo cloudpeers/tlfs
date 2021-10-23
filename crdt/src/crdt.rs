@@ -179,7 +179,7 @@ impl Causal {
             .retain(|path| !expired.contains(path.as_path()));
     }
 
-    /// Returns the difference of a transaction and a [`CasualContext`].
+    /// Returns the difference of a transaction and a [`CausalContext`].
     pub fn unjoin(&self, ctx: &CausalContext) -> Self {
         let mut expired = DotStore::new();
         for path in self.expired.iter() {

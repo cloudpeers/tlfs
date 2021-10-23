@@ -171,7 +171,7 @@ impl std::fmt::Debug for Docs {
     }
 }
 
-/// The crdt [`Backend`] is the main entry point to interact with [`tlfs_crdt`].
+/// The crdt [`Backend`] is the main entry point to interact with this crate.
 pub struct Backend {
     registry: Registry,
     crdt: Crdt,
@@ -291,7 +291,7 @@ impl Backend {
         self.crdt.unjoin(peer_id, doc, ctx)
     }
 
-    /// Transforms a document into a the [`Schema`] identified by [`Hash`].
+    /// Transforms a document into a the [`Schema`] identified by [`struct@Hash`].
     pub fn transform(&mut self, id: &DocId, schema_id: &Hash) -> Result<()> {
         let doc_schema_id = self.docs.schema_id(id)?;
         let doc_lenses = self
