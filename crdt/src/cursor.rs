@@ -10,6 +10,7 @@ use crate::subscriber::Subscriber;
 use anyhow::{anyhow, Context, Result};
 use rkyv::Archived;
 
+/// A cursor into a document used to construct transactions.
 #[derive(Clone, Debug)]
 pub struct Cursor<'a> {
     key: Keypair,
@@ -23,6 +24,7 @@ pub struct Cursor<'a> {
 }
 
 impl<'a> Cursor<'a> {
+    /// Creates a new [`Cursor`].
     pub fn new(key: Keypair, id: DocId, schema: &'a Archived<Schema>, crdt: &'a Crdt) -> Self {
         let mut path = PathBuf::new();
         path.doc(&id);

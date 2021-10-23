@@ -1,5 +1,5 @@
 use crate::acl::{Acl, Permission};
-use crate::dotset::{AbstractDotSet, DotSet};
+use crate::dotset::DotSet;
 use crate::id::{DocId, PeerId};
 use crate::lens::ArchivedLenses;
 use crate::path::{Path, PathBuf};
@@ -89,17 +89,19 @@ impl FromIterator<PathBuf> for DotStore {
     }
 }
 
+/// Represents the state of a crdt.
 #[derive(Clone, Default, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(Debug, CheckBytes))]
 #[repr(C)]
 pub struct CausalContext {
-    /// the dots to be considered. These are the dots in the store.
+    /// Store dots. These are the dots in the store.
     pub(crate) store: DotSet,
-    /// the expired dots. The intersection of this and dots must be empty.
+    /// Expired dots. The intersection of this and dots must be empty.
     pub(crate) expired: DotSet,
 }
 
 impl CausalContext {
+    /// Creates an empty `CausalContext`.
     pub fn new() -> Self {
         Self {
             store: Default::default(),
@@ -107,20 +109,24 @@ impl CausalContext {
         }
     }
 
+    /// Returns the store dots. These are the active dots in the store.
     pub fn store(&self) -> &DotSet {
         &self.store
     }
 
+    /// Returns the expired dots. These are the tombstoned dots in the store.
     pub fn expired(&self) -> &DotSet {
         &self.expired
     }
 }
 
 impl ArchivedCausalContext {
+    /// Returns the store dots. These are the active dots in the store.
     pub fn store(&self) -> &Archived<DotSet> {
         &self.store
     }
 
+    /// Returns the expired dots. These are the tombstoned dots in the store.
     pub fn expired(&self) -> &Archived<DotSet> {
         &self.expired
     }
@@ -135,6 +141,8 @@ impl std::fmt::Debug for CausalContext {
     }
 }
 
+/// Represents a state transition of a crdt. Multiple state transitions can be combined
+/// together into an atomic transaction.
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(Debug, CheckBytes))]
 #[repr(C)]
@@ -144,14 +152,17 @@ pub struct Causal {
 }
 
 impl Causal {
+    /// Returns the store. These are the new paths created by the transaction.
     pub fn store(&self) -> &DotStore {
         &self.store
     }
 
+    /// Returns the expired. These are the paths tombstoned by the transaction.
     pub fn expired(&self) -> &DotStore {
         &self.expired
     }
 
+    /// Computes the [`CausalContext`] of this transaction.
     pub fn ctx(&self) -> CausalContext {
         let mut ctx = CausalContext::new();
         for path in self.store.iter() {
@@ -164,6 +175,7 @@ impl Causal {
         ctx
     }
 
+    /// Combines two transactions into a larger transaction.
     pub fn join(&mut self, that: &Causal) {
         self.store.union(&that.store);
         self.expired.union(&that.expired);
@@ -173,6 +185,7 @@ impl Causal {
             .retain(|path| !expired.contains(path.as_path()));
     }
 
+    /// Returns the difference of a transaction and a [`CausalContext`].
     pub fn unjoin(&self, ctx: &CausalContext) -> Self {
         let mut expired = DotStore::new();
         for path in self.expired.iter() {
@@ -191,6 +204,7 @@ impl Causal {
         Self { expired, store }
     }
 
+    /// Transforms a transaction so that it can be applied to a target document.
     pub fn transform(&mut self, from: &ArchivedLenses, to: &ArchivedLenses) {
         let mut store = DotStore::new();
         for path in self.store.iter() {

@@ -171,6 +171,7 @@ impl std::fmt::Debug for Docs {
     }
 }
 
+/// The crdt [`Backend`] is the main entry point to interact with this crate.
 pub struct Backend {
     registry: Registry,
     crdt: Crdt,
@@ -181,6 +182,7 @@ pub struct Backend {
 }
 
 impl Backend {
+    /// Creates a new [`Backend`] from a [`sled::Db`].
     pub fn new(db: sled::Db) -> Result<Self> {
         let registry = Registry::new(db.open_tree("lenses")?);
         let docs = Docs::new(db.open_tree("docs")?);
@@ -204,6 +206,7 @@ impl Backend {
         Ok(me)
     }
 
+    /// Creates a new in-memory backend for testing purposes.
     #[cfg(test)]
     pub fn memory() -> Result<Self> {
         use tracing_subscriber::fmt::format::FmtSpan;
@@ -220,11 +223,13 @@ impl Backend {
         Self::new(sled::Config::new().temporary(true).open()?)
     }
 
+    /// Registers lenses in the lens registry.
     pub fn register(&self, lenses: Vec<Lens>) -> Result<Hash> {
         self.registry
             .register(Ref::archive(&Lenses::new(lenses)).as_bytes())
     }
 
+    /// Returns a reference to the lens registry.
     pub fn registry(&self) -> &Registry {
         &self.registry
     }
@@ -238,6 +243,7 @@ impl Backend {
         self.engine.update_acl()
     }
 
+    /// Applies a remote change received from a peer.
     pub fn join(
         &mut self,
         peer_id: &PeerId,
@@ -275,6 +281,7 @@ impl Backend {
         Ok(())
     }
 
+    /// Returns the changes required to bring a peer up to speed.
     pub fn unjoin(
         &self,
         peer_id: &PeerId,
@@ -284,6 +291,7 @@ impl Backend {
         self.crdt.unjoin(peer_id, doc, ctx)
     }
 
+    /// Transforms a document into a the [`Schema`] identified by [`struct@Hash`].
     pub fn transform(&mut self, id: &DocId, schema_id: &Hash) -> Result<()> {
         let doc_schema_id = self.docs.schema_id(id)?;
         let doc_lenses = self
@@ -300,6 +308,7 @@ impl Backend {
         Ok(())
     }
 
+    /// Returns a clonable [`Frontend`].
     pub fn frontend(&self) -> Frontend {
         Frontend::new(
             self.crdt.clone(),
@@ -322,6 +331,7 @@ impl Future for Backend {
     }
 }
 
+/// Clonable [`Frontend`].
 #[derive(Clone)]
 pub struct Frontend {
     crdt: Crdt,
@@ -340,26 +350,32 @@ impl Frontend {
         }
     }
 
+    /// Adds a [`Keypair`].
     pub fn add_keypair(&self, key: Keypair) -> Result<PeerId> {
         self.docs.add_keypair(key)
     }
 
+    /// Generates a new [`Keypair`].
     pub fn generate_keypair(&self) -> Result<PeerId> {
         self.add_keypair(Keypair::generate())
     }
 
+    /// Returns the [`Keypair`] matching [`PeerId`].
     pub fn keypair(&self, peer: &PeerId) -> Result<Keypair> {
         self.docs.keypair(peer)
     }
 
+    /// Removes the [`Keypair`] matching [`PeerId`].
     pub fn remove_keypair(&self, peer: &PeerId) -> Result<()> {
         self.docs.remove_keypair(peer)
     }
 
+    /// Returns an iterator of [`DocId`].
     pub fn docs(&self) -> impl Iterator<Item = Result<DocId>> + '_ {
         self.docs.docs()
     }
 
+    /// Creates a new document using [`Keypair`] with initial schema and owner.
     pub fn create_doc(&self, owner: PeerId, schema: &Hash, la: Keypair) -> Result<Doc> {
         let id = DocId::new(la.peer_id().into());
         self.docs.create(&id, schema)?;
@@ -371,30 +387,37 @@ impl Frontend {
         self.doc(id)
     }
 
+    /// Adds an existing document identified by [`DocId`] with schema and associates the local
+    /// keypair identified by [`PeerId`].
     pub fn add_doc(&self, id: DocId, peer: &PeerId, schema: &Hash) -> Result<Doc> {
         self.docs.set_peer_id(&id, peer)?;
         self.docs.set_schema_id(&id, schema)?;
         self.doc(id)
     }
 
+    /// Removes a document identified by [`DocId`].
     pub fn remove_doc(&self, id: &DocId) -> Result<()> {
         self.crdt.remove(id)?;
         self.docs.remove(id)?;
         Ok(())
     }
 
+    /// Returns the local [`PeerId`] associated with a document.
     pub fn peer_id(&self, id: &DocId) -> Result<PeerId> {
         self.docs.peer_id(id)
     }
 
+    /// Changes the associated [`Keypair`] for a document.
     pub fn set_peer_id(&self, id: &DocId, peer: &PeerId) -> Result<()> {
         self.docs.set_peer_id(id, peer)
     }
 
+    /// Returns the current schema identifier of a document.
     pub fn schema_id(&self, id: &DocId) -> Result<Hash> {
         self.docs.schema_id(id)
     }
 
+    /// Returns the current lenses of a document.
     pub fn lenses(&self, id: &Hash) -> Result<Ref<Lenses>> {
         Ok(self
             .registry
@@ -402,6 +425,7 @@ impl Frontend {
             .unwrap_or_else(|| Ref::new(EMPTY_LENSES.as_ref().into())))
     }
 
+    /// Returns the current schema of a document.
     pub fn schema(&self, id: &Hash) -> Result<Ref<Schema>> {
         Ok(self
             .registry
@@ -409,15 +433,18 @@ impl Frontend {
             .unwrap_or_else(|| Ref::new(EMPTY_SCHEMA.as_ref().into())))
     }
 
+    /// Computes the [`CausalContext`] to sync with a remote peer.
     pub fn ctx(&self, id: &DocId) -> Result<CausalContext> {
         self.crdt.ctx(id)
     }
 
+    /// Opens a document.
     pub fn doc(&self, id: DocId) -> Result<Doc> {
         let peer_id = self.peer_id(&id)?;
         self.doc_as(id, &peer_id)
     }
 
+    /// Opens a document with a local keypair identified by [`PeerId`].
     pub fn doc_as(&self, id: DocId, peer_id: &PeerId) -> Result<Doc> {
         let hash = self.schema_id(&id)?;
         let schema = self.schema(&hash)?;
@@ -425,6 +452,7 @@ impl Frontend {
         Ok(Doc::new(id, self.clone(), key, schema))
     }
 
+    /// Applies a local change to a document.
     pub fn apply(&self, doc: &DocId, causal: &Causal) -> Result<()> {
         let peer = self.peer_id(doc)?;
         self.crdt.join(&peer, causal)?;
@@ -442,6 +470,7 @@ impl std::fmt::Debug for Frontend {
     }
 }
 
+/// A clonable document handle.
 #[derive(Debug, Clone)]
 pub struct Doc {
     id: DocId,
@@ -460,10 +489,12 @@ impl Doc {
         }
     }
 
+    /// Returns the [`DocId`].
     pub fn id(&self) -> &DocId {
         &self.id
     }
 
+    /// Computes the [`CausalContext`] to sync with a remote peer.
     pub fn ctx(&self) -> Result<CausalContext> {
         self.frontend.ctx(&self.id)
     }
@@ -473,6 +504,7 @@ impl Doc {
         Cursor::new(self.key, self.id, self.schema.as_ref(), &self.frontend.crdt)
     }
 
+    /// Applies a local change to the document.
     pub fn apply(&self, causal: &Causal) -> Result<()> {
         self.frontend.apply(&self.id, causal)
     }

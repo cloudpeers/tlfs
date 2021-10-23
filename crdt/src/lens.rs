@@ -1,5 +1,5 @@
 use crate::path::{Path, PathBuf, Segment};
-use crate::schema::{PrimitiveKind, Prop, Schema};
+use crate::schema::{PrimitiveKind, Schema};
 use anyhow::{anyhow, Result};
 use bytecheck::CheckBytes;
 use rkyv::ser::serializers::AllocSerializer;
@@ -7,19 +7,31 @@ use rkyv::ser::Serializer;
 use rkyv::string::ArchivedString;
 use rkyv::{Archive, Serialize};
 
+type Prop = String;
+
+/// Kind of a sequence of [`Path`] [`Segment`]s.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Archive, Serialize)]
+#[archive_attr(allow(missing_docs))]
 #[archive_attr(derive(Clone, Copy, Debug, Eq, PartialEq, CheckBytes))]
 #[repr(C)]
 pub enum Kind {
+    /// Empty kind.
     Null,
+    /// EWFlag kind.
     Flag,
+    /// MVReg with values of [`PrimitiveKind`].
     Reg(PrimitiveKind),
+    /// ORMap with keys of [`PrimitiveKind`].
     Table(PrimitiveKind),
+    /// Struct is a named tuple crdt.
     Struct,
+    /// ORArray.
     Array,
 }
 
+/// A [`Lens`] is a bidirectional transform on [`Schema`]s.
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Serialize)]
+#[archive_attr(allow(missing_docs))]
 #[archive_attr(derive(Debug, Eq, PartialEq, CheckBytes))]
 #[archive_attr(check_bytes(
     bound = "__C: rkyv::validation::ArchiveContext, <__C as rkyv::Fallible>::Error: std::error::Error"
@@ -27,24 +39,34 @@ pub enum Kind {
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
 #[repr(C)]
 pub enum Lens {
+    /// Makes a crdt of [`Kind`].
     Make(Kind),
+    /// Destroys a crdt of [`Kind`].
     Destroy(Kind),
+    /// Adds a field to a [`Kind::Struct`].
     AddProperty(Prop),
+    /// Removes a field from a [`Kind::Struct`].
     RemoveProperty(Prop),
+    /// Renames a field of a [`Kind::Struct`].
     RenameProperty(Prop, Prop),
+    /// Moves a field from a nested [`Kind::Struct`] to it's parent.
     HoistProperty(Prop, Prop),
+    /// Moves a field from a nested [`Kind::Struct`] to it's child.
     PlungeProperty(Prop, Prop),
+    /// Applies the [`Lens`] to a [`Kind::Struct`] field.
     LensIn(
         Prop,
         #[omit_bounds]
         #[archive_attr(omit_bounds)]
         Box<Lens>,
     ),
+    /// Applies the [`Lens`] to all values of a [`Kind::Array`].
     LensMap(
         #[omit_bounds]
         #[archive_attr(omit_bounds)]
         Box<Lens>,
     ),
+    /// Applies the [`Lens`] to all values of a [`Kind::Table`].
     LensMapValue(
         #[omit_bounds]
         #[archive_attr(omit_bounds)]
@@ -53,16 +75,19 @@ pub enum Lens {
 }
 
 impl Lens {
+    /// Wraps the [`Lens`] in a [`Lens::LensIn`].
     pub fn lens_in(self, prop: &str) -> Self {
         Self::LensIn(prop.into(), Box::new(self))
     }
 
+    /// Wraps the [`Lens`] in a [`Lens::LensMapValue`].
     pub fn lens_map_value(self) -> Self {
         Self::LensMapValue(Box::new(self))
     }
 }
 
 impl ArchivedLens {
+    /// Returns a [`LensRef`] to an [`ArchivedLens`].
     pub fn to_ref(&self) -> LensRef<'_> {
         match self {
             Self::Make(k) => LensRef::Make(*k),
@@ -79,21 +104,33 @@ impl ArchivedLens {
     }
 }
 
+/// Reversible reference to an [`ArchivedLens`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LensRef<'a> {
+    /// Reference to [`Lens::Make`].
     Make(ArchivedKind),
+    /// Reference to [`Lens::Destroy`].
     Destroy(ArchivedKind),
+    /// Reference to [`Lens::AddProperty`].
     AddProperty(&'a ArchivedString),
+    /// Reference to [`Lens::RemoveProperty`].
     RemoveProperty(&'a ArchivedString),
+    /// Reference to [`Lens::RenameProperty`].
     RenameProperty(&'a ArchivedString, &'a ArchivedString),
+    /// Reference to [`Lens::HoistProperty`].
     HoistProperty(&'a ArchivedString, &'a ArchivedString),
+    /// Reference to [`Lens::PlungeProperty`].
     PlungeProperty(&'a ArchivedString, &'a ArchivedString),
+    /// Reference to [`Lens::LensIn`].
     LensIn(bool, &'a ArchivedString, &'a ArchivedLens),
+    /// Reference to [`Lens::LensMap`].
     LensMap(bool, &'a ArchivedLens),
+    /// Reference to [`Lens::LensMapValue`].
     LensMapValue(bool, &'a ArchivedLens),
 }
 
 impl<'a> LensRef<'a> {
+    /// Reverse the [`ArchivedLens`].
     pub fn reverse(self) -> Self {
         match self {
             Self::Make(kind) => Self::Destroy(kind),
@@ -109,6 +146,7 @@ impl<'a> LensRef<'a> {
         }
     }
 
+    /// Reverses the [`ArchivedLens`] if `rev` is true.
     pub fn maybe_reverse(self, rev: bool) -> Self {
         if rev {
             self.reverse()
@@ -117,6 +155,7 @@ impl<'a> LensRef<'a> {
         }
     }
 
+    /// Applies the [`Lens`] to a [`Schema`].
     pub fn transform_schema(&self, s: &mut Schema) -> Result<()> {
         match (self, s) {
             (Self::Make(k), s) => {
@@ -235,6 +274,7 @@ impl<'a> LensRef<'a> {
         Ok(())
     }
 
+    /// Applies the [`Lens`] to a sequence of [`Path`] [`Segment`]s.
     pub fn transform_path(&self, path: &[Segment]) -> Vec<Segment> {
         match self {
             Self::Make(_) => {}
@@ -300,6 +340,7 @@ impl<'a> LensRef<'a> {
     }
 }
 
+/// An ordered sequence of [`Lens`]es.
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Serialize)]
 #[archive_attr(derive(Debug, Eq, PartialEq, CheckBytes))]
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
@@ -307,16 +348,20 @@ impl<'a> LensRef<'a> {
 pub struct Lenses(Vec<Lens>);
 
 impl Lenses {
+    /// Creates a new [`Lenses`] wrapper from a [`Vec<Lens>`].
     pub fn new(lenses: Vec<Lens>) -> Self {
         Self(lenses)
     }
 }
 
 impl ArchivedLenses {
+    /// Returns a reference to the [`ArchivedLenses`].
     pub fn lenses(&self) -> &[ArchivedLens] {
         &self.0
     }
 
+    /// Applies the [`Lens`]es to the identity schema [`Schema::Null`] and
+    /// returns the archived result.
     pub fn to_schema(&self) -> Result<Vec<u8>> {
         let mut schema = Schema::Null;
         for lens in self.0.as_ref() {
@@ -329,6 +374,8 @@ impl ArchivedLenses {
         Ok(bytes)
     }
 
+    /// Given another sequence of [`Lens`]es it returns the sequence of [`Lens`]es
+    /// required to transfrom from one [`Schema`] to another.
     pub fn transform<'a>(&'a self, b: &'a ArchivedLenses) -> Vec<LensRef<'a>> {
         let mut prefix = 0;
         for (a, b) in self.0.iter().zip(b.0.iter()) {
@@ -348,6 +395,8 @@ impl ArchivedLenses {
         c
     }
 
+    /// Transforms a [`Path`] valid in the source [`Schema`] to a [`PathBuf`] valid in the
+    /// target [`Schema`].
     pub fn transform_path(&self, path: Path, target: &ArchivedLenses) -> Option<PathBuf> {
         let mut segments: Vec<Segment> = path.child().unwrap().into_iter().collect();
         for lens in self.transform(target) {

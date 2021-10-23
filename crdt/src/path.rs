@@ -71,9 +71,9 @@ pub enum Segment {
     Policy(Policy),
     /// Path identifier.
     Dot(Dot),
-    // Positional identifier.
+    /// Positional identifier.
     Position(Fraction),
-    // Signature.
+    /// Signature primitive.
     Sig(Signature),
 }
 
@@ -256,6 +256,7 @@ impl PathBuf {
         self.0.extend(&[ty as u8]);
     }
 
+    /// Appends a [`Segment`].
     pub fn push_segment(&mut self, segment: Segment) {
         match segment {
             Segment::Doc(d) => self.doc(&d),
@@ -318,7 +319,7 @@ impl PathBuf {
         self.push(SegmentType::Dot, dot.as_ref());
     }
 
-    // Apends a position segment.
+    /// Apends a position segment.
     pub fn position(&mut self, data: &Fraction) {
         self.push(SegmentType::Position, data.as_ref());
     }
@@ -463,7 +464,7 @@ impl<'a> Path<'a> {
 
     /// Returns a path that, when joined onto `base`, yields `self`.
     pub fn strip_prefix(&self, base: Self) -> Result<PathBuf> {
-        Ok(iter_after(self.clone().into_iter(), base.into_iter())
+        Ok(iter_after((*self).into_iter(), base.into_iter())
             .context("StripPrefixError")?
             .collect())
     }

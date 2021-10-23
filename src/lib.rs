@@ -1,9 +1,13 @@
+//! The Local First SDK.
+//!
+//! See the `tlfs_crdt` docs for details of how it works.
+#![deny(missing_docs)]
 mod sync;
 
 pub use libp2p::Multiaddr;
 pub use tlfs_crdt::{
     Causal, Cursor, DocId, Event, Hash, Keypair, Kind, Lens, PeerId, Permission, PrimitiveKind,
-    Subscriber,
+    Schema, Subscriber,
 };
 
 use crate::sync::{Behaviour, ToLibp2pKeypair, ToLibp2pPublic};
@@ -18,11 +22,13 @@ use tlfs_crdt::{Backend, Frontend};
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::EnvFilter;
 
+/// Used to construct a new [`Sdk`]. Can migrate old documents to new [`Schema`]s at startup.
 pub struct Migrate {
     backend: Backend,
 }
 
 impl Migrate {
+    /// Create a new [`Migrate`] instance.
     pub fn new(db: sled::Db) -> Result<Self> {
         tracing_log::LogTracer::init().ok();
         let env = std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or_else(|_| "info".to_owned());
@@ -38,23 +44,28 @@ impl Migrate {
         Ok(Self { backend })
     }
 
+    /// Create a new in-memory [`Migrate`] instance.
     pub fn memory() -> Result<Self> {
         Self::new(sled::Config::new().temporary(true).open()?)
     }
 
+    /// Register a new [`Schema`].
     pub fn register(&self, lenses: Vec<Lens>) -> Result<Hash> {
         self.backend.register(lenses)
     }
 
+    /// Migrate a document to a registered [`Schema`].
     pub fn migrate(&mut self, doc: &DocId, hash: &Hash) -> Result<()> {
         self.backend.transform(doc, hash)
     }
 
+    /// Returns a new [`Sdk`] instance.
     pub async fn finish(self) -> Result<Sdk> {
         Sdk::new(self.backend).await
     }
 }
 
+/// Main entry point for `tlfs`.
 pub struct Sdk {
     frontend: Frontend,
     peer: PeerId,
@@ -111,22 +122,26 @@ impl Sdk {
         })
     }
 
+    /// Returns the [`PeerId`] of this [`Sdk`].
     pub fn peer_id(&self) -> &PeerId {
         &self.peer
     }
 
+    /// Adds a new [`Multiaddr`] for a [`PeerId`].
     pub fn add_address(&self, peer: PeerId, addr: Multiaddr) {
         self.swarm
             .unbounded_send(Command::AddAddress(peer, addr))
             .ok();
     }
 
+    /// Removes a [`Multiaddr`] of a [`PeerId`].
     pub fn remove_address(&self, peer: PeerId, addr: Multiaddr) {
         self.swarm
             .unbounded_send(Command::RemoveAddress(peer, addr))
             .ok();
     }
 
+    /// Returns the list of [`Multiaddr`] the [`Sdk`] is listening on.
     pub async fn addresses(&self) -> Vec<Multiaddr> {
         let (tx, rx) = oneshot::channel();
         if let Ok(()) = self.swarm.unbounded_send(Command::Addresses(tx)) {
@@ -137,10 +152,12 @@ impl Sdk {
         vec![]
     }
 
+    /// Returns an iterator of [`DocId`].
     pub fn docs(&self) -> impl Iterator<Item = Result<DocId>> + '_ {
         self.frontend.docs()
     }
 
+    /// Creates a new document with an initial [`Schema`].
     pub fn create_doc(&mut self, schema: &Hash) -> Result<Doc> {
         let peer_id = self.peer_id();
         let doc = self
@@ -152,6 +169,7 @@ impl Sdk {
         Ok(Doc::new(doc, self.swarm.clone()))
     }
 
+    /// Adds a document with a [`Schema`].
     pub fn add_doc(&self, id: DocId, schema: &Hash) -> Result<Doc> {
         let peer_id = self.peer_id();
         let doc = self.frontend.add_doc(id, peer_id, schema)?;
@@ -161,16 +179,19 @@ impl Sdk {
         Ok(Doc::new(doc, self.swarm.clone()))
     }
 
+    /// Returns a document handle.
     pub fn doc(&self, id: DocId) -> Result<Doc> {
         let doc = self.frontend.doc(id)?;
         Ok(Doc::new(doc, self.swarm.clone()))
     }
 
+    /// Removes a document.
     pub fn remove_doc(&self, id: &DocId) -> Result<()> {
         self.frontend.remove_doc(id)
     }
 }
 
+/// Document handle.
 pub struct Doc {
     doc: tlfs_crdt::Doc,
     swarm: mpsc::UnboundedSender<Command>,
