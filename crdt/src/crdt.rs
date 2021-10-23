@@ -146,14 +146,17 @@ pub struct Causal {
 }
 
 impl Causal {
+    /// Returns the store. These are the new paths created by the transaction.
     pub fn store(&self) -> &DotStore {
         &self.store
     }
 
+    /// Returns the expired. These are the paths tombstoned by the transaction.
     pub fn expired(&self) -> &DotStore {
         &self.expired
     }
 
+    /// Computes the [`CausalContext`] of this transaction.
     pub fn ctx(&self) -> CausalContext {
         let mut ctx = CausalContext::new();
         for path in self.store.iter() {
@@ -166,6 +169,7 @@ impl Causal {
         ctx
     }
 
+    /// Combines two transactions into a larger transaction.
     pub fn join(&mut self, that: &Causal) {
         self.store.union(&that.store);
         self.expired.union(&that.expired);
@@ -175,6 +179,7 @@ impl Causal {
             .retain(|path| !expired.contains(path.as_path()));
     }
 
+    /// Returns the difference of a transaction and a [`CasualContext`].
     pub fn unjoin(&self, ctx: &CausalContext) -> Self {
         let mut expired = DotStore::new();
         for path in self.expired.iter() {
@@ -193,6 +198,7 @@ impl Causal {
         Self { expired, store }
     }
 
+    /// Transforms a transaction so that it can be applied to a target document.
     pub fn transform(&mut self, from: &ArchivedLenses, to: &ArchivedLenses) {
         let mut store = DotStore::new();
         for path in self.store.iter() {

@@ -1,3 +1,4 @@
+#![deny(missing_docs)]
 mod sync;
 
 pub use libp2p::Multiaddr;
