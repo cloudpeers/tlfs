@@ -25,7 +25,11 @@ pub enum Kind {
     Table(PrimitiveKind),
     /// Struct is a named tuple crdt.
     Struct,
-    /// ORArray.
+    /// Observed-Remove Array (ORArray) supporting the following operations: insert, move, update,
+    /// and delete based on [Rinberg et al. 2021].
+    /// The precedence of concurrent operations is as follows: UPDATE > DELETE > MOVE.
+    ///
+    /// [Rinberg et al. 2021]: https://dl.acm.org/doi/10.1145/3447865.3457971
     Array,
 }
 

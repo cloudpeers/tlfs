@@ -16,11 +16,14 @@ use smallvec::SmallVec;
 pub struct Cursor<'a> {
     key: Keypair,
     peer_id: PeerId,
+    /// The [`DocId`] this cursor points into.
     id: DocId,
+    /// The [`Schema`] this [`Cursor`] is pointing to.
     schema: &'a Archived<Schema>,
     crdt: &'a Crdt,
+    /// The path this [`Cursor`] is pointing to.
     path: PathBuf,
-    /// If the cursor points into an array, this struct help with manipulating the outer ORArray
+    /// Helpers to work with nested ORArrays.
     array: SmallVec<[ArrayWrapper; 1]>,
 }
 
@@ -417,7 +420,7 @@ impl<'a> Cursor<'a> {
     }
 
     /// Augments a causal with array metadata if in an array, otherwise just returns the causal
-    /// unchanged
+    /// unchanged.
     fn augment_array(&self, mut inner: Causal) -> Result<Causal> {
         for a in &self.array {
             inner = a.augment_causal(self, inner)?;
@@ -426,7 +429,6 @@ impl<'a> Cursor<'a> {
     }
 }
 
-//
 fn nonce() -> u64 {
     let mut nonce = [0; 8];
     getrandom::getrandom(&mut nonce).unwrap();
@@ -434,6 +436,23 @@ fn nonce() -> u64 {
 }
 
 #[derive(Clone, Debug)]
+// The ORArray needs to store additional metadata additional to the actual value paths in order to
+// support insert, move, update, and delete semantics.
+// The paths are structured as follows:
+// <path_to_array>.VALUES.<pos>.<uid>.<nonce>.<sig>.<value>
+// <path_to_array>.META.<uid>.<nonce>.<nonce>.<pos>.<nonce>.<sig>
+//                         ^     ^      ^       ^
+//                         |     |      |       |
+//          Stable identifier    |      |       |
+//                  ID of last update   |       |
+//                            ID of last move   |
+//                                           Position
+// The uid is stable for the element and created upon insertion. The positional identifiers are
+// constructed as such that it's always possible to find one inbetween to existing ones. This way
+// elements can be inserted at arbitrary places without needed to shift parts of the existing
+// array.
+// The main reason for the duality of this approach is to have fast access to the actual values, as
+// the paths prefixed with `VALUES` are sorted according to `pos` and can thus be cheaply queried.
 struct ArrayWrapper {
     /// Absolute path to the array root
     array_path: PathBuf,
@@ -446,6 +465,7 @@ struct ArrayWrapper {
     /// meta path
     meta_path: PathBuf,
 }
+
 impl ArrayWrapper {
     /// Augments a `Causal` embedded into an `ORArray`.
     fn augment_causal(&self, cursor: &Cursor, inner: Causal) -> Result<Causal> {
@@ -466,7 +486,7 @@ impl ArrayWrapper {
         let array_path = cursor.path.clone();
         let array_value_root = {
             let mut p = array_path.clone();
-            p.prim_str(array::ARRAY_VALUES);
+            p.prim_str(array_util::ARRAY_VALUES);
             p
         };
         // TODO: use sled's size hint
@@ -478,7 +498,7 @@ impl ArrayWrapper {
             // Existing entry
             let entry = entry?;
             let p_c = cursor.path.clone();
-            let data = array::ArrayValue::from_path(
+            let data = array_util::ArrayValue::from_path(
                 Path::new(&entry).strip_prefix(p_c.as_path())?.as_path(),
             )
             .context("Reading array data")?;
@@ -494,7 +514,7 @@ impl ArrayWrapper {
                         .skip(s)
                         .map(move |p| {
                             p.and_then(|iv| {
-                                let meta = array::ArrayValue::from_path(
+                                let meta = array_util::ArrayValue::from_path(
                                     Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
                                 )?;
                                 Ok(meta.pos)
@@ -510,7 +530,7 @@ impl ArrayWrapper {
                             .scan_path(array_value_root.as_path())
                             .map(move |p| {
                                 p.and_then(|iv| {
-                                    let meta = array::ArrayValue::from_path(
+                                    let meta = array_util::ArrayValue::from_path(
                                         Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
                                     )?;
                                     Ok(meta.pos)
@@ -532,7 +552,7 @@ impl ArrayWrapper {
 
         let value_path = {
             let mut p = array_path.clone();
-            p.prim_str(array::ARRAY_VALUES);
+            p.prim_str(array_util::ARRAY_VALUES);
             p.position(&pos);
             p.prim_u64(uid);
             p
@@ -540,7 +560,7 @@ impl ArrayWrapper {
 
         let meta_path = {
             let mut p = array_path.clone();
-            p.prim_str(array::ARRAY_META);
+            p.prim_str(array_util::ARRAY_META);
             p.prim_u64(uid);
             p
         };
@@ -575,7 +595,7 @@ impl ArrayWrapper {
                         .skip(s)
                         .map(move |p| {
                             p.and_then(|iv| {
-                                let meta = array::ArrayValue::from_path(
+                                let meta = array_util::ArrayValue::from_path(
                                     Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
                                 )?;
                                 Ok(meta.pos)
@@ -590,7 +610,7 @@ impl ArrayWrapper {
                         .scan_path(self.value_path.as_path())
                         .map(move |p| {
                             p.and_then(|iv| {
-                                let meta = array::ArrayValue::from_path(
+                                let meta = array_util::ArrayValue::from_path(
                                     Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
                                 )?;
                                 Ok(meta.pos)
@@ -635,7 +655,7 @@ impl ArrayWrapper {
         }
         let mut new_value_path = {
             let mut p = self.array_path.clone();
-            p.prim_str(array::ARRAY_VALUES);
+            p.prim_str(array_util::ARRAY_VALUES);
             p
         };
         // remove old pos
@@ -659,6 +679,7 @@ impl ArrayWrapper {
         Ok(Causal { store, expired })
     }
 
+    /// Tombstones all value and meta paths
     fn tombstone(&self, cursor: &Cursor) -> Result<DotStore> {
         let mut expired = DotStore::new();
         for e in cursor
@@ -704,22 +725,22 @@ impl ArrayWrapper {
         Ok(inner)
     }
 
-    pub fn delete(&self, cursor: &Cursor) -> Result<Causal> {
+    fn delete(&self, cursor: &Cursor) -> Result<Causal> {
         Ok(Causal {
             expired: self.tombstone(cursor)?,
             store: Default::default(),
         })
     }
-    fn get_meta_data(&self, path: Path) -> Result<array::ArrayMeta> {
-        array::ArrayMeta::from_path(path.strip_prefix(self.array_path.as_path())?.as_path())
+    fn get_meta_data(&self, path: Path) -> Result<array_util::ArrayMeta> {
+        array_util::ArrayMeta::from_path(path.strip_prefix(self.array_path.as_path())?.as_path())
     }
 
-    fn get_value(&self, path: Path<'_>) -> Result<array::ArrayValue> {
-        array::ArrayValue::from_path(path.strip_prefix(self.array_path.as_path())?.as_path())
+    fn get_value(&self, path: Path<'_>) -> Result<array_util::ArrayValue> {
+        array_util::ArrayValue::from_path(path.strip_prefix(self.array_path.as_path())?.as_path())
     }
 }
 
-mod array {
+mod array_util {
     use super::*;
     use crate::Segment;
     use anyhow::Context;
