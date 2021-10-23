@@ -3,7 +3,7 @@ use crate::dotset::Dot;
 use crate::fraction::Fraction;
 use crate::id::{DocId, PeerId};
 use crate::util::Ref;
-use anyhow::Context;
+use anyhow::{Context, Result};
 use bytecheck::CheckBytes;
 use ed25519_dalek::Signature;
 use rkyv::{Archive, Deserialize, Serialize};
@@ -462,7 +462,7 @@ impl<'a> Path<'a> {
     }
 
     /// Returns a path that, when joined onto `base`, yields `self`.
-    pub fn strip_prefix(&self, base: Self) -> anyhow::Result<PathBuf> {
+    pub fn strip_prefix(&self, base: Self) -> Result<PathBuf> {
         Ok(iter_after(self.clone().into_iter(), base.into_iter())
             .context("StripPrefixError")?
             .collect())
