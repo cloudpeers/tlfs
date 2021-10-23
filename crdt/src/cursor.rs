@@ -9,6 +9,7 @@ use crate::schema::{ArchivedSchema, PrimitiveKind, Schema};
 use crate::subscriber::Subscriber;
 use anyhow::{anyhow, Context, Result};
 use rkyv::Archived;
+use smallvec::SmallVec;
 
 /// A cursor into a document used to construct transactions.
 #[derive(Clone, Debug)]
@@ -20,7 +21,7 @@ pub struct Cursor<'a> {
     crdt: &'a Crdt,
     path: PathBuf,
     /// If the cursor points into an array, this struct help with manipulating the outer ORArray
-    array: Option<ArrayWrapper>,
+    array: SmallVec<[ArrayWrapper; 1]>,
 }
 
 impl<'a> Cursor<'a> {
@@ -35,7 +36,7 @@ impl<'a> Cursor<'a> {
             schema,
             path,
             crdt,
-            array: None,
+            array: Default::default(),
         }
     }
 
@@ -190,10 +191,9 @@ impl<'a> Cursor<'a> {
     /// Returns a cursor to a value in an array.
     pub fn index(mut self, ix: usize) -> Result<Self> {
         if let ArchivedSchema::Array(schema) = &self.schema {
-            anyhow::ensure!(self.array.is_none(), "Nested ORArrays not supported");
             self.schema = schema;
             let (array, path) = ArrayWrapper::new(&self, ix)?;
-            self.array.replace(array);
+            self.array.push(array);
             self.path = path;
             Ok(self)
         } else {
@@ -406,24 +406,23 @@ impl<'a> Cursor<'a> {
 
     /// Moves the entry inside an array.
     pub fn r#move(mut self, to: usize) -> Result<Causal> {
-        let array = self.array.take().context("Not inside an ORArray")?;
+        let array = self.array.pop().context("Not inside an ORArray")?;
         array.r#move(&self, to)
     }
 
     /// Deletes the entry from an array.
     pub fn delete(mut self) -> Result<Causal> {
-        let array = self.array.take().context("Not inside an ORArray")?;
+        let array = self.array.pop().context("Not inside an ORArray")?;
         array.delete(&self)
     }
 
     /// Augments a causal with array metadata if in an array, otherwise just returns the causal
     /// unchanged
-    fn augment_array(&self, inner: Causal) -> Result<Causal> {
-        if let Some(array) = self.array.as_ref() {
-            array.augment_causal(self, inner)
-        } else {
-            Ok(inner)
+    fn augment_array(&self, mut inner: Causal) -> Result<Causal> {
+        for a in &self.array {
+            inner = a.augment_causal(self, inner)?;
         }
+        Ok(inner)
     }
 }
 
