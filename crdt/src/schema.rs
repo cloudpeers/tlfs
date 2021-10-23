@@ -1,5 +1,6 @@
 use crate::crdt::Causal;
 use crate::path::{Path, Segment};
+use crate::PathBuf;
 use bytecheck::CheckBytes;
 use ed25519_dalek::{PublicKey, Verifier};
 use rkyv::{Archive, Serialize};
@@ -116,7 +117,33 @@ impl ArchivedSchema {
                 Some(schema.validate_path(path)?)
             }
             Self::Array(schema) => {
-                todo!("validate Array");
+                let (prim, path) = path.split_first()?;
+                match prim {
+                    Segment::Str(x) => match x.as_str() {
+                        "VALUES" => {
+                            // <path_to_array>.VALUES.<pos>.<uid>.<nonce>.<sig>.<value>
+                            let mut path = path.into_iter();
+                            path.next()?.position()?;
+                            path.next()?.prim_u64()?;
+                            path.next()?.nonce()?;
+                            path.next()?.sig()?;
+                            schema.validate_path(path.collect::<PathBuf>().as_path())
+                        }
+                        "META" => {
+                            // <path_to_array>.META.<uid>.<nonce>.<nonce>.<pos>.<nonce>.<sig>
+                            let mut path = path.into_iter();
+                            path.next()?.prim_u64()?;
+                            path.next()?.prim_u64()?;
+                            path.next()?.prim_u64()?;
+                            path.next()?.position()?;
+                            path.next()?.nonce()?;
+                            path.next()?.sig()?;
+                            Some(path.next().is_none())
+                        }
+                        _ => Some(false),
+                    },
+                    _ => Some(false),
+                }
             }
         }
     }
