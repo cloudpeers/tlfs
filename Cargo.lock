@@ -2560,6 +2560,7 @@ dependencies = [
  "proptest",
  "rkyv",
  "sled",
+ "smallvec",
  "tracing",
  "tracing-log",
  "tracing-subscriber",

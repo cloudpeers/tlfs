@@ -152,7 +152,8 @@ pub fn arb_schema() -> impl Strategy<Value = Schema> {
         prop_oneof![
             (arb_primitive_kind(), inner.clone())
                 .prop_map(|(kind, schema)| Schema::Table(kind, Box::new(schema))),
-            prop::collection::btree_map(arb_prop(), inner, 0..10).prop_map(Schema::Struct),
+            prop::collection::btree_map(arb_prop(), inner.clone(), 0..10).prop_map(Schema::Struct),
+            inner.prop_map(|s| Schema::Array(Box::new(s)))
         ]
     })
 }
@@ -183,6 +184,7 @@ fn arb_dotstore_for_schema(s: Schema) -> BoxedStrategy<DotStore> {
                     })
                     .boxed()
             }),
+        Schema::Array(schema) => arb_dotstore_for_schema(*schema),
     }
 }
 
@@ -280,6 +282,17 @@ pub fn arb_lens_for_schema(s: &Schema) -> BoxedStrategy<Lens> {
                         .boxed(),
                 );
             }
+        }
+        Schema::Array(s) => {
+            if **s == Schema::Null {
+                strategy.push(Just(Lens::Destroy(Kind::Array)).boxed());
+            }
+
+            strategy.push(
+                arb_lens_for_schema(s)
+                    .prop_map(|l| Lens::LensMap(Box::new(l)))
+                    .boxed(),
+            );
         }
     }
     (0..strategy.len())

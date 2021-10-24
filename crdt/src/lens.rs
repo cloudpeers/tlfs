@@ -25,6 +25,12 @@ pub enum Kind {
     Table(PrimitiveKind),
     /// Struct is a named tuple crdt.
     Struct,
+    /// Observed-Remove Array (ORArray) supporting the following operations: insert, move, update,
+    /// and delete based on [Rinberg et al. 2021].
+    /// The precedence of concurrent operations is as follows: UPDATE > DELETE > MOVE.
+    ///
+    /// [Rinberg et al. 2021]: https://dl.acm.org/doi/10.1145/3447865.3457971
+    Array,
 }
 
 /// A [`Lens`] is a bidirectional transform on [`Schema`]s.
@@ -54,6 +60,12 @@ pub enum Lens {
     /// Applies the [`Lens`] to a [`Kind::Struct`] field.
     LensIn(
         Prop,
+        #[omit_bounds]
+        #[archive_attr(omit_bounds)]
+        Box<Lens>,
+    ),
+    /// Applies the [`Lens`] to all values of a [`Kind::Array`].
+    LensMap(
         #[omit_bounds]
         #[archive_attr(omit_bounds)]
         Box<Lens>,
@@ -90,6 +102,7 @@ impl ArchivedLens {
             Self::HoistProperty(h, t) => LensRef::HoistProperty(h, t),
             Self::PlungeProperty(h, t) => LensRef::PlungeProperty(h, t),
             Self::LensIn(k, l) => LensRef::LensIn(false, k, l),
+            Self::LensMap(l) => LensRef::LensMap(false, l),
             Self::LensMapValue(l) => LensRef::LensMapValue(false, l),
         }
     }
@@ -114,6 +127,8 @@ pub enum LensRef<'a> {
     PlungeProperty(&'a ArchivedString, &'a ArchivedString),
     /// Reference to [`Lens::LensIn`].
     LensIn(bool, &'a ArchivedString, &'a ArchivedLens),
+    /// Reference to [`Lens::LensMap`].
+    LensMap(bool, &'a ArchivedLens),
     /// Reference to [`Lens::LensMapValue`].
     LensMapValue(bool, &'a ArchivedLens),
 }
@@ -130,6 +145,7 @@ impl<'a> LensRef<'a> {
             Self::HoistProperty(host, target) => Self::PlungeProperty(host, target),
             Self::PlungeProperty(host, target) => Self::HoistProperty(host, target),
             Self::LensIn(rev, key, lens) => Self::LensIn(!rev, key, lens),
+            Self::LensMap(rev, lens) => Self::LensMap(!rev, lens),
             Self::LensMapValue(rev, lens) => Self::LensMapValue(!rev, lens),
         }
     }
@@ -156,6 +172,7 @@ impl<'a> LensRef<'a> {
                     ArchivedKind::Reg(kind) => Schema::Reg(*kind),
                     ArchivedKind::Table(kind) => Schema::Table(*kind, Box::new(Schema::Null)),
                     ArchivedKind::Struct => Schema::Struct(Default::default()),
+                    ArchivedKind::Array => Schema::Array(Box::new(Schema::Null)),
                 }
             }
             (Self::Destroy(k), s) => {
@@ -252,6 +269,10 @@ impl<'a> LensRef<'a> {
             (Self::LensMapValue(rev, lens), Schema::Table(_, schema)) => {
                 lens.to_ref().maybe_reverse(*rev).transform_schema(schema)?
             }
+
+            (Self::LensMap(rev, lens), Schema::Array(schema)) => {
+                lens.to_ref().maybe_reverse(*rev).transform_schema(schema)?
+            }
             (_, s) => return Err(anyhow!("invalid lens for schema: {:?} {:?}", self, s)),
         }
         Ok(())
@@ -299,6 +320,15 @@ impl<'a> LensRef<'a> {
                     p2.extend(path);
                     return p2;
                 }
+            }
+            Self::LensMap(rev, lens) => {
+                let path = lens.to_ref().maybe_reverse(*rev).transform_path(&path[1..]);
+                if path.is_empty() {
+                    return path;
+                }
+                let mut p2 = vec![path[0].clone()];
+                p2.extend(path);
+                return p2;
             }
             Self::LensMapValue(rev, lens) => {
                 let path = lens.to_ref().maybe_reverse(*rev).transform_path(&path[1..]);

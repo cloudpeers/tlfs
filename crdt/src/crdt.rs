@@ -68,6 +68,12 @@ impl DotStore {
             self.insert(path.to_owned());
         }
     }
+
+    pub fn extend(&mut self, other: Self) {
+        for p in other.0.into_iter() {
+            self.insert(p);
+        }
+    }
 }
 
 impl FromIterator<PathBuf> for DotStore {
@@ -275,7 +281,7 @@ impl Crdt {
         self.store.iter().keys()
     }
 
-    pub fn scan_path(&self, path: Path) -> impl Iterator<Item = Result<sled::IVec>> + '_ {
+    pub fn scan_path(&self, path: Path) -> impl Iterator<Item = Result<sled::IVec>> {
         self.store
             .scan_prefix(path)
             .keys()
@@ -554,6 +560,206 @@ mod tests {
         assert_eq!(values.len(), 1);
         assert!(values.contains(&99));
 
+        Ok(())
+    }
+
+    #[async_std::test]
+    async fn test_orarray_smoke() -> Result<()> {
+        let mut sdk = Backend::memory()?;
+        let hash = sdk.register(vec![
+            Lens::Make(Kind::Array),
+            Lens::LensMap(Box::new(Lens::Make(Kind::Reg(PrimitiveKind::U64)))),
+        ])?;
+        let peer = sdk.frontend().generate_keypair()?;
+        let doc = sdk
+            .frontend()
+            .create_doc(peer, &hash, Keypair::generate())?;
+        Pin::new(&mut sdk).await?;
+        let cur = doc.cursor().index(0)?;
+        let op = cur.assign_u64(42)?;
+
+        let op1 = cur.assign_u64(43)?;
+        doc.apply(&op)?;
+        doc.apply(&op1)?;
+
+        let r = doc
+            .cursor()
+            .index(0)?
+            .u64s()?
+            .collect::<anyhow::Result<BTreeSet<_>>>()?;
+        assert_eq!(r.len(), 2);
+        assert!(r.contains(&42));
+        assert!(r.contains(&43));
+
+        let op2 = cur.assign_u64(44)?;
+        doc.apply(&op2)?;
+
+        let r = doc
+            .cursor()
+            .index(0)?
+            .u64s()?
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        assert_eq!(r, vec![44]);
+
+        let op_delete = doc.cursor().index(0)?.delete()?;
+        doc.apply(&op_delete)?;
+        assert!(doc.cursor().index(0)?.u64s()?.next().is_none());
+
+        Ok(())
+    }
+
+    #[async_std::test]
+    async fn test_orarray_nested_crdt() -> Result<()> {
+        let mut sdk = Backend::memory()?;
+        let hash = sdk.register(vec![
+            Lens::Make(Kind::Array),
+            Lens::LensMap(Box::new(Lens::Make(Kind::Table(PrimitiveKind::Str)))),
+            Lens::LensMap(Box::new(Lens::LensMapValue(Box::new(Lens::Make(
+                Kind::Reg(PrimitiveKind::U64),
+            ))))),
+        ])?;
+        let peer = sdk.frontend().generate_keypair()?;
+        let doc = sdk
+            .frontend()
+            .create_doc(peer, &hash, Keypair::generate())?;
+        Pin::new(&mut sdk).await?;
+        let cur = doc.cursor().index(0)?.key_str("a")?;
+        let op = cur.assign_u64(42)?;
+
+        let op1 = cur.assign_u64(43)?;
+        doc.apply(&op)?;
+        doc.apply(&op1)?;
+
+        let r = doc
+            .cursor()
+            .index(0)?
+            .key_str("a")?
+            .u64s()?
+            .collect::<anyhow::Result<BTreeSet<_>>>()?;
+        assert_eq!(r.len(), 2);
+        assert!(r.contains(&42));
+        assert!(r.contains(&43));
+
+        let op2 = cur.assign_u64(44)?;
+        doc.apply(&op2)?;
+
+        let r = doc
+            .cursor()
+            .index(0)?
+            .key_str("a")?
+            .u64s()?
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        assert_eq!(r, vec![44]);
+
+        let op_delete = doc.cursor().index(0)?.key_str("a")?.delete()?;
+        doc.apply(&op_delete)?;
+        assert!(doc
+            .cursor()
+            .index(0)?
+            .key_str("a")?
+            .u64s()?
+            .next()
+            .is_none());
+
+        Ok(())
+    }
+
+    #[async_std::test]
+    async fn test_orarray_nested_orarray() -> Result<()> {
+        let mut sdk = Backend::memory()?;
+        let hash = sdk.register(vec![
+            Lens::Make(Kind::Array),
+            Lens::LensMap(Box::new(Lens::Make(Kind::Table(PrimitiveKind::Str)))),
+            Lens::LensMap(Box::new(Lens::LensMapValue(Box::new(Lens::Make(
+                Kind::Array,
+            ))))),
+            Lens::LensMap(Box::new(Lens::LensMapValue(Box::new(Lens::LensMap(
+                Box::new(Lens::Make(Kind::Reg(PrimitiveKind::U64))),
+            ))))),
+        ])?;
+        let peer = sdk.frontend().generate_keypair()?;
+        let doc = sdk
+            .frontend()
+            .create_doc(peer, &hash, Keypair::generate())?;
+        Pin::new(&mut sdk).await?;
+        let cur = doc.cursor().index(0)?.key_str("a")?.index(0)?;
+        let op = cur.assign_u64(42)?;
+
+        let op1 = cur.assign_u64(43)?;
+        doc.apply(&op)?;
+        doc.apply(&op1)?;
+
+        let r = doc
+            .cursor()
+            .index(0)?
+            .key_str("a")?
+            .index(0)?
+            .u64s()?
+            .collect::<anyhow::Result<BTreeSet<_>>>()?;
+        assert_eq!(r.len(), 2);
+        assert!(r.contains(&42));
+        assert!(r.contains(&43));
+
+        let op2 = cur.assign_u64(44)?;
+        doc.apply(&op2)?;
+
+        let r = doc
+            .cursor()
+            .index(0)?
+            .key_str("a")?
+            .index(0)?
+            .u64s()?
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        assert_eq!(r, vec![44]);
+
+        let op_delete = doc.cursor().index(0)?.key_str("a")?.delete()?;
+        doc.apply(&op_delete)?;
+        assert!(doc
+            .cursor()
+            .index(0)?
+            .key_str("a")?
+            .index(0)?
+            .u64s()?
+            .next()
+            .is_none());
+
+        Ok(())
+    }
+
+    // FIXME Fraction Ordering
+    #[ignore]
+    #[async_std::test]
+    async fn test_orarray_move() -> Result<()> {
+        let mut sdk = Backend::memory()?;
+        let peer = sdk.frontend().generate_keypair()?;
+        let hash = sdk.register(vec![
+            Lens::Make(Kind::Array),
+            Lens::LensMap(Box::new(Lens::Make(Kind::Reg(PrimitiveKind::U64)))),
+        ])?;
+        let doc = sdk
+            .frontend()
+            .create_doc(peer, &hash, Keypair::generate())?;
+        Pin::new(&mut sdk).await?;
+        for i in 0..10 {
+            let op = doc.cursor().index(i)?.assign_u64(i as u64)?;
+            doc.apply(&op)?;
+        }
+        let mut r = vec![];
+        for i in 0..10 {
+            r.extend(doc.cursor().index(i)?.u64s()?.collect::<Result<Vec<_>>>()?);
+        }
+        assert_eq!(r, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+
+        println!("{:#?}", doc);
+        let move_op = doc.cursor().index(5)?.r#move(2)?;
+        println!("move_op {:#?}", move_op);
+        doc.apply(&move_op)?;
+
+        let mut r = vec![];
+        for i in 0..10 {
+            r.extend(doc.cursor().index(i)?.u64s()?.collect::<Result<Vec<_>>>()?);
+        }
+        assert_eq!(r, vec![0, 1, 5, 2, 3, 4, 6, 7, 8, 9]);
         Ok(())
     }
 

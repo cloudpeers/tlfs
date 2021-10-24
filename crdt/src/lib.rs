@@ -135,6 +135,7 @@ mod crypto;
 mod cursor;
 mod doc;
 mod dotset;
+mod fraction;
 mod id;
 mod lens;
 mod path;
