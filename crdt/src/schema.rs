@@ -121,22 +121,21 @@ impl ArchivedSchema {
                 match prim {
                     Segment::Str(x) => match x.as_str() {
                         "VALUES" => {
-                            // <path_to_array>.VALUES.<pos>.<uid>.<nonce>.<sig>.<value>
+                            // <path_to_array>.VALUES.<pos>.<uid>.<value>
                             let mut path = path.into_iter();
                             path.next()?.position()?;
                             path.next()?.prim_u64()?;
-                            path.next()?.nonce()?;
-                            path.next()?.sig()?;
                             schema.validate_path(path.collect::<PathBuf>().as_path())
                         }
                         "META" => {
-                            // <path_to_array>.META.<uid>.<nonce>.<nonce>.<pos>.<nonce>.<sig>
+                            // <path_to_array>.META.<uid>.<nonce>.<nonce>.<pos>.<nonce>.<peer>.<sig>
                             let mut path = path.into_iter();
                             path.next()?.prim_u64()?;
                             path.next()?.prim_u64()?;
                             path.next()?.prim_u64()?;
                             path.next()?.position()?;
                             path.next()?.nonce()?;
+                            path.next()?.peer()?;
                             path.next()?.sig()?;
                             Some(path.next().is_none())
                         }

@@ -439,8 +439,8 @@ fn nonce() -> u64 {
 // The ORArray needs to store additional metadata additional to the actual value paths in order to
 // support insert, move, update, and delete semantics.
 // The paths are structured as follows:
-// <path_to_array>.VALUES.<pos>.<uid>.<nonce>.<sig>.<value>
-// <path_to_array>.META.<uid>.<nonce>.<nonce>.<pos>.<nonce>.<sig>
+// <path_to_array>.VALUES.<pos>.<uid>.<value>
+// <path_to_array>.META.<uid>.<nonce>.<nonce>.<pos>.<nonce>.<peer>.<sig>
 //                         ^     ^      ^       ^
 //                         |     |      |       |
 //          Stable identifier    |      |       |
@@ -672,8 +672,11 @@ impl ArrayWrapper {
         new_value_path.position(&new_pos);
         new_value_path.prim_u64(self.uid);
         new_value_path.nonce(nonce());
+        for s in v.value {
+            new_value_path.push_segment(s);
+        }
+        // overwrite existing peer and sig fields
         cursor.sign(&mut new_value_path);
-        new_value_path.push_segment(v.value);
         store.insert(new_value_path);
 
         Ok(Causal { store, expired })
@@ -750,7 +753,7 @@ mod array_util {
     pub(crate) struct ArrayValue {
         pub(crate) uid: u64,
         pub(crate) pos: Fraction,
-        pub(crate) value: Segment,
+        pub(crate) value: Vec<Segment>,
     }
     impl ArrayValue {
         /// `path` needs to point into the array root dir
@@ -780,7 +783,15 @@ mod array_util {
             // nonce
             path.next();
 
-            let value = path.next().context("Unexpected layout")?;
+            let mut value = path.collect::<Vec<_>>();
+            anyhow::ensure!(
+                matches!(value.pop(), Some(Segment::Sig(_))),
+                "Unexpected layout"
+            );
+            anyhow::ensure!(
+                matches!(value.pop(), Some(Segment::Peer(_))),
+                "Unexpected layout"
+            );
             Ok(Self { uid, pos, value })
         }
     }
