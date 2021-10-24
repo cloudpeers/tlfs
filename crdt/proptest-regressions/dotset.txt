@@ -1,7 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc bf0c12b5bb4c478ee0727eea7e4c9cc2b8f5f5becb441443243dea7607b10a59 # shrinks to s1 = DotSet { set: {} }, s2 = DotSet { set: {(0,1)} }

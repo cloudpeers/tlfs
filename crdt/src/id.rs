@@ -1,6 +1,7 @@
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Deserialize, Serialize};
 
+/// Document identifier is an ephemeral ed25519 public key.
 #[derive(
     Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd, Archive, CheckBytes, Deserialize, Serialize,
 )]
@@ -9,6 +10,7 @@ use rkyv::{Archive, Deserialize, Serialize};
 pub struct DocId([u8; 32]);
 
 impl DocId {
+    /// Creates a new [`DocId`] from a `[[u8; 32]]`.
     pub fn new(id: [u8; 32]) -> Self {
         Self(id)
     }
@@ -28,15 +30,17 @@ impl AsRef<[u8; 32]> for DocId {
 
 impl std::fmt::Debug for DocId {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let mut peer_id = [0; 44];
-        base64::encode_config_slice(&self.0, base64::URL_SAFE, &mut peer_id);
-        write!(f, "{}", std::str::from_utf8(&peer_id).expect("wtf?"))
+        let mut id = [0; 44];
+        base64::encode_config_slice(&self.0, base64::URL_SAFE, &mut id);
+        write!(f, "Doc({})", std::str::from_utf8(&id[..4]).expect("wtf?"))
     }
 }
 
 impl std::fmt::Display for DocId {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        let mut id = [0; 44];
+        base64::encode_config_slice(&self.0, base64::URL_SAFE, &mut id);
+        write!(f, "{}", std::str::from_utf8(&id).expect("wtf?"))
     }
 }
 
@@ -53,6 +57,7 @@ impl std::str::FromStr for DocId {
     }
 }
 
+/// Peer identifier is a static ed25519 public key.
 #[derive(
     Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd, Archive, CheckBytes, Deserialize, Serialize,
 )]
@@ -61,6 +66,7 @@ impl std::str::FromStr for DocId {
 pub struct PeerId([u8; 32]);
 
 impl PeerId {
+    /// Creates a new [`PeerId`] from a `[[u8; 32]]`.
     pub fn new(id: [u8; 32]) -> Self {
         Self(id)
     }
@@ -80,15 +86,17 @@ impl AsRef<[u8; 32]> for PeerId {
 
 impl std::fmt::Debug for PeerId {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let mut peer_id = [0; 44];
-        base64::encode_config_slice(&self.0, base64::URL_SAFE, &mut peer_id);
-        write!(f, "{}", std::str::from_utf8(&peer_id).expect("wtf?"))
+        let mut id = [0; 44];
+        base64::encode_config_slice(&self.0, base64::URL_SAFE, &mut id);
+        write!(f, "Peer({})", std::str::from_utf8(&id[..4]).expect("wtf?"))
     }
 }
 
 impl std::fmt::Display for PeerId {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        let mut peer_id = [0; 44];
+        base64::encode_config_slice(&self.0, base64::URL_SAFE, &mut peer_id);
+        write!(f, "{}", std::str::from_utf8(&peer_id).expect("wtf?"))
     }
 }
 
@@ -108,25 +116,5 @@ impl std::str::FromStr for PeerId {
 impl From<DocId> for PeerId {
     fn from(id: DocId) -> Self {
         Self::new(id.into())
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Archive)]
-#[archive(as = "Id")]
-#[repr(C)]
-pub enum Id {
-    Doc(DocId),
-    Peer(PeerId),
-}
-
-impl From<DocId> for Id {
-    fn from(id: DocId) -> Self {
-        Self::Doc(id)
-    }
-}
-
-impl From<PeerId> for Id {
-    fn from(id: PeerId) -> Self {
-        Self::Peer(id)
     }
 }

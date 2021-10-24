@@ -1,13 +1,25 @@
 [package]
 name = "tlfs-crdt"
 version = "0.1.0"
-edition = "2018"
+edition = "2021"
 
 [dependencies]
+anyhow = "1.0.44"
+base64 = "0.13.0"
+blake3 = "1.0.0"
 bytecheck = "0.6.5"
-itertools = "0.10.1"
-proptest = { version = "1.0.0", optional = true }
-rkyv = "0.7.18"
+crepe = "0.1.5"
+ed25519-dalek = "1.0.1"
+futures = "0.3.17"
+getrandom = "0.2.3"
+rkyv = { version = "0.7.19", features = ["validation"] }
+sled = { git = "https://github.com/spacejam/sled" }
+smallvec = "1.7.0"
+tracing = "0.1.29"
 
 [dev-dependencies]
+async-std = { version = "1.10.0", features = ["attributes"] }
+log-panics = "2.0.0"
 proptest = "1.0.0"
+tracing-log = "0.1.2"
+tracing-subscriber = "0.2.25"

@@ -1,28 +1,53 @@
 [workspace]
 members = [
-    "acl",
-    "cambria",
+    "cloud-relay",
     "crdt",
-    "wasm-ffi",
-    "."
+#    "wasm-ffi",
+    ".",
 ]
-
-[profile.release]
-lto = true
 
 [package]
 name = "tlfs"
 version = "0.1.0"
-edition = "2018"
+edition = "2021"
+
+[profile.release]
+lto = true
 
 [dependencies]
 anyhow = "1.0.44"
+async-global-executor = "2.0.2"
+async-trait = "0.1.51"
 bytecheck = "0.6.5"
-rkyv = "0.7.18"
-tlfs-acl = { version = "0.1.0", path = "acl" }
-tlfs-cambria = { version = "0.1.0", path = "cambria" }
+ed25519-dalek = "1.0.1"
+fnv = "1.0.7"
+futures = "0.3.17"
+libp2p-broadcast = "0.6.0"
+log-panics = "2.0.0"
+rkyv = "0.7.19"
+sled = { git = "https://github.com/spacejam/sled" }
+tlfs-crdt = { version = "0.1.0", path = "crdt" }
+tracing = "0.1.29"
+tracing-log = "0.1.2"
+tracing-subscriber = "0.2.25"
+
+[dependencies.libp2p]
+version = "0.40.0-rc.2"
+default-features = false
+features = [
+    "dns-async-std",
+    "gossipsub",
+    "mplex",
+    "noise",
+    "request-response",
+    "tcp-async-io",
+    "yamux",
+    "websocket",
+]
+
+[dev-dependencies]
+async-std = { version = "1.10.0", features = ["attributes"] }
 
 [patch.crates-io]
-# https://github.com/libp2p/rust-libp2p/pull/2245
-libp2p = { git = "https://github.com/wngr/rust-libp2p", branch = "ow/wasm" }
-instant = { git = "https://github.com/wngr/instant", branch = "systemtime" }
+libp2p = { git = "https://github.com/wngr/rust-libp2p", branch = "wasm-support" }
+libp2p-broadcast= { git = "https://github.com/wngr/libp2p-broadcast" }
