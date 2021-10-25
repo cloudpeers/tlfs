@@ -2,20 +2,26 @@ use anyhow::{bail, Result};
 use async_trait::async_trait;
 use bytecheck::CheckBytes;
 use fnv::FnvHashMap;
-use futures::io::{AsyncRead, AsyncWrite};
-use futures::prelude::*;
-use libp2p::request_response::{
-    self, ProtocolName, ProtocolSupport, RequestId, RequestResponse, RequestResponseCodec,
-    RequestResponseConfig,
+use futures::{
+    io::{AsyncRead, AsyncWrite},
+    prelude::*,
 };
-use libp2p::swarm::NetworkBehaviourEventProcess;
-use libp2p::{Multiaddr, NetworkBehaviour};
+use libp2p::{
+    request_response::{
+        self, ProtocolName, ProtocolSupport, RequestId, RequestResponse, RequestResponseCodec,
+        RequestResponseConfig,
+    },
+    swarm::NetworkBehaviourEventProcess,
+    Multiaddr, NetworkBehaviour,
+};
 use libp2p_broadcast::{Broadcast, BroadcastConfig, BroadcastEvent, Topic};
 use rkyv::{Archive, Deserialize, Serialize};
-use std::convert::TryInto;
-use std::io;
-use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::{
+    convert::TryInto,
+    io,
+    pin::Pin,
+    task::{Context, Poll},
+};
 use tlfs_crdt::{Backend, Causal, CausalContext, DocId, Hash, Keypair, PeerId, Ref};
 
 macro_rules! unwrap {
@@ -129,14 +135,14 @@ type RequestResponseEvent =
 #[derive(NetworkBehaviour)]
 #[behaviour(event_process = true)]
 pub struct Behaviour {
-    #[behaviour(ignore)]
-    backend: Backend,
     req: RequestResponse<SyncCodec>,
+    broadcast: Broadcast,
     #[behaviour(ignore)]
     unjoin_req: FnvHashMap<RequestId, DocId>,
     #[behaviour(ignore)]
     buffer: Vec<(Hash, DocId, PeerId, Causal)>,
-    broadcast: Broadcast,
+    #[behaviour(ignore)]
+    backend: Backend,
 }
 
 impl Behaviour {
