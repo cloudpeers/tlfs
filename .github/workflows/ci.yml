@@ -1,8 +1,4 @@
-on:
-  push:
-    branches:
-    - master
-  pull_request:
+on: [push, pull_request]
 
 name: tlfs
 
@@ -105,3 +101,20 @@ jobs:
 
     - name: cargo clippy
       run: cargo clippy --workspace --examples --tests --all-features -- -D warnings
+
+  wasm:
+    runs-on: self-hosted
+    steps:
+    - name: Checkout sources
+      uses: actions/checkout@v2
+        
+    - name: build
+      working-directory: wasm-ffi
+      run: ./build.sh
+
+    - name: install wasm-pack
+      run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+    - name: wasm-pack test
+      working-directory: wasm-ffi
+      run: wasm-pack test --headless --chrome --firefox

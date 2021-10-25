@@ -1,7 +1,8 @@
 [workspace]
 members = [
-    #"cloud-relay",
+    "cloud-relay",
     "crdt",
+    "wasm-ffi",
     ".",
 ]
 
@@ -9,6 +10,9 @@ members = [
 name = "tlfs"
 version = "0.1.0"
 edition = "2021"
+
+[profile.release]
+lto = true
 
 [dependencies]
 anyhow = "1.0.44"
@@ -28,7 +32,7 @@ tracing-log = "0.1.2"
 tracing-subscriber = "0.2.25"
 
 [dependencies.libp2p]
-version = "0.39.1"
+version = "0.40.0-rc.2"
 default-features = false
 features = [
     "dns-async-std",
@@ -43,3 +47,8 @@ features = [
 
 [dev-dependencies]
 async-std = { version = "1.10.0", features = ["attributes"] }
+
+[patch.crates-io]
+#libp2p = { git = "https://github.com/wngr/rust-libp2p", branch = "wasm-support" }
+libp2p = { git = "https://github.com/wngr/rust-libp2p", branch = "ow/usize-partialeq" }
+libp2p-broadcast= { git = "https://github.com/wngr/libp2p-broadcast" }

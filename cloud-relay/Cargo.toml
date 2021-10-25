@@ -6,9 +6,9 @@ edition = "2018"
 [dependencies]
 acme-lib = "0.8.2"
 anyhow = "1.0.44"
-clap = "3.0.0-beta.4"
+clap = "3.0.0-beta.5"
 hex = "0.4.3"
-libp2p = { version = "0.40.0", features = [
+libp2p = { version = "0.40.0-rc.2", features = [
   "noise",
   "mplex",
   "pnet",

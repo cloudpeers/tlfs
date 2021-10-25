@@ -81,7 +81,7 @@ impl Sdk {
 
         let transport = libp2p::development_transport(keypair.to_libp2p()).await?;
         let behaviour = Behaviour::new(backend)?;
-        let mut swarm = Swarm::new(transport, behaviour, peer.to_libp2p().into_peer_id());
+        let mut swarm = Swarm::new(transport, behaviour, peer.to_libp2p().to_peer_id());
         swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse().unwrap())?;
 
         let (tx, mut rx) = mpsc::unbounded();
@@ -90,7 +90,7 @@ impl Sdk {
                 match cmd {
                     Command::AddAddress(peer, addr) => {
                         swarm.behaviour_mut().add_address(&peer, addr);
-                        if let Err(err) = swarm.dial(&peer.to_libp2p().into_peer_id()) {
+                        if let Err(err) = swarm.dial(&peer.to_libp2p().to_peer_id()) {
                             tracing::error!("{}", err);
                         }
                     }

@@ -6,11 +6,10 @@ use std::{
 };
 
 use anyhow::Context;
-use clap::{AppSettings, Clap};
+use clap::Parser;
 use libp2p::{
     core::{
-        either::EitherTransport, muxing::StreamMuxerBox, transport::OrTransport,
-        upgrade::AuthenticationVersion,
+        either::EitherTransport, muxing::StreamMuxerBox, transport::upgrade, transport::OrTransport,
     },
     dns::TokioDnsConfig,
     futures::StreamExt,
@@ -31,8 +30,7 @@ use tracing_subscriber::fmt;
 
 mod acme;
 
-#[derive(Clap)]
-#[clap(setting = AppSettings::ColoredHelp)]
+#[derive(Parser)]
 struct Opts {
     #[clap(long, default_value = "priv.key")]
     /// Path to a private key file. Will be created if it doesn't exist.
@@ -194,8 +192,8 @@ async fn build_swarm(
     let noise_config = noise::NoiseConfig::xx(xx_keypair).into_authenticated();
     let yamux_config = YamuxConfig::default();
     let transport = transport
-        .upgrade()
-        .authenticate_with_version(noise_config, AuthenticationVersion::V1SimultaneousOpen)
+        .upgrade(upgrade::Version::V1Lazy)
+        .authenticate(noise_config)
         .multiplex(yamux_config)
         .timeout(upgrade_timeout)
         .map(|(peer_id, muxer), _| (peer_id, StreamMuxerBox::new(muxer)))

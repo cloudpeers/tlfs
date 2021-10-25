@@ -2,20 +2,26 @@ use anyhow::{bail, Result};
 use async_trait::async_trait;
 use bytecheck::CheckBytes;
 use fnv::FnvHashMap;
-use futures::io::{AsyncRead, AsyncWrite};
-use futures::prelude::*;
-use libp2p::request_response::{
-    self, ProtocolName, ProtocolSupport, RequestId, RequestResponse, RequestResponseCodec,
-    RequestResponseConfig,
+use futures::{
+    io::{AsyncRead, AsyncWrite},
+    prelude::*,
 };
-use libp2p::swarm::NetworkBehaviourEventProcess;
-use libp2p::{Multiaddr, NetworkBehaviour};
+use libp2p::{
+    request_response::{
+        self, ProtocolName, ProtocolSupport, RequestId, RequestResponse, RequestResponseCodec,
+        RequestResponseConfig,
+    },
+    swarm::NetworkBehaviourEventProcess,
+    Multiaddr, NetworkBehaviour,
+};
 use libp2p_broadcast::{Broadcast, BroadcastConfig, BroadcastEvent, Topic};
 use rkyv::{Archive, Deserialize, Serialize};
-use std::convert::TryInto;
-use std::io;
-use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::{
+    convert::TryInto,
+    io,
+    pin::Pin,
+    task::{Context, Poll},
+};
 use tlfs_crdt::{Backend, Causal, CausalContext, DocId, Hash, Keypair, PeerId, Ref};
 
 macro_rules! unwrap {
@@ -127,15 +133,16 @@ type RequestResponseEvent =
     request_response::RequestResponseEvent<Ref<SyncRequest>, Ref<SyncResponse>>;
 
 #[derive(NetworkBehaviour)]
+#[behaviour(event_process = true)]
 pub struct Behaviour {
-    #[behaviour(ignore)]
-    backend: Backend,
     req: RequestResponse<SyncCodec>,
+    broadcast: Broadcast,
     #[behaviour(ignore)]
     unjoin_req: FnvHashMap<RequestId, DocId>,
     #[behaviour(ignore)]
     buffer: Vec<(Hash, DocId, PeerId, Causal)>,
-    broadcast: Broadcast,
+    #[behaviour(ignore)]
+    backend: Backend,
 }
 
 impl Behaviour {
@@ -163,24 +170,24 @@ impl Behaviour {
     }
 
     pub fn add_address(&mut self, peer: &PeerId, addr: Multiaddr) {
-        self.req.add_address(&peer.to_libp2p().into_peer_id(), addr);
+        self.req.add_address(&peer.to_libp2p().to_peer_id(), addr);
     }
 
     pub fn remove_address(&mut self, peer: &PeerId, addr: &Multiaddr) {
         self.req
-            .remove_address(&peer.to_libp2p().into_peer_id(), addr);
+            .remove_address(&peer.to_libp2p().to_peer_id(), addr);
     }
 
     pub fn request_lenses(&mut self, peer_id: &PeerId, hash: Hash) -> RequestId {
         tracing::debug!("request_lenses {} {}", peer_id, hash);
-        let peer_id = peer_id.to_libp2p().into_peer_id();
+        let peer_id = peer_id.to_libp2p().to_peer_id();
         let req = SyncRequest::Lenses(hash.into());
         self.req.send_request(&peer_id, Ref::archive(&req))
     }
 
     pub fn request_unjoin(&mut self, peer_id: &PeerId, doc: DocId) -> Result<RequestId> {
         tracing::debug!("request_unjoin {} {}", peer_id, doc);
-        let peer_id = peer_id.to_libp2p().into_peer_id();
+        let peer_id = peer_id.to_libp2p().to_peer_id();
         let ctx = self.backend.frontend().ctx(&doc)?;
         let req = SyncRequest::Unjoin(doc, ctx);
         let id = self.req.send_request(&peer_id, Ref::archive(&req));
