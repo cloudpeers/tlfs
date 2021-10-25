@@ -6,7 +6,8 @@ WASMBINDGEN_VERSION=0.2.77
 OUT=./pkg
 
 echo "Running cargo build"
-cargo build --release --target wasm32-unknown-unknown
+# todo: release build
+cargo build --target wasm32-unknown-unknown
 
 if [ -d $OUT ]; then
   echo "Clearing output directory '$OUT'"
@@ -25,7 +26,7 @@ echo "Generating wasm-bindings"
 # automatically, no need to call `.free` in JS.
 #
 # [1]: https://rustwasm.github.io/docs/wasm-bindgen/reference/weak-references.html
-wasm-bindgen ../target/wasm32-unknown-unknown/release/wasm_ffi.wasm \
+wasm-bindgen ../target/wasm32-unknown-unknown/debug/tlfs_wasm_ffi.wasm \
   --out-dir $OUT \
   --out-name local_first \
   --target web \
