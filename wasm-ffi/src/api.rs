@@ -9,9 +9,6 @@ use wasm_bindgen_futures::future_to_promise;
 
 use crate::p2p::SwarmWrapper;
 
-mod p2p;
-mod util;
-
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
