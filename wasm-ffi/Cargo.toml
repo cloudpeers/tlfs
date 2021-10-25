@@ -1,5 +1,5 @@
 [package]
-name = "wasm-ffi"
+name = "tlfs-wasm-ffi"
 description = "WASM bindings for tlfs"
 version = "0.1.0"
 edition = "2018"

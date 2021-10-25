@@ -3806,6 +3806,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "tlfs-wasm-ffi"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "console_error_panic_hook",
+ "console_log",
+ "futures-timer",
+ "instant",
+ "js-sys",
+ "libp2p",
+ "libp2p-webrtc",
+ "log",
+ "parking_lot",
+ "serde",
+ "void",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "wasm-bindgen-test",
+ "web-sys",
+ "wee_alloc",
+]
+
+[[package]]
 name = "tokio"
 version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4384,29 +4407,6 @@ checksum = "6006f79628dfeb96a86d4db51fbf1344cd7fd8408f06fc9aa3c84913a4789688"
 dependencies = [
  "proc-macro2",
  "quote",
-]
-
-[[package]]
-name = "wasm-ffi"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "console_error_panic_hook",
- "console_log",
- "futures-timer",
- "instant",
- "js-sys",
- "libp2p",
- "libp2p-webrtc",
- "log",
- "parking_lot",
- "serde",
- "void",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "wasm-bindgen-test",
- "web-sys",
- "wee_alloc",
 ]
 
 [[package]]
