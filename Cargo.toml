@@ -49,5 +49,6 @@ features = [
 async-std = { version = "1.10.0", features = ["attributes"] }
 
 [patch.crates-io]
-libp2p = { git = "https://github.com/wngr/rust-libp2p", branch = "wasm-support" }
+#libp2p = { git = "https://github.com/wngr/rust-libp2p", branch = "wasm-support" }
+libp2p = { git = "https://github.com/wngr/rust-libp2p", branch = "ow/usize-partialeq" }
 libp2p-broadcast= { git = "https://github.com/wngr/libp2p-broadcast" }

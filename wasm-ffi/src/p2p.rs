@@ -7,7 +7,7 @@ use std::{
 use futures_timer::Delay;
 use instant::SystemTime;
 use libp2p::{
-    core::{self, either::EitherError, upgrade::AuthenticationVersion},
+    core::{self, either::EitherError, transport::upgrade},
     futures::{
         channel::{mpsc, oneshot},
         pin_mut, select, stream, StreamExt,
@@ -125,11 +125,8 @@ impl SwarmWrapper {
                 .into_authentic(&identity)
                 .expect("Signing libp2p-noise static DH keypair failed.");
 
-            base.upgrade()
-                .authenticate_with_version(
-                    noise::NoiseConfig::xx(noise_keys).into_authenticated(),
-                    AuthenticationVersion::V1SimultaneousOpen,
-                )
+            base.upgrade(upgrade::Version::V1Lazy)
+                .authenticate(noise::NoiseConfig::xx(noise_keys).into_authenticated())
                 .multiplex(core::upgrade::SelectUpgrade::new(
                     yamux::YamuxConfig::default(),
                     mplex::MplexConfig::default(),
