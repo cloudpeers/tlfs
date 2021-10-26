@@ -3820,6 +3820,7 @@ dependencies = [
  "log",
  "parking_lot",
  "serde",
+ "tlfs",
  "void",
  "wasm-bindgen",
  "wasm-bindgen-futures",

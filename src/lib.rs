@@ -4,6 +4,9 @@
 #![deny(missing_docs)]
 mod sync;
 
+use futures::Future;
+use libp2p::core::muxing::StreamMuxerBox;
+use libp2p::core::transport::Boxed;
 pub use libp2p::Multiaddr;
 pub use tlfs_crdt::{
     Causal, Cursor, DocId, Event, Hash, Keypair, Kind, Lens, PeerId, Permission, PrimitiveKind,
@@ -27,6 +30,7 @@ pub struct Migrate {
     backend: Backend,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Migrate {
     /// Create a new [`Migrate`] instance.
     pub fn new(db: sled::Db) -> Result<Self> {
@@ -59,8 +63,9 @@ impl Migrate {
         self.backend.transform(doc, hash)
     }
 
-    /// Returns a new [`Sdk`] instance.
-    pub async fn finish(self) -> Result<Sdk> {
+    /// Returns a new [`Sdk`] instance and a future to drive the backend. The future needs to be
+    /// continuously polled in order for the [`Sdk`] to progress.
+    pub async fn finish(self) -> Result<(Sdk, impl Future<Output = ()>)> {
         Sdk::new(self.backend).await
     }
 }
@@ -73,19 +78,27 @@ pub struct Sdk {
 }
 
 impl Sdk {
-    async fn new(backend: Backend) -> Result<Self> {
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn new(backend: Backend) -> Result<(Self, impl Future<Output = ()>)> {
         let frontend = backend.frontend();
 
         let peer = frontend.generate_keypair()?;
         let keypair = frontend.keypair(&peer)?;
-
         let transport = libp2p::development_transport(keypair.to_libp2p()).await?;
+        Self::new_with_transport(backend, frontend, transport, peer).await
+    }
+    async fn new_with_transport(
+        backend: Backend,
+        frontend: Frontend,
+        transport: Boxed<(libp2p::PeerId, StreamMuxerBox)>,
+        peer: PeerId,
+    ) -> Result<(Self, impl Future<Output = ()>)> {
         let behaviour = Behaviour::new(backend)?;
         let mut swarm = Swarm::new(transport, behaviour, peer.to_libp2p().to_peer_id());
         swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse().unwrap())?;
 
         let (tx, mut rx) = mpsc::unbounded();
-        async_global_executor::spawn::<_, ()>(poll_fn(move |cx| {
+        let driver = poll_fn(move |cx| {
             while let Poll::Ready(Some(cmd)) = Pin::new(&mut rx).poll_next(cx) {
                 match cmd {
                     Command::AddAddress(peer, addr) => {
@@ -112,14 +125,16 @@ impl Sdk {
             while swarm.behaviour_mut().poll_backend(cx).is_ready() {}
             while Pin::new(&mut swarm).poll_next(cx).is_ready() {}
             Poll::Pending
-        }))
-        .detach();
+        });
 
-        Ok(Self {
-            frontend,
-            peer,
-            swarm: tx,
-        })
+        Ok((
+            Self {
+                frontend,
+                peer,
+                swarm: tx,
+            },
+            driver,
+        ))
     }
 
     /// Returns the [`PeerId`] of this [`Sdk`].
@@ -261,7 +276,8 @@ mod tests {
         ];
         let hash = migrate.register(lenses.clone())?;
 
-        let mut sdk = migrate.finish().await?;
+        let (mut sdk, driver) = migrate.finish().await?;
+        async_global_executor::spawn(driver).detach();
         let doc = sdk.create_doc(&hash)?;
 
         async_std::task::sleep(Duration::from_millis(100)).await;
@@ -290,7 +306,8 @@ mod tests {
         let mut lenses2 = lenses.clone();
         lenses2.push(Lens::RenameProperty("todos".into(), "tasks".into()));
         let hash2 = sdk2.register(lenses2)?;
-        let sdk2 = sdk2.finish().await?;
+        let (sdk2, driver) = sdk2.finish().await?;
+        async_global_executor::spawn(driver).detach();
         let op = doc
             .cursor()
             .say_can(Some(*sdk2.peer_id()), Permission::Write)?;
