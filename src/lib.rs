@@ -7,7 +7,7 @@ mod sync;
 pub use libp2p::Multiaddr;
 pub use tlfs_crdt::{
     Causal, Cursor, DocId, Event, Hash, Keypair, Kind, Lens, PeerId, Permission, PrimitiveKind,
-    Schema, Subscriber,
+    Schema, Subscriber, EMPTY_HASH,
 };
 
 use crate::sync::{Behaviour, ToLibp2pKeypair, ToLibp2pPublic};
@@ -16,6 +16,7 @@ use futures::channel::{mpsc, oneshot};
 use futures::future::poll_fn;
 use futures::stream::Stream;
 use libp2p::Swarm;
+use std::path::Path;
 use std::pin::Pin;
 use std::task::Poll;
 use tlfs_crdt::{Backend, Frontend};
@@ -42,6 +43,11 @@ impl Migrate {
 
         let backend = Backend::new(db)?;
         Ok(Self { backend })
+    }
+
+    /// Creates a new persistent [`Migrate`] instance.
+    pub fn persistent(path: &Path) -> Result<Self> {
+        Self::new(sled::Config::new().path(path).open()?)
     }
 
     /// Create a new in-memory [`Migrate`] instance.
@@ -76,8 +82,10 @@ impl Sdk {
     async fn new(backend: Backend) -> Result<Self> {
         let frontend = backend.frontend();
 
+        // TODO: load from db
         let peer = frontend.generate_keypair()?;
         let keypair = frontend.keypair(&peer)?;
+        tracing::info!("our peer id is: {}", peer);
 
         let transport = libp2p::development_transport(keypair.to_libp2p()).await?;
         let behaviour = Behaviour::new(backend)?;
@@ -153,7 +161,7 @@ impl Sdk {
     }
 
     /// Returns an iterator of [`DocId`].
-    pub fn docs(&self) -> impl Iterator<Item = Result<DocId>> + '_ {
+    pub fn docs(&self) -> impl Iterator<Item = Result<DocId>> {
         self.frontend.docs()
     }
 
@@ -266,6 +274,10 @@ mod tests {
 
         async_std::task::sleep(Duration::from_millis(100)).await;
         assert!(doc.cursor().can(sdk.peer_id(), Permission::Write)?);
+
+        let docs = sdk.docs().collect::<Result<Vec<_>>>()?;
+        assert_eq!(docs.len(), 1);
+        assert_eq!(docs[0], *doc.id());
 
         let title = "something that needs to be done";
         let op = doc
