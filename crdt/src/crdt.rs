@@ -575,7 +575,8 @@ mod tests {
             .frontend()
             .create_doc(peer, &hash, Keypair::generate())?;
         Pin::new(&mut sdk).await?;
-        let cur = doc.cursor().index(0)?;
+        let mut cur = doc.cursor();
+        cur.index(0)?;
         let op = cur.assign_u64(42)?;
 
         let op1 = cur.assign_u64(43)?;
@@ -623,7 +624,8 @@ mod tests {
             .frontend()
             .create_doc(peer, &hash, Keypair::generate())?;
         Pin::new(&mut sdk).await?;
-        let cur = doc.cursor().index(0)?.key_str("a")?;
+        let mut cur = doc.cursor();
+        cur.index(0)?.key_str("a")?;
         let op = cur.assign_u64(42)?;
 
         let op1 = cur.assign_u64(43)?;
@@ -682,7 +684,8 @@ mod tests {
             .frontend()
             .create_doc(peer, &hash, Keypair::generate())?;
         Pin::new(&mut sdk).await?;
-        let cur = doc.cursor().index(0)?.key_str("a")?.index(0)?;
+        let mut cur = doc.cursor();
+        cur.index(0)?.key_str("a")?.index(0)?;
         let op = cur.assign_u64(42)?;
 
         let op1 = cur.assign_u64(43)?;
@@ -779,7 +782,8 @@ mod tests {
             .create_doc(peer, &hash, Keypair::generate())?;
         Pin::new(&mut sdk).await?;
 
-        let cur = doc.cursor().key_str("a")?.key_str("b")?;
+        let mut cur = doc.cursor();
+        cur.key_str("a")?.key_str("b")?;
         let op = cur.assign_u64(42)?;
         doc.apply(&op)?;
 
