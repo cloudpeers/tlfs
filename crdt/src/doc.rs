@@ -3,6 +3,7 @@ use crate::crdt::{Causal, CausalContext, Crdt};
 use crate::crypto::Keypair;
 use crate::cursor::Cursor;
 use crate::id::{DocId, PeerId};
+use crate::lens::LensesRef;
 use crate::path::Path;
 use crate::registry::{Expanded, Hash, Registry};
 use crate::util::Ref;
@@ -20,21 +21,29 @@ use std::task::{Context, Poll};
 #[archive_attr(derive(Debug))]
 pub struct SchemaInfo {
     name: String,
+    version: u32,
     hash: [u8; 32],
-    len: u32,
 }
 
 impl SchemaInfo {
-    pub fn new(name: String, hash: Hash, len: u32) -> Self {
+    pub fn new(name: String, version: u32, hash: Hash) -> Self {
         Self {
             name,
+            version,
             hash: hash.into(),
-            len,
         }
     }
 }
 
 impl ArchivedSchemaInfo {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn version(&self) -> u32 {
+        self.version
+    }
+
     pub fn hash(&self) -> Hash {
         self.hash.into()
     }
@@ -233,24 +242,27 @@ impl Backend {
         };
         me.update_acl()?;
 
-        /*/// Transforms a document into a the [`Schema`] identified by [`struct@Hash`].
-        pub fn transform(&mut self, id: &DocId, schema_id: &Hash) -> Result<()> {
-            let doc_schema_id = self.docs.schema_id(id)?;
-            let doc_lenses = self.registry.get(doc_schema_id).unwrap();
-            let lenses = self.registry.get(schema_id)
-                .ok_or_else(|| anyhow!("missing lenses with hash {}", &schema_id))?;
-            self.crdt
-                .transform(id, doc_lenses.as_ref(), lenses.as_ref())?;
-            self.docs.set_schema_id(id, schema_id)?;
-            Ok(())
-        }*/
-
+        // migrate docs
+        for res in me.docs.docs() {
+            let id = res?;
+            let info = me.docs.schema(&id)?;
+            let (version, hash) = me.registry.lookup(&info.as_ref().name).unwrap();
+            if version > info.as_ref().version {
+                let lenses = me.registry.get(&hash).unwrap();
+                let end = info.as_ref().version as usize;
+                let curr_lenses = LensesRef::new(&lenses.lenses().lenses()[..end]);
+                me.crdt
+                    .transform(&id, curr_lenses, lenses.lenses().to_ref())?;
+                let info = SchemaInfo::new(info.as_ref().name.to_string(), version, hash);
+                me.docs.set_schema(&id, &info)?;
+            }
+        }
         Ok(me)
     }
 
     /// Creates a new in-memory backend for testing purposes.
     #[cfg(test)]
-    pub fn memory(package: &crate::registry::Package) -> Result<Self> {
+    pub fn memory(packages: &Vec<crate::registry::Package>) -> Result<Self> {
         use tracing_subscriber::fmt::format::FmtSpan;
         use tracing_subscriber::EnvFilter;
         tracing_log::LogTracer::init().ok();
@@ -262,7 +274,7 @@ impl Backend {
             .finish();
         tracing::subscriber::set_global_default(subscriber).ok();
         log_panics::init();
-        let package = Ref::archive(package);
+        let package = Ref::archive(packages);
         Self::new(
             sled::Config::new().temporary(true).open()?,
             package.as_bytes(),
@@ -300,7 +312,7 @@ impl Backend {
         if !lenses.schema().validate(&causal) {
             return Err(anyhow!("crdt failed schema validation"));
         }
-        causal.transform(lenses.lenses(), doc_lenses.lenses());
+        causal.transform(lenses.lenses().to_ref(), doc_lenses.lenses().to_ref());
         self.crdt.join_policy(&causal)?;
         self.update_acl()?;
         self.crdt.join(peer_id, &causal)?;
@@ -392,11 +404,11 @@ impl Frontend {
     /// Creates a new document using [`Keypair`] with initial schema and owner.
     pub fn create_doc(&self, owner: PeerId, schema: &str, la: Keypair) -> Result<Doc> {
         let id = DocId::new(la.peer_id().into());
-        let (hash, len) = self
+        let (version, hash) = self
             .registry
             .lookup(schema)
             .ok_or_else(|| anyhow!("missing schema {}", schema))?;
-        let info = SchemaInfo::new(schema.into(), hash, len);
+        let info = SchemaInfo::new(schema.into(), version, hash);
         let schema = self.registry.get(&hash).unwrap();
         self.docs.set_peer_id(&id, &id.into())?;
         self.docs.set_schema(&id, &info)?;
@@ -410,11 +422,11 @@ impl Frontend {
     /// Adds an existing document identified by [`DocId`] with schema and associates the local
     /// keypair identified by [`PeerId`].
     pub fn add_doc(&self, id: DocId, peer: &PeerId, schema: &str) -> Result<Doc> {
-        let (hash, len) = self
+        let (version, hash) = self
             .registry
             .lookup(schema)
             .ok_or_else(|| anyhow!("missing schema {}", schema))?;
-        let info = SchemaInfo::new(schema.into(), hash, len);
+        let info = SchemaInfo::new(schema.into(), version, hash);
         self.docs.set_schema(&id, &info)?;
         self.docs.set_peer_id(&id, peer)?;
         self.doc(id)
@@ -524,7 +536,7 @@ impl Doc {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Kind, Lens, Package, Permission, PrimitiveKind};
+    use crate::{Kind, Lens, Lenses, Package, Permission, PrimitiveKind};
 
     #[async_std::test]
     async fn test_api() -> Result<()> {
@@ -548,14 +560,14 @@ mod tests {
                 .lens_map_value()
                 .lens_in("todos"),
         ];
-        let package = Package::new(
+        let packages = vec![Package::new(
             "todoapp".into(),
-            vec![("0.1.0".into(), 8)],
-            Ref::archive(&lenses).into(),
-        );
-        let mut sdk = Backend::memory(&package)?;
+            8,
+            &Lenses::new(lenses.clone()),
+        )];
+        let mut sdk = Backend::memory(&packages)?;
 
-        let peer = sdk.frontend().generate_keypair()?;
+        let peer = sdk.frontend().default_keypair()?.peer_id();
         let doc = sdk
             .frontend()
             .create_doc(peer, "todoapp", Keypair::generate())?;
@@ -581,8 +593,8 @@ mod tests {
             .unwrap()?;
         assert_eq!(value, title);
 
-        let mut sdk2 = Backend::memory(&package)?;
-        let peer2 = sdk2.frontend().generate_keypair()?;
+        let mut sdk2 = Backend::memory(&packages)?;
+        let peer2 = sdk2.frontend().default_keypair()?.peer_id();
         let op = doc.cursor().say_can(Some(peer2), Permission::Write)?;
         doc.apply(&op)?;
         Pin::new(&mut sdk).await?;
@@ -590,7 +602,7 @@ mod tests {
         let doc2 = sdk2.frontend().add_doc(*doc.id(), &peer2, "todoapp")?;
         let ctx = Ref::archive(&doc2.ctx()?);
         let delta = sdk.unjoin(&peer2, doc2.id(), ctx.as_ref())?;
-        let hash = sdk2.frontend().registry.lookup("todoapp").unwrap().0;
+        let hash = sdk2.frontend().registry.lookup("todoapp").unwrap().1;
         sdk2.join(&peer, doc.id(), &hash, delta)?;
 
         let value = doc2

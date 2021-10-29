@@ -364,6 +364,21 @@ impl ArchivedLenses {
         &self.0
     }
 
+    /// Returns a [`LensesRef`].
+    pub fn to_ref(&self) -> LensesRef {
+        LensesRef::new(&self.0)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct LensesRef<'a>(&'a [ArchivedLens]);
+
+impl<'a> LensesRef<'a> {
+    /// Creates a new ref.
+    pub fn new(lenses: &'a [ArchivedLens]) -> Self {
+        Self(lenses)
+    }
+
     /// Applies the [`Lens`]es to the identity schema [`Schema::Null`] and
     /// returns the archived result.
     pub fn to_schema(&self) -> Result<Vec<u8>> {
@@ -380,7 +395,7 @@ impl ArchivedLenses {
 
     /// Given another sequence of [`Lens`]es it returns the sequence of [`Lens`]es
     /// required to transfrom from one [`Schema`] to another.
-    pub fn transform<'a>(&'a self, b: &'a ArchivedLenses) -> Vec<LensRef<'a>> {
+    pub fn transform(&'a self, b: LensesRef<'a>) -> Vec<LensRef<'a>> {
         let mut prefix = 0;
         for (a, b) in self.0.iter().zip(b.0.iter()) {
             if a == b {
@@ -401,7 +416,7 @@ impl ArchivedLenses {
 
     /// Transforms a [`Path`] valid in the source [`Schema`] to a [`PathBuf`] valid in the
     /// target [`Schema`].
-    pub fn transform_path(&self, path: Path, target: &ArchivedLenses) -> Option<PathBuf> {
+    pub fn transform_path(&self, path: Path, target: LensesRef<'a>) -> Option<PathBuf> {
         let mut segments: Vec<Segment> = path.child().unwrap().into_iter().collect();
         for lens in self.transform(target) {
             segments = lens.transform_path(&segments);
@@ -442,7 +457,7 @@ mod tests {
             let lens = to.as_ref().lenses()[0].to_ref();
             prop_assume!(validate(&schema, &causal));
             prop_assume!(lens.transform_schema(&mut schema).is_ok());
-            causal.transform(from.as_ref(), to.as_ref());
+            causal.transform(from.as_ref().to_ref(), to.as_ref().to_ref());
             prop_assert!(validate(&schema, &causal));
         }
     }
