@@ -4,8 +4,8 @@ number = @{ "0" | ASCII_NONZERO_DIGIT ~ ASCII_DIGIT* }
 version = @{ number ~ ("." ~ number ~ ("." ~ number)) }
 
 ty = ${ ident ~ ("<" ~ ident ~ ">")? }
-invokation = ${ ident ~ ("(" ~ ident? ~ ")")? }
-segment = ${ "{}" | "[]" | invokation }
+invocation = ${ ident ~ ("(" ~ ident? ~ ")")? }
+segment = ${ "{}" | "[]" | invocation }
 path = ${ "." ~ (segment ~ path?)? }
 rule = { path ~ (":" ~ ty)? }
 
