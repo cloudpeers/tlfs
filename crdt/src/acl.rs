@@ -438,7 +438,7 @@ impl Engine {
     }
 }
 
-#[cfg(test)]
+/*#[cfg(test)]
 mod tests {
     use super::*;
     use crate::{Backend, Keypair, Kind, Lens, EMPTY_HASH};
@@ -616,4 +616,4 @@ mod tests {
 
         Ok(())
     }
-}
+}*/

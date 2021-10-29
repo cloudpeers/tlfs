@@ -6,8 +6,8 @@ mod sync;
 
 pub use libp2p::Multiaddr;
 pub use tlfs_crdt::{
-    Causal, Cursor, DocId, Event, Hash, Keypair, Kind, Lens, PeerId, Permission, PrimitiveKind,
-    Schema, Subscriber, EMPTY_HASH,
+    Causal, Cursor, DocId, Event, Keypair, Kind, Lens, PeerId, Permission, PrimitiveKind, Schema,
+    Subscriber,
 };
 
 use crate::sync::{Behaviour, ToLibp2pKeypair, ToLibp2pPublic};
@@ -23,14 +23,25 @@ use tlfs_crdt::{Backend, Frontend};
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::EnvFilter;
 
-/// Used to construct a new [`Sdk`]. Can migrate old documents to new [`Schema`]s at startup.
-pub struct Migrate {
-    backend: Backend,
+/// Main entry point for `tlfs`.
+pub struct Sdk {
+    frontend: Frontend,
+    peer: PeerId,
+    swarm: mpsc::UnboundedSender<Command>,
 }
 
-impl Migrate {
-    /// Create a new [`Migrate`] instance.
-    pub fn new(db: sled::Db) -> Result<Self> {
+impl Sdk {
+    /// Creates a new persistent [`Sdk`] instance.
+    pub async fn persistent(db: &Path, lenses: &Path) -> Result<Self> {
+        Self::new(sled::Config::new().path(db).open()?, lenses).await
+    }
+
+    /// Create a new in-memory [`Sdk`] instance.
+    pub async fn memory(lenses: &Path) -> Result<Self> {
+        Self::new(sled::Config::new().temporary(true).open()?, lenses).await
+    }
+
+    async fn new(db: sled::Db, package: &Path) -> Result<Self> {
         tracing_log::LogTracer::init().ok();
         let env = std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or_else(|_| "info".to_owned());
         let subscriber = tracing_subscriber::FmtSubscriber::builder()
@@ -41,48 +52,11 @@ impl Migrate {
         tracing::subscriber::set_global_default(subscriber).ok();
         log_panics::init();
 
-        let backend = Backend::new(db)?;
-        Ok(Self { backend })
-    }
-
-    /// Creates a new persistent [`Migrate`] instance.
-    pub fn persistent(path: &Path) -> Result<Self> {
-        Self::new(sled::Config::new().path(path).open()?)
-    }
-
-    /// Create a new in-memory [`Migrate`] instance.
-    pub fn memory() -> Result<Self> {
-        Self::new(sled::Config::new().temporary(true).open()?)
-    }
-
-    /// Register a new [`Schema`].
-    pub fn register(&self, lenses: Vec<Lens>) -> Result<Hash> {
-        self.backend.register(lenses)
-    }
-
-    /// Migrate a document to a registered [`Schema`].
-    pub fn migrate(&mut self, doc: &DocId, hash: &Hash) -> Result<()> {
-        self.backend.transform(doc, hash)
-    }
-
-    /// Returns a new [`Sdk`] instance.
-    pub async fn finish(self) -> Result<Sdk> {
-        Sdk::new(self.backend).await
-    }
-}
-
-/// Main entry point for `tlfs`.
-pub struct Sdk {
-    frontend: Frontend,
-    peer: PeerId,
-    swarm: mpsc::UnboundedSender<Command>,
-}
-
-impl Sdk {
-    async fn new(backend: Backend) -> Result<Self> {
+        let package = std::fs::read(package)?;
+        let backend = Backend::new(db, &package)?;
         let frontend = backend.frontend();
 
-        // TODO: load from db
+        // TODO: load keypair
         let peer = frontend.generate_keypair()?;
         let keypair = frontend.keypair(&peer)?;
         tracing::info!("our peer id is: {}", peer);
@@ -166,7 +140,7 @@ impl Sdk {
     }
 
     /// Creates a new document with an initial [`Schema`].
-    pub fn create_doc(&mut self, schema: &Hash) -> Result<Doc> {
+    pub fn create_doc(&mut self, schema: &str) -> Result<Doc> {
         let peer_id = self.peer_id();
         let doc = self
             .frontend
@@ -178,7 +152,7 @@ impl Sdk {
     }
 
     /// Adds a document with a [`Schema`].
-    pub fn add_doc(&self, id: DocId, schema: &Hash) -> Result<Doc> {
+    pub fn add_doc(&self, id: DocId, schema: &str) -> Result<Doc> {
         let peer_id = self.peer_id();
         let doc = self.frontend.add_doc(id, peer_id, schema)?;
         self.swarm
