@@ -133,6 +133,25 @@ impl Docs {
         self.0.remove(key)?;
         Ok(())
     }
+
+    pub fn default_keypair(&self) -> Result<Keypair> {
+        let mut key = [0; 33];
+        key[32] = 3;
+        if let Some(value) = self.0.get(&key)? {
+            return self.keypair(&PeerId::new(value.as_ref().try_into().unwrap()));
+        }
+        let keypair = Keypair::generate();
+        self.add_keypair(keypair)?;
+        self.set_default_keypair(&keypair.peer_id())?;
+        Ok(keypair)
+    }
+
+    pub fn set_default_keypair(&self, keypair: &PeerId) -> Result<()> {
+        let mut key = [0; 33];
+        key[32] = 3;
+        self.0.insert(&key, keypair.as_ref())?;
+        Ok(())
+    }
 }
 
 struct DebugDoc<'a>(&'a Docs, DocId);
@@ -348,6 +367,11 @@ impl Frontend {
     /// Generates a new [`Keypair`].
     pub fn generate_keypair(&self) -> Result<PeerId> {
         self.add_keypair(Keypair::generate())
+    }
+
+    /// Returns the default [`Keypair`].
+    pub fn default_keypair(&self) -> Result<Keypair> {
+        self.docs.default_keypair()
     }
 
     /// Returns the [`Keypair`] matching [`PeerId`].
