@@ -1,0 +1,17 @@
+ident = { ASCII_ALPHA ~ ASCII_ALPHANUMERIC* }
+
+number = @{ "0" | ASCII_NONZERO_DIGIT ~ ASCII_DIGIT* }
+version = @{ number ~ ("." ~ number ~ ("." ~ number)) }
+
+ty = ${ ident ~ ("<" ~ ident ~ ">")? }
+invokation = ${ ident ~ ("(" ~ ident? ~ ")")? }
+segment = ${ "{}" | "[]" | invokation }
+path = ${ "." ~ (segment ~ path?)? }
+rule = { path ~ (":" ~ ty)? }
+
+schema_version = { version ~ "{" ~ rule* ~ "}" }
+schema = { ident ~ "{" ~ schema_version* ~ "}" }
+root = { SOI ~ schema* ~ EOI }
+
+WHITESPACE = _{ " " | "\t" | "\n" }
+COMMENT = _{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
