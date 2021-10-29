@@ -6,8 +6,8 @@ mod sync;
 
 pub use libp2p::Multiaddr;
 pub use tlfs_crdt::{
-    Causal, Cursor, DocId, Event, Keypair, Kind, Lens, Package, PeerId, Permission, PrimitiveKind,
-    Schema, Subscriber,
+    Causal, Cursor, DocId, Event, Keypair, Kind, Lens, Lenses, Package, PeerId, Permission,
+    PrimitiveKind, Schema, Subscriber,
 };
 
 use crate::sync::{Behaviour, ToLibp2pKeypair, ToLibp2pPublic};
@@ -243,12 +243,12 @@ mod tests {
                 .lens_map_value()
                 .lens_in("todos"),
         ];
-        let package = Package::new(
+        let packages = vec![Package::new(
             "todoapp".into(),
-            vec![("0.1.0".into(), 8)],
-            Ref::archive(&lenses).into(),
-        );
-        let sdk = Sdk::memory(Ref::<Vec<Package>>::archive(&vec![package]).as_bytes()).await?;
+            8,
+            &Lenses::new(lenses.clone()),
+        )];
+        let sdk = Sdk::memory(Ref::archive(&packages).as_bytes()).await?;
         let doc = sdk.create_doc("todoapp")?;
 
         async_std::task::sleep(Duration::from_millis(100)).await;
@@ -278,12 +278,8 @@ mod tests {
         assert_eq!(value, title);
 
         lenses.push(Lens::RenameProperty("todos".into(), "tasks".into()));
-        let package = Package::new(
-            "todoapp".into(),
-            vec![("0.1.0".into(), 9)],
-            Ref::archive(&lenses).into(),
-        );
-        let sdk2 = Sdk::memory(Ref::archive(&vec![package]).as_bytes()).await?;
+        let packages = vec![Package::new("todoapp".into(), 9, &Lenses::new(lenses))];
+        let sdk2 = Sdk::memory(Ref::archive(&packages).as_bytes()).await?;
 
         let op = doc
             .cursor()

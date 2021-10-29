@@ -1,7 +1,7 @@
 use crate::acl::{Acl, Permission};
 use crate::dotset::DotSet;
 use crate::id::{DocId, PeerId};
-use crate::lens::ArchivedLenses;
+use crate::lens::LensesRef;
 use crate::path::{Path, PathBuf};
 use crate::subscriber::Subscriber;
 use anyhow::Result;
@@ -205,7 +205,7 @@ impl Causal {
     }
 
     /// Transforms a transaction so that it can be applied to a target document.
-    pub fn transform(&mut self, from: &ArchivedLenses, to: &ArchivedLenses) {
+    pub fn transform(&mut self, from: LensesRef, to: LensesRef) {
         let mut store = DotStore::new();
         for path in self.store.iter() {
             if let Some(path) = from.transform_path(path, to) {
@@ -433,7 +433,7 @@ impl Crdt {
         Ok(())
     }
 
-    pub fn transform(&self, doc: &DocId, from: &ArchivedLenses, to: &ArchivedLenses) -> Result<()> {
+    pub fn transform(&self, doc: &DocId, from: LensesRef, to: LensesRef) -> Result<()> {
         let mut path = PathBuf::new();
         path.doc(doc);
         for r in self.scan_path(path.as_path()) {
@@ -456,11 +456,12 @@ impl Crdt {
     }
 }
 
-/*#[cfg(test)]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::doc::Backend;
-    use crate::lens::{Kind, Lens};
+    use crate::lens::{Kind, Lens, Lenses};
+    use crate::registry::Package;
     use crate::schema::PrimitiveKind;
     use crate::util::Ref;
     use crate::{props::*, Keypair};
@@ -469,12 +470,16 @@ mod tests {
 
     #[async_std::test]
     async fn test_ewflag() -> Result<()> {
-        let mut sdk = Backend::memory()?;
+        let packages = vec![Package::new(
+            "crdt".into(),
+            1,
+            &Lenses::new(vec![Lens::Make(Kind::Flag)]),
+        )];
+        let mut sdk = Backend::memory(&packages)?;
         let peer = sdk.frontend().generate_keypair()?;
-        let hash = sdk.register(vec![Lens::Make(Kind::Flag)])?;
         let doc = sdk
             .frontend()
-            .create_doc(peer, &hash, Keypair::generate())?;
+            .create_doc(peer, "crdt", Keypair::generate())?;
         Pin::new(&mut sdk).await?;
         assert!(!doc.cursor().enabled()?);
 
@@ -491,22 +496,24 @@ mod tests {
 
     #[async_std::test]
     async fn test_ewflag_unjoin() -> Result<()> {
+        let packages = vec![Package::new(
+            "crdt".into(),
+            1,
+            &Lenses::new(vec![Lens::Make(Kind::Flag)]),
+        )];
         let la = Keypair::generate();
         let key = Keypair::generate();
         let peer = key.peer_id();
 
-        let mut sdk1 = Backend::memory()?;
-        let hash1 = sdk1.register(vec![Lens::Make(Kind::Flag)])?;
+        let mut sdk1 = Backend::memory(&packages)?;
         sdk1.frontend().add_keypair(key)?;
-        let doc1 = sdk1.frontend().create_doc(peer, &hash1, la)?;
+        let doc1 = sdk1.frontend().create_doc(peer, "crdt", la)?;
         Pin::new(&mut sdk1).await?;
 
-        let mut sdk2 = Backend::memory()?;
-        let hash2 = sdk2.register(vec![Lens::Make(Kind::Flag)])?;
+        let mut sdk2 = Backend::memory(&packages)?;
         sdk2.frontend().add_keypair(key)?;
-        let doc2 = sdk2.frontend().create_doc(peer, &hash2, la)?;
+        let doc2 = sdk2.frontend().create_doc(peer, "crdt", la)?;
         Pin::new(&mut sdk2).await?;
-        assert_eq!(hash1, hash2);
 
         let op = doc1.cursor().enable()?;
         doc1.apply(&op)?;
@@ -519,7 +526,8 @@ mod tests {
         doc1.apply(&op)?;
 
         let delta = sdk1.unjoin(&peer, doc1.id(), Ref::archive(&doc2.ctx()?).as_ref())?;
-        sdk2.join(&peer, doc1.id(), &hash1, delta)?;
+        let hash = sdk1.frontend().schema(doc1.id())?.as_ref().hash();
+        sdk2.join(&peer, doc1.id(), &hash, delta)?;
 
         assert!(!doc1.cursor().enabled()?);
         assert!(!doc2.cursor().enabled()?);
@@ -529,12 +537,16 @@ mod tests {
 
     #[async_std::test]
     async fn test_mvreg() -> Result<()> {
-        let mut sdk = Backend::memory()?;
-        let hash = sdk.register(vec![Lens::Make(Kind::Reg(PrimitiveKind::U64))])?;
+        let packages = vec![Package::new(
+            "crdt".into(),
+            1,
+            &Lenses::new(vec![Lens::Make(Kind::Reg(PrimitiveKind::U64))]),
+        )];
+        let mut sdk = Backend::memory(&packages)?;
         let peer1 = sdk.frontend().generate_keypair()?;
         let doc = sdk
             .frontend()
-            .create_doc(peer1, &hash, Keypair::generate())?;
+            .create_doc(peer1, "crdt", Keypair::generate())?;
         Pin::new(&mut sdk).await?;
 
         let peer2 = sdk.frontend().generate_keypair()?;
@@ -565,15 +577,19 @@ mod tests {
 
     #[async_std::test]
     async fn test_orarray_smoke() -> Result<()> {
-        let mut sdk = Backend::memory()?;
-        let hash = sdk.register(vec![
-            Lens::Make(Kind::Array),
-            Lens::LensMap(Box::new(Lens::Make(Kind::Reg(PrimitiveKind::U64)))),
-        ])?;
+        let packages = vec![Package::new(
+            "crdt".into(),
+            1,
+            &Lenses::new(vec![
+                Lens::Make(Kind::Array),
+                Lens::LensMap(Box::new(Lens::Make(Kind::Reg(PrimitiveKind::U64)))),
+            ]),
+        )];
+        let mut sdk = Backend::memory(&packages)?;
         let peer = sdk.frontend().generate_keypair()?;
         let doc = sdk
             .frontend()
-            .create_doc(peer, &hash, Keypair::generate())?;
+            .create_doc(peer, "crdt", Keypair::generate())?;
         Pin::new(&mut sdk).await?;
         let mut cur = doc.cursor();
         cur.index(0)?;
@@ -587,7 +603,7 @@ mod tests {
             .cursor()
             .index(0)?
             .u64s()?
-            .collect::<anyhow::Result<BTreeSet<_>>>()?;
+            .collect::<Result<BTreeSet<_>>>()?;
         assert_eq!(r.len(), 2);
         assert!(r.contains(&42));
         assert!(r.contains(&43));
@@ -595,11 +611,7 @@ mod tests {
         let op2 = cur.assign_u64(44)?;
         doc.apply(&op2)?;
 
-        let r = doc
-            .cursor()
-            .index(0)?
-            .u64s()?
-            .collect::<anyhow::Result<Vec<_>>>()?;
+        let r = doc.cursor().index(0)?.u64s()?.collect::<Result<Vec<_>>>()?;
         assert_eq!(r, vec![44]);
 
         let op_delete = doc.cursor().index(0)?.delete()?;
@@ -611,18 +623,22 @@ mod tests {
 
     #[async_std::test]
     async fn test_orarray_nested_crdt() -> Result<()> {
-        let mut sdk = Backend::memory()?;
-        let hash = sdk.register(vec![
-            Lens::Make(Kind::Array),
-            Lens::LensMap(Box::new(Lens::Make(Kind::Table(PrimitiveKind::Str)))),
-            Lens::LensMap(Box::new(Lens::LensMapValue(Box::new(Lens::Make(
-                Kind::Reg(PrimitiveKind::U64),
-            ))))),
-        ])?;
+        let packages = vec![Package::new(
+            "crdt".into(),
+            1,
+            &Lenses::new(vec![
+                Lens::Make(Kind::Array),
+                Lens::LensMap(Box::new(Lens::Make(Kind::Table(PrimitiveKind::Str)))),
+                Lens::LensMap(Box::new(Lens::LensMapValue(Box::new(Lens::Make(
+                    Kind::Reg(PrimitiveKind::U64),
+                ))))),
+            ]),
+        )];
+        let mut sdk = Backend::memory(&packages)?;
         let peer = sdk.frontend().generate_keypair()?;
         let doc = sdk
             .frontend()
-            .create_doc(peer, &hash, Keypair::generate())?;
+            .create_doc(peer, "crdt", Keypair::generate())?;
         Pin::new(&mut sdk).await?;
         let mut cur = doc.cursor();
         cur.index(0)?.key_str("a")?;
@@ -637,7 +653,7 @@ mod tests {
             .index(0)?
             .key_str("a")?
             .u64s()?
-            .collect::<anyhow::Result<BTreeSet<_>>>()?;
+            .collect::<Result<BTreeSet<_>>>()?;
         assert_eq!(r.len(), 2);
         assert!(r.contains(&42));
         assert!(r.contains(&43));
@@ -650,7 +666,7 @@ mod tests {
             .index(0)?
             .key_str("a")?
             .u64s()?
-            .collect::<anyhow::Result<Vec<_>>>()?;
+            .collect::<Result<Vec<_>>>()?;
         assert_eq!(r, vec![44]);
 
         let op_delete = doc.cursor().index(0)?.key_str("a")?.delete()?;
@@ -668,21 +684,25 @@ mod tests {
 
     #[async_std::test]
     async fn test_orarray_nested_orarray() -> Result<()> {
-        let mut sdk = Backend::memory()?;
-        let hash = sdk.register(vec![
-            Lens::Make(Kind::Array),
-            Lens::LensMap(Box::new(Lens::Make(Kind::Table(PrimitiveKind::Str)))),
-            Lens::LensMap(Box::new(Lens::LensMapValue(Box::new(Lens::Make(
-                Kind::Array,
-            ))))),
-            Lens::LensMap(Box::new(Lens::LensMapValue(Box::new(Lens::LensMap(
-                Box::new(Lens::Make(Kind::Reg(PrimitiveKind::U64))),
-            ))))),
-        ])?;
+        let packages = vec![Package::new(
+            "crdt".into(),
+            1,
+            &Lenses::new(vec![
+                Lens::Make(Kind::Array),
+                Lens::LensMap(Box::new(Lens::Make(Kind::Table(PrimitiveKind::Str)))),
+                Lens::LensMap(Box::new(Lens::LensMapValue(Box::new(Lens::Make(
+                    Kind::Array,
+                ))))),
+                Lens::LensMap(Box::new(Lens::LensMapValue(Box::new(Lens::LensMap(
+                    Box::new(Lens::Make(Kind::Reg(PrimitiveKind::U64))),
+                ))))),
+            ]),
+        )];
+        let mut sdk = Backend::memory(&packages)?;
         let peer = sdk.frontend().generate_keypair()?;
         let doc = sdk
             .frontend()
-            .create_doc(peer, &hash, Keypair::generate())?;
+            .create_doc(peer, "crdt", Keypair::generate())?;
         Pin::new(&mut sdk).await?;
         let mut cur = doc.cursor();
         cur.index(0)?.key_str("a")?.index(0)?;
@@ -698,7 +718,7 @@ mod tests {
             .key_str("a")?
             .index(0)?
             .u64s()?
-            .collect::<anyhow::Result<BTreeSet<_>>>()?;
+            .collect::<Result<BTreeSet<_>>>()?;
         assert_eq!(r.len(), 2);
         assert!(r.contains(&42));
         assert!(r.contains(&43));
@@ -712,7 +732,7 @@ mod tests {
             .key_str("a")?
             .index(0)?
             .u64s()?
-            .collect::<anyhow::Result<Vec<_>>>()?;
+            .collect::<Result<Vec<_>>>()?;
         assert_eq!(r, vec![44]);
 
         let op_delete = doc.cursor().index(0)?.key_str("a")?.delete()?;
@@ -733,15 +753,19 @@ mod tests {
     #[ignore]
     #[async_std::test]
     async fn test_orarray_move() -> Result<()> {
-        let mut sdk = Backend::memory()?;
+        let packages = vec![Package::new(
+            "crdt".into(),
+            1,
+            &Lenses::new(vec![
+                Lens::Make(Kind::Array),
+                Lens::LensMap(Box::new(Lens::Make(Kind::Reg(PrimitiveKind::U64)))),
+            ]),
+        )];
+        let mut sdk = Backend::memory(&packages)?;
         let peer = sdk.frontend().generate_keypair()?;
-        let hash = sdk.register(vec![
-            Lens::Make(Kind::Array),
-            Lens::LensMap(Box::new(Lens::Make(Kind::Reg(PrimitiveKind::U64)))),
-        ])?;
         let doc = sdk
             .frontend()
-            .create_doc(peer, &hash, Keypair::generate())?;
+            .create_doc(peer, "crdt", Keypair::generate())?;
         Pin::new(&mut sdk).await?;
         for i in 0..10 {
             let op = doc.cursor().index(i)?.assign_u64(i as u64)?;
@@ -768,18 +792,22 @@ mod tests {
 
     #[async_std::test]
     async fn test_ormap() -> Result<()> {
-        let mut sdk = Backend::memory()?;
+        let packages = vec![Package::new(
+            "crdt".into(),
+            1,
+            &Lenses::new(vec![
+                Lens::Make(Kind::Table(PrimitiveKind::Str)),
+                Lens::LensMapValue(Box::new(Lens::Make(Kind::Table(PrimitiveKind::Str)))),
+                Lens::LensMapValue(Box::new(Lens::LensMapValue(Box::new(Lens::Make(
+                    Kind::Reg(PrimitiveKind::U64),
+                ))))),
+            ]),
+        )];
+        let mut sdk = Backend::memory(&packages)?;
         let peer = sdk.frontend().generate_keypair()?;
-        let hash = sdk.register(vec![
-            Lens::Make(Kind::Table(PrimitiveKind::Str)),
-            Lens::LensMapValue(Box::new(Lens::Make(Kind::Table(PrimitiveKind::Str)))),
-            Lens::LensMapValue(Box::new(Lens::LensMapValue(Box::new(Lens::Make(
-                Kind::Reg(PrimitiveKind::U64),
-            ))))),
-        ])?;
         let doc = sdk
             .frontend()
-            .create_doc(peer, &hash, Keypair::generate())?;
+            .create_doc(peer, "crdt", Keypair::generate())?;
         Pin::new(&mut sdk).await?;
 
         let mut cur = doc.cursor();
@@ -849,4 +877,4 @@ mod tests {
             assert_eq!(c, c2);
         }
     }
-}*/
+}

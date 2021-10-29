@@ -4,7 +4,6 @@ use crate::util::Ref;
 use anyhow::Result;
 pub use blake3::Hash;
 use parking_lot::RwLock;
-use rkyv::string::ArchivedString;
 use rkyv::{Archive, Archived, Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -16,17 +15,26 @@ use std::sync::Arc;
 #[repr(C)]
 pub struct Package {
     name: String,
-    versions: Vec<(String, u32)>,
+    version: u32,
     lenses: Vec<u8>,
 }
 
 impl Package {
-    /// Creates a new [`Lenses`] wrapper from a [`Vec<Lens>`].
-    pub fn new(name: String, versions: Vec<(String, u32)>, lenses: Vec<u8>) -> Self {
+    /// Creates a new [`Package`].
+    pub fn new(name: String, version: u32, lenses: &Lenses) -> Self {
         Self {
             name,
-            versions,
-            lenses,
+            version,
+            lenses: Ref::archive(lenses).into(),
+        }
+    }
+
+    /// Empty package.
+    pub fn empty(name: String) -> Self {
+        Self {
+            name,
+            version: 0,
+            lenses: [0; 8].to_vec(),
         }
     }
 }
@@ -37,9 +45,9 @@ impl ArchivedPackage {
         &self.name
     }
 
-    /// Returns the versions of the lenses.
-    pub fn versions(&self) -> &[(ArchivedString, u32)] {
-        self.versions.as_ref()
+    /// Returns the version of the lenses.
+    pub fn version(&self) -> u32 {
+        self.version
     }
 
     /// Returns a reference to the [`ArchivedLenses`] bytes.
@@ -57,7 +65,7 @@ pub struct Expanded {
 impl Expanded {
     /// Expands lenses.
     pub fn new(lenses: Ref<Lenses>) -> Result<Self> {
-        let schema = Ref::new(lenses.as_ref().to_schema()?.into());
+        let schema = Ref::new(lenses.as_ref().to_ref().to_schema()?.into());
         Ok(Self { lenses, schema })
     }
 
@@ -129,7 +137,7 @@ impl Registry {
     }
 
     /// Returns the schema by name.
-    pub fn lookup(&self, id: &str) -> Option<(Hash, u32)> {
+    pub fn lookup(&self, id: &str) -> Option<(u32, Hash)> {
         let hash = *self.table.get(id)?;
         let len = self
             .expanded
@@ -138,7 +146,7 @@ impl Registry {
             .lenses()
             .lenses()
             .len();
-        Some((hash, len as u32))
+        Some((len as u32, hash))
     }
 
     /// Returns true if the registry contains the [`Schema`] identified by [`struct@Hash`].

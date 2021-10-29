@@ -3,7 +3,7 @@ use fnv::FnvHashMap;
 use pest::iterators::Pair;
 use pest::Parser;
 use pest_derive::Parser;
-use tlfs_crdt::{Kind, Lens, Package, PrimitiveKind, Ref, Schema};
+use tlfs_crdt::{Kind, Lens, Lenses, Package, PrimitiveKind, Ref, Schema};
 
 #[derive(Parser)]
 #[grammar = "grammar.pest"]
@@ -64,8 +64,8 @@ impl Interpreter {
         for (name, builder) in self.schemas {
             lenses.push(Package::new(
                 name,
-                builder.versions,
-                Ref::archive(&builder.lenses).into(),
+                builder.lenses.len() as u32,
+                &Lenses::new(builder.lenses),
             ));
         }
         lenses
