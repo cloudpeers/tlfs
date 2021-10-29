@@ -143,6 +143,8 @@ impl Docs {
         Ok(())
     }
 
+    /// Returns the default [`Keypair`]. If no default [`Keypair`] is set it will
+    /// generate one.
     pub fn default_keypair(&self) -> Result<Keypair> {
         let mut key = [0; 33];
         key[32] = 3;
@@ -382,7 +384,8 @@ impl Frontend {
         self.add_keypair(Keypair::generate())
     }
 
-    /// Returns the default [`Keypair`].
+    /// Returns the default [`Keypair`]. If no default [`Keypair`] is set it will
+    /// generate one.
     pub fn default_keypair(&self) -> Result<Keypair> {
         self.docs.default_keypair()
     }
