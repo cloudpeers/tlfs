@@ -148,7 +148,7 @@ impl<'a> Cursor<'a> {
     }
 
     /// Returns a cursor to a value in a table.
-    pub fn key_bool(mut self, key: bool) -> Result<Self> {
+    pub fn key_bool(&mut self, key: bool) -> Result<&mut Self> {
         if let ArchivedSchema::Table(PrimitiveKind::Bool, schema) = &self.schema {
             self.path.prim_bool(key);
             self.schema = schema;
@@ -159,7 +159,7 @@ impl<'a> Cursor<'a> {
     }
 
     /// Returns a cursor to a value in a table.
-    pub fn key_u64(mut self, key: u64) -> Result<Self> {
+    pub fn key_u64(&mut self, key: u64) -> Result<&mut Self> {
         if let ArchivedSchema::Table(PrimitiveKind::U64, schema) = &self.schema {
             self.path.prim_u64(key);
             self.schema = schema;
@@ -170,7 +170,7 @@ impl<'a> Cursor<'a> {
     }
 
     /// Returns a cursor to a value in a table.
-    pub fn key_i64(mut self, key: i64) -> Result<Self> {
+    pub fn key_i64(&mut self, key: i64) -> Result<&mut Self> {
         if let ArchivedSchema::Table(PrimitiveKind::I64, schema) = &self.schema {
             self.path.prim_i64(key);
             self.schema = schema;
@@ -181,7 +181,7 @@ impl<'a> Cursor<'a> {
     }
 
     /// Returns a cursor to a value in a table.
-    pub fn key_str(mut self, key: &str) -> Result<Self> {
+    pub fn key_str(&mut self, key: &str) -> Result<&mut Self> {
         if let ArchivedSchema::Table(PrimitiveKind::Str, schema) = &self.schema {
             self.path.prim_str(key);
             self.schema = schema;
@@ -192,7 +192,7 @@ impl<'a> Cursor<'a> {
     }
 
     /// Returns a cursor to a value in an array.
-    pub fn index(mut self, ix: usize) -> Result<Self> {
+    pub fn index(&mut self, ix: usize) -> Result<&mut Self> {
         if let ArchivedSchema::Array(schema) = &self.schema {
             self.schema = schema;
             let (array, path) = ArrayWrapper::new(&self, ix)?;
@@ -205,7 +205,7 @@ impl<'a> Cursor<'a> {
     }
 
     /// Returns a cursor to a field in a struct.
-    pub fn field(mut self, key: &str) -> Result<Self> {
+    pub fn field(&mut self, key: &str) -> Result<&mut Self> {
         if let ArchivedSchema::Struct(fields) = &self.schema {
             if let Some(schema) = fields.get(key) {
                 self.path.prim_str(key);
@@ -408,13 +408,13 @@ impl<'a> Cursor<'a> {
     }
 
     /// Moves the entry inside an array.
-    pub fn r#move(mut self, to: usize) -> Result<Causal> {
+    pub fn r#move(&mut self, to: usize) -> Result<Causal> {
         let array = self.array.pop().context("Not inside an ORArray")?;
         array.r#move(&self, to)
     }
 
     /// Deletes the entry from an array.
-    pub fn delete(mut self) -> Result<Causal> {
+    pub fn delete(&mut self) -> Result<Causal> {
         let array = self.array.pop().context("Not inside an ORArray")?;
         array.delete(&self)
     }

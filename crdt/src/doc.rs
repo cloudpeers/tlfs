@@ -25,7 +25,7 @@ impl Docs {
         Self(tree)
     }
 
-    pub fn docs(&self) -> impl Iterator<Item = Result<DocId>> + '_ {
+    pub fn docs(&self) -> impl Iterator<Item = Result<DocId>> {
         self.0.iter().keys().filter_map(|r| match r {
             Ok(k) if k[32] == 1 => Some(Ok(DocId::new((&k[..32]).try_into().unwrap()))),
             Ok(_) => None,
@@ -33,7 +33,7 @@ impl Docs {
         })
     }
 
-    pub fn keys(&self) -> impl Iterator<Item = Result<PeerId>> + '_ {
+    pub fn keys(&self) -> impl Iterator<Item = Result<PeerId>> {
         self.0.iter().keys().filter_map(|r| match r {
             Ok(k) if k[32] == 2 => Some(Ok(PeerId::new((&k[..32]).try_into().unwrap()))),
             Ok(_) => None,
@@ -87,7 +87,10 @@ impl Docs {
         let mut key = [0; 33];
         key[..32].copy_from_slice(id.as_ref());
         key[32] = 1;
-        let v = self.0.get(key)?.unwrap();
+        let v = self
+            .0
+            .get(key)?
+            .ok_or_else(|| anyhow!("{:?} doesn't have an associated peer id", id))?;
         Ok(PeerId::new(v.as_ref().try_into().unwrap()))
     }
 
@@ -371,7 +374,7 @@ impl Frontend {
     }
 
     /// Returns an iterator of [`DocId`].
-    pub fn docs(&self) -> impl Iterator<Item = Result<DocId>> + '_ {
+    pub fn docs(&self) -> impl Iterator<Item = Result<DocId>> {
         self.docs.docs()
     }
 
