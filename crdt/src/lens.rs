@@ -5,12 +5,12 @@ use bytecheck::CheckBytes;
 use rkyv::ser::serializers::AllocSerializer;
 use rkyv::ser::Serializer;
 use rkyv::string::ArchivedString;
-use rkyv::{Archive, Serialize};
+use rkyv::{Archive, Deserialize, Serialize};
 
 type Prop = String;
 
 /// Kind of a sequence of [`Path`] [`Segment`]s.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Archive, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Archive, Deserialize, Serialize)]
 #[archive_attr(allow(missing_docs))]
 #[archive_attr(derive(Clone, Copy, Debug, Eq, PartialEq, CheckBytes))]
 #[repr(C)]
@@ -34,7 +34,7 @@ pub enum Kind {
 }
 
 /// A [`Lens`] is a bidirectional transform on [`Schema`]s.
-#[derive(Clone, Debug, Eq, PartialEq, Archive, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive_attr(allow(missing_docs))]
 #[archive_attr(derive(Debug, Eq, PartialEq, CheckBytes))]
 #[archive_attr(check_bytes(
@@ -345,10 +345,10 @@ impl<'a> LensRef<'a> {
 }
 
 /// An ordered sequence of [`Lens`]es.
-#[derive(Clone, Debug, Eq, PartialEq, Archive, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(Debug, Eq, PartialEq, CheckBytes))]
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
-#[repr(C)]
+#[repr(transparent)]
 pub struct Lenses(Vec<Lens>);
 
 impl Lenses {
@@ -421,7 +421,6 @@ impl ArchivedLenses {
 mod tests {
     use super::*;
     use crate::props::*;
-    use crate::registry::EMPTY_LENSES;
     use crate::util::Ref;
     use proptest::prelude::*;
 
@@ -438,7 +437,7 @@ mod tests {
         #[test]
         #[ignore] // props don't generate signatures
         fn transform_preserves_validity((lens, mut schema, mut causal) in lens_schema_and_causal()) {
-            let from = Ref::<Lenses>::new(EMPTY_LENSES.as_ref().into());
+            let from = Ref::archive(&Lenses::new(vec![]));
             let to = Ref::archive(&Lenses::new(vec![lens]));
             let lens = to.as_ref().lenses()[0].to_ref();
             prop_assume!(validate(&schema, &causal));

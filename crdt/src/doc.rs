@@ -3,19 +3,42 @@ use crate::crdt::{Causal, CausalContext, Crdt};
 use crate::crypto::Keypair;
 use crate::cursor::Cursor;
 use crate::id::{DocId, PeerId};
-use crate::lens::{Lens, Lenses};
 use crate::path::Path;
-use crate::registry::{Hash, Registry, EMPTY_HASH, EMPTY_LENSES, EMPTY_SCHEMA};
-use crate::schema::Schema;
+use crate::registry::{Expanded, Hash, Registry};
 use crate::util::Ref;
 use anyhow::{anyhow, Result};
 use futures::channel::mpsc;
 use futures::prelude::*;
-use rkyv::Archived;
+use rkyv::{Archive, Archived, Deserialize, Serialize};
 use std::convert::TryInto;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
+
+#[derive(Debug, Archive, Deserialize, Serialize)]
+#[archive_attr(derive(Debug))]
+pub struct SchemaInfo {
+    name: String,
+    hash: [u8; 32],
+    len: u32,
+}
+
+impl SchemaInfo {
+    pub fn new(name: String, hash: Hash, len: u32) -> Self {
+        Self {
+            name,
+            hash: hash.into(),
+            len,
+        }
+    }
+}
+
+impl ArchivedSchemaInfo {
+    pub fn hash(&self) -> Hash {
+        self.hash.into()
+    }
+}
 
 #[derive(Clone)]
 struct Docs(sled::Tree);
@@ -41,16 +64,6 @@ impl Docs {
         })
     }
 
-    pub fn create(&self, id: &DocId, schema: &Hash) -> Result<()> {
-        let mut key = [0; 33];
-        key[..32].copy_from_slice(id.as_ref());
-        key[32] = 0;
-        self.0.insert(key, schema.as_bytes())?;
-        key[32] = 1;
-        self.0.insert(key, id.as_ref())?;
-        Ok(())
-    }
-
     pub fn remove(&self, id: &DocId) -> Result<()> {
         let mut key = [0; 33];
         key[..32].copy_from_slice(id.as_ref());
@@ -61,25 +74,19 @@ impl Docs {
         Ok(())
     }
 
-    pub fn schema_id(&self, id: &DocId) -> Result<Hash> {
+    pub fn schema(&self, id: &DocId) -> Result<Ref<SchemaInfo>> {
         let mut key = [0; 33];
         key[..32].copy_from_slice(id.as_ref());
         key[32] = 0;
-        Ok(self
-            .0
-            .get(key)?
-            .map(|b| {
-                let b: [u8; 32] = b.as_ref().try_into().unwrap();
-                b.into()
-            })
-            .unwrap_or_else(|| EMPTY_HASH.into()))
+        let schema = self.0.get(key)?.unwrap();
+        Ok(Ref::new(schema))
     }
 
-    pub fn set_schema_id(&self, id: &DocId, hash: &Hash) -> Result<()> {
+    pub fn set_schema(&self, id: &DocId, schema: &SchemaInfo) -> Result<()> {
         let mut key = [0; 33];
         key[..32].copy_from_slice(id.as_ref());
         key[32] = 0;
-        self.0.insert(key, hash.as_bytes())?;
+        self.0.insert(key, Ref::archive(schema).as_bytes())?;
         Ok(())
     }
 
@@ -134,7 +141,7 @@ impl<'a> std::fmt::Debug for DebugDoc<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let mut s = f.debug_struct("Doc");
         s.field("peer_id", &self.0.peer_id(&self.1).unwrap());
-        s.field("schema", &self.0.schema_id(&self.1).unwrap());
+        s.field("schema", &self.0.schema(&self.1).unwrap());
         s.finish()
     }
 }
@@ -186,8 +193,8 @@ pub struct Backend {
 
 impl Backend {
     /// Creates a new [`Backend`] from a [`sled::Db`].
-    pub fn new(db: sled::Db) -> Result<Self> {
-        let registry = Registry::new(db.open_tree("lenses")?);
+    pub fn new(db: sled::Db, package: &[u8]) -> Result<Self> {
+        let registry = Registry::new(package)?;
         let docs = Docs::new(db.open_tree("docs")?);
         let acl = Acl::new(db.open_tree("acl")?);
         let crdt = Crdt::new(
@@ -206,12 +213,25 @@ impl Backend {
             rx,
         };
         me.update_acl()?;
+
+        /*/// Transforms a document into a the [`Schema`] identified by [`struct@Hash`].
+        pub fn transform(&mut self, id: &DocId, schema_id: &Hash) -> Result<()> {
+            let doc_schema_id = self.docs.schema_id(id)?;
+            let doc_lenses = self.registry.get(doc_schema_id).unwrap();
+            let lenses = self.registry.get(schema_id)
+                .ok_or_else(|| anyhow!("missing lenses with hash {}", &schema_id))?;
+            self.crdt
+                .transform(id, doc_lenses.as_ref(), lenses.as_ref())?;
+            self.docs.set_schema_id(id, schema_id)?;
+            Ok(())
+        }*/
+
         Ok(me)
     }
 
     /// Creates a new in-memory backend for testing purposes.
     #[cfg(test)]
-    pub fn memory() -> Result<Self> {
+    pub fn memory(package: &crate::registry::Package) -> Result<Self> {
         use tracing_subscriber::fmt::format::FmtSpan;
         use tracing_subscriber::EnvFilter;
         tracing_log::LogTracer::init().ok();
@@ -223,13 +243,11 @@ impl Backend {
             .finish();
         tracing::subscriber::set_global_default(subscriber).ok();
         log_panics::init();
-        Self::new(sled::Config::new().temporary(true).open()?)
-    }
-
-    /// Registers lenses in the lens registry.
-    pub fn register(&self, lenses: Vec<Lens>) -> Result<Hash> {
-        self.registry
-            .register(Ref::archive(&Lenses::new(lenses)).as_bytes())
+        let package = Ref::archive(package);
+        Self::new(
+            sled::Config::new().temporary(true).open()?,
+            package.as_bytes(),
+        )
     }
 
     /// Returns a reference to the lens registry.
@@ -254,30 +272,16 @@ impl Backend {
         causal_schema: &Hash,
         mut causal: Causal,
     ) -> Result<()> {
-        let doc_schema_id = self.docs.schema_id(doc)?;
-        let doc_lenses = self
+        let doc_schema = self.docs.schema(doc)?;
+        let doc_lenses = self.registry.get(&doc_schema.as_ref().hash.into()).unwrap();
+        let lenses = self
             .registry
-            .lenses(&doc_schema_id)?
-            .unwrap_or_else(|| Ref::new(EMPTY_LENSES.as_ref().into()));
-        let schema = self.registry.schema(causal_schema)?;
-        let lenses = self.registry.lenses(causal_schema)?;
-        let (schema, lenses) = match (schema, lenses) {
-            (Some(schema), Some(lenses)) => (schema, lenses),
-            _ => {
-                if *causal_schema.as_bytes() == EMPTY_HASH {
-                    (
-                        Ref::new(EMPTY_SCHEMA.to_vec().into()),
-                        Ref::new(EMPTY_LENSES.to_vec().into()),
-                    )
-                } else {
-                    return Err(anyhow!("missing lenses with hash {}", causal_schema));
-                }
-            }
-        };
-        if !schema.as_ref().validate(&causal) {
+            .get(causal_schema)
+            .ok_or_else(|| anyhow!("missing lenses with hash {}", causal_schema))?;
+        if !lenses.schema().validate(&causal) {
             return Err(anyhow!("crdt failed schema validation"));
         }
-        causal.transform(lenses.as_ref(), doc_lenses.as_ref());
+        causal.transform(lenses.lenses(), doc_lenses.lenses());
         self.crdt.join_policy(&causal)?;
         self.update_acl()?;
         self.crdt.join(peer_id, &causal)?;
@@ -292,23 +296,6 @@ impl Backend {
         ctx: &Archived<CausalContext>,
     ) -> Result<Causal> {
         self.crdt.unjoin(peer_id, doc, ctx)
-    }
-
-    /// Transforms a document into a the [`Schema`] identified by [`struct@Hash`].
-    pub fn transform(&mut self, id: &DocId, schema_id: &Hash) -> Result<()> {
-        let doc_schema_id = self.docs.schema_id(id)?;
-        let doc_lenses = self
-            .registry
-            .lenses(&doc_schema_id)?
-            .unwrap_or_else(|| Ref::new(EMPTY_LENSES.as_ref().into()));
-        let lenses = self
-            .registry
-            .lenses(schema_id)?
-            .ok_or_else(|| anyhow!("missing lenses with hash {}", &schema_id))?;
-        self.crdt
-            .transform(id, doc_lenses.as_ref(), lenses.as_ref())?;
-        self.docs.set_schema_id(id, schema_id)?;
-        Ok(())
     }
 
     /// Returns a clonable [`Frontend`].
@@ -379,22 +366,32 @@ impl Frontend {
     }
 
     /// Creates a new document using [`Keypair`] with initial schema and owner.
-    pub fn create_doc(&self, owner: PeerId, schema: &Hash, la: Keypair) -> Result<Doc> {
+    pub fn create_doc(&self, owner: PeerId, schema: &str, la: Keypair) -> Result<Doc> {
         let id = DocId::new(la.peer_id().into());
-        self.docs.create(&id, schema)?;
-        let schema = self.schema(schema)?;
+        let (hash, len) = self
+            .registry
+            .lookup(schema)
+            .ok_or_else(|| anyhow!("missing schema {}", schema))?;
+        let info = SchemaInfo::new(schema.into(), hash, len);
+        let schema = self.registry.get(&hash).unwrap();
+        self.docs.set_schema(&id, &info)?;
         let doc = Doc::new(id, self.clone(), la, schema);
         let delta = doc.cursor().say_can(Some(owner), Permission::Own)?;
         self.apply(&id, &delta)?;
-        self.set_peer_id(&id, &owner)?;
+        self.docs.set_peer_id(&id, &owner)?;
         self.doc(id)
     }
 
     /// Adds an existing document identified by [`DocId`] with schema and associates the local
     /// keypair identified by [`PeerId`].
-    pub fn add_doc(&self, id: DocId, peer: &PeerId, schema: &Hash) -> Result<Doc> {
+    pub fn add_doc(&self, id: DocId, peer: &PeerId, schema: &str) -> Result<Doc> {
+        let (hash, len) = self
+            .registry
+            .lookup(schema)
+            .ok_or_else(|| anyhow!("missing schema {}", schema))?;
+        let info = SchemaInfo::new(schema.into(), hash, len);
+        self.docs.set_schema(&id, &info)?;
         self.docs.set_peer_id(&id, peer)?;
-        self.docs.set_schema_id(&id, schema)?;
         self.doc(id)
     }
 
@@ -410,30 +407,16 @@ impl Frontend {
         self.docs.peer_id(id)
     }
 
-    /// Changes the associated [`Keypair`] for a document.
-    pub fn set_peer_id(&self, id: &DocId, peer: &PeerId) -> Result<()> {
-        self.docs.set_peer_id(id, peer)
-    }
-
     /// Returns the current schema identifier of a document.
-    pub fn schema_id(&self, id: &DocId) -> Result<Hash> {
-        self.docs.schema_id(id)
+    pub fn schema(&self, id: &DocId) -> Result<Ref<SchemaInfo>> {
+        self.docs.schema(id)
     }
 
     /// Returns the current lenses of a document.
-    pub fn lenses(&self, id: &Hash) -> Result<Ref<Lenses>> {
-        Ok(self
-            .registry
-            .lenses(id)?
-            .unwrap_or_else(|| Ref::new(EMPTY_LENSES.as_ref().into())))
-    }
-
-    /// Returns the current schema of a document.
-    pub fn schema(&self, id: &Hash) -> Result<Ref<Schema>> {
-        Ok(self
-            .registry
-            .schema(id)?
-            .unwrap_or_else(|| Ref::new(EMPTY_SCHEMA.as_ref().into())))
+    pub fn lenses(&self, id: &Hash) -> Result<Arc<Expanded>> {
+        self.registry
+            .get(id)
+            .ok_or_else(|| anyhow!("missing schema for {}", id))
     }
 
     /// Computes the [`CausalContext`] to sync with a remote peer.
@@ -449,8 +432,8 @@ impl Frontend {
 
     /// Opens a document with a local keypair identified by [`PeerId`].
     pub fn doc_as(&self, id: DocId, peer_id: &PeerId) -> Result<Doc> {
-        let hash = self.schema_id(&id)?;
-        let schema = self.schema(&hash)?;
+        let info = self.schema(&id)?;
+        let schema = self.lenses(&info.as_ref().hash.into())?;
         let key = self.keypair(peer_id)?;
         Ok(Doc::new(id, self.clone(), key, schema))
     }
@@ -479,11 +462,11 @@ pub struct Doc {
     id: DocId,
     frontend: Frontend,
     key: Keypair,
-    schema: Ref<Schema>,
+    schema: Arc<Expanded>,
 }
 
 impl Doc {
-    fn new(id: DocId, frontend: Frontend, key: Keypair, schema: Ref<Schema>) -> Self {
+    fn new(id: DocId, frontend: Frontend, key: Keypair, schema: Arc<Expanded>) -> Self {
         Self {
             id,
             frontend,
@@ -504,7 +487,7 @@ impl Doc {
 
     /// Returns a cursor for the document.
     pub fn cursor(&self) -> Cursor<'_> {
-        Cursor::new(self.key, self.id, self.schema.as_ref(), &self.frontend.crdt)
+        Cursor::new(self.key, self.id, self.schema.schema(), &self.frontend.crdt)
     }
 
     /// Applies a local change to the document.
@@ -516,11 +499,10 @@ impl Doc {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Kind, Lens, Permission, PrimitiveKind};
+    use crate::{Kind, Lens, Package, Permission, PrimitiveKind};
 
     #[async_std::test]
     async fn test_api() -> Result<()> {
-        let mut sdk = Backend::memory()?;
         let lenses = vec![
             Lens::Make(Kind::Struct),
             Lens::AddProperty("todos".into()),
@@ -541,12 +523,17 @@ mod tests {
                 .lens_map_value()
                 .lens_in("todos"),
         ];
-        let hash = sdk.register(lenses.clone())?;
+        let package = Package::new(
+            "todoapp".into(),
+            vec![("0.1.0".into(), 8)],
+            Ref::archive(&lenses).into(),
+        );
+        let mut sdk = Backend::memory(&package)?;
 
         let peer = sdk.frontend().generate_keypair()?;
         let doc = sdk
             .frontend()
-            .create_doc(peer, &hash, Keypair::generate())?;
+            .create_doc(peer, "todoapp", Keypair::generate())?;
         Pin::new(&mut sdk).await?;
         assert!(doc.cursor().can(&peer, Permission::Write)?);
 
@@ -569,16 +556,16 @@ mod tests {
             .unwrap()?;
         assert_eq!(value, title);
 
-        let mut sdk2 = Backend::memory()?;
-        sdk2.register(lenses)?;
+        let mut sdk2 = Backend::memory(&package)?;
         let peer2 = sdk2.frontend().generate_keypair()?;
         let op = doc.cursor().say_can(Some(peer2), Permission::Write)?;
         doc.apply(&op)?;
         Pin::new(&mut sdk).await?;
 
-        let doc2 = sdk2.frontend().add_doc(*doc.id(), &peer2, &hash)?;
+        let doc2 = sdk2.frontend().add_doc(*doc.id(), &peer2, "todoapp")?;
         let ctx = Ref::archive(&doc2.ctx()?);
         let delta = sdk.unjoin(&peer2, doc2.id(), ctx.as_ref())?;
+        let hash = sdk2.frontend().registry.lookup("todoapp").unwrap().0;
         sdk2.join(&peer, doc.id(), &hash, delta)?;
 
         let value = doc2

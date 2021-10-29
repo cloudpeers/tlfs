@@ -2,6 +2,7 @@
 members = [
     "cloud-relay",
     "crdt",
+    "tlfsc",
     "wasm-ffi",
     ".",
 ]
