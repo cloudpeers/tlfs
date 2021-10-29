@@ -59,9 +59,8 @@ impl Sdk {
         let backend = Backend::new(db, package)?;
         let frontend = backend.frontend();
 
-        // TODO: load keypair
-        let peer = frontend.generate_keypair()?;
-        let keypair = frontend.keypair(&peer)?;
+        let keypair = frontend.default_keypair()?;
+        let peer = keypair.peer_id();
         tracing::info!("our peer id is: {}", peer);
 
         let transport = libp2p::development_transport(keypair.to_libp2p()).await?;
