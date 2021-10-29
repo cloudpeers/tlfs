@@ -238,9 +238,9 @@ impl SchemaBuilder {
                     "{}" => segments.push(Segment::LensMapValue),
                     _ => {
                         for pair in pair.into_inner() {
-                            if pair.as_rule() == Rule::invokation {
+                            if pair.as_rule() == Rule::invocation {
                                 if pair.as_str().ends_with(')') {
-                                    segments.push(self.invokation(pair));
+                                    segments.push(self.invocation(pair));
                                 } else {
                                     segments.push(Segment::Field(pair.as_str().into()));
                                 }
@@ -253,7 +253,7 @@ impl SchemaBuilder {
         segments
     }
 
-    fn invokation(&mut self, pair: Pair<Rule>) -> Segment {
+    fn invocation(&mut self, pair: Pair<Rule>) -> Segment {
         let mut method = None;
         let mut segment = None;
         for pair in pair.into_inner().into_iter() {
