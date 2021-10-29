@@ -6,8 +6,8 @@ mod sync;
 
 pub use libp2p::Multiaddr;
 pub use tlfs_crdt::{
-    Causal, Cursor, DocId, Event, Keypair, Kind, Lens, PeerId, Permission, PrimitiveKind, Schema,
-    Subscriber,
+    Causal, Cursor, DocId, Event, Keypair, Kind, Lens, Package, PeerId, Permission, PrimitiveKind,
+    Schema, Subscriber,
 };
 
 use crate::sync::{Behaviour, ToLibp2pKeypair, ToLibp2pPublic};
@@ -32,16 +32,20 @@ pub struct Sdk {
 
 impl Sdk {
     /// Creates a new persistent [`Sdk`] instance.
-    pub async fn persistent(db: &Path, lenses: &Path) -> Result<Self> {
-        Self::new(sled::Config::new().path(db).open()?, lenses).await
+    pub async fn persistent(db: &Path, package: &Path) -> Result<Self> {
+        Self::new(
+            sled::Config::new().path(db).open()?,
+            &std::fs::read(package)?,
+        )
+        .await
     }
 
     /// Create a new in-memory [`Sdk`] instance.
-    pub async fn memory(lenses: &Path) -> Result<Self> {
-        Self::new(sled::Config::new().temporary(true).open()?, lenses).await
+    pub async fn memory(package: &[u8]) -> Result<Self> {
+        Self::new(sled::Config::new().temporary(true).open()?, package).await
     }
 
-    async fn new(db: sled::Db, package: &Path) -> Result<Self> {
+    async fn new(db: sled::Db, package: &[u8]) -> Result<Self> {
         tracing_log::LogTracer::init().ok();
         let env = std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or_else(|_| "info".to_owned());
         let subscriber = tracing_subscriber::FmtSubscriber::builder()
@@ -52,8 +56,7 @@ impl Sdk {
         tracing::subscriber::set_global_default(subscriber).ok();
         log_panics::init();
 
-        let package = std::fs::read(package)?;
-        let backend = Backend::new(db, &package)?;
+        let backend = Backend::new(db, package)?;
         let frontend = backend.frontend();
 
         // TODO: load keypair
@@ -140,7 +143,7 @@ impl Sdk {
     }
 
     /// Creates a new document with an initial [`Schema`].
-    pub fn create_doc(&mut self, schema: &str) -> Result<Doc> {
+    pub fn create_doc(&self, schema: &str) -> Result<Doc> {
         let peer_id = self.peer_id();
         let doc = self
             .frontend
@@ -217,11 +220,11 @@ mod tests {
     use super::*;
     use futures::StreamExt;
     use std::time::Duration;
+    use tlfs_crdt::Ref;
 
     #[async_std::test]
     async fn test_api() -> Result<()> {
-        let migrate = Migrate::memory()?;
-        let lenses = vec![
+        let mut lenses = vec![
             Lens::Make(Kind::Struct),
             Lens::AddProperty("todos".into()),
             Lens::Make(Kind::Table(PrimitiveKind::U64)).lens_in("todos"),
@@ -241,10 +244,13 @@ mod tests {
                 .lens_map_value()
                 .lens_in("todos"),
         ];
-        let hash = migrate.register(lenses.clone())?;
-
-        let mut sdk = migrate.finish().await?;
-        let doc = sdk.create_doc(&hash)?;
+        let package = Package::new(
+            "todoapp".into(),
+            vec![("0.1.0".into(), 8)],
+            Ref::archive(&lenses).into(),
+        );
+        let sdk = Sdk::memory(Ref::<Vec<Package>>::archive(&vec![package]).as_bytes()).await?;
+        let doc = sdk.create_doc("todoapp")?;
 
         async_std::task::sleep(Duration::from_millis(100)).await;
         assert!(doc.cursor().can(sdk.peer_id(), Permission::Write)?);
@@ -272,11 +278,14 @@ mod tests {
             .unwrap()?;
         assert_eq!(value, title);
 
-        let sdk2 = Migrate::memory()?;
-        let mut lenses2 = lenses.clone();
-        lenses2.push(Lens::RenameProperty("todos".into(), "tasks".into()));
-        let hash2 = sdk2.register(lenses2)?;
-        let sdk2 = sdk2.finish().await?;
+        lenses.push(Lens::RenameProperty("todos".into(), "tasks".into()));
+        let package = Package::new(
+            "todoapp".into(),
+            vec![("0.1.0".into(), 9)],
+            Ref::archive(&lenses).into(),
+        );
+        let sdk2 = Sdk::memory(Ref::archive(&vec![package]).as_bytes()).await?;
+
         let op = doc
             .cursor()
             .say_can(Some(*sdk2.peer_id()), Permission::Write)?;
@@ -285,7 +294,7 @@ mod tests {
         for addr in sdk.addresses().await {
             sdk2.add_address(*sdk.peer_id(), addr);
         }
-        let doc2 = sdk2.add_doc(*doc.id(), &hash2)?;
+        let doc2 = sdk2.add_doc(*doc.id(), "todoapp")?;
         let mut sub = doc2.cursor().field("tasks")?.subscribe();
         let mut exit = false;
         while !exit {

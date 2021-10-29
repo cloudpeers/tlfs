@@ -16,8 +16,6 @@ use smallvec::SmallVec;
 pub struct Cursor<'a> {
     key: Keypair,
     peer_id: PeerId,
-    /// The [`DocId`] this cursor points into.
-    id: DocId,
     /// The [`Schema`] this [`Cursor`] is pointing to.
     schema: &'a Archived<Schema>,
     crdt: &'a Crdt,
@@ -35,7 +33,6 @@ impl<'a> Cursor<'a> {
         Self {
             key,
             peer_id: key.peer_id(),
-            id,
             schema,
             path,
             crdt,

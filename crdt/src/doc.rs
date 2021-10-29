@@ -374,6 +374,7 @@ impl Frontend {
             .ok_or_else(|| anyhow!("missing schema {}", schema))?;
         let info = SchemaInfo::new(schema.into(), hash, len);
         let schema = self.registry.get(&hash).unwrap();
+        self.docs.set_peer_id(&id, &id.into())?;
         self.docs.set_schema(&id, &info)?;
         let doc = Doc::new(id, self.clone(), la, schema);
         let delta = doc.cursor().say_can(Some(owner), Permission::Own)?;
