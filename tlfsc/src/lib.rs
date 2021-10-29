@@ -232,14 +232,14 @@ impl SchemaBuilder {
     fn path(&mut self, pair: Pair<Rule>) -> Vec<Segment> {
         let mut segments = vec![];
         for pair in pair.into_inner().flatten() {
-            match pair.as_rule() {
-                Rule::segment => match pair.as_str() {
+            if pair.as_rule() == Rule::segment {
+                match pair.as_str() {
                     "[]" => segments.push(Segment::LensMap),
                     "{}" => segments.push(Segment::LensMapValue),
                     _ => {
                         for pair in pair.into_inner() {
                             if pair.as_rule() == Rule::invokation {
-                                if pair.as_str().ends_with(")") {
+                                if pair.as_str().ends_with(')') {
                                     segments.push(self.invokation(pair));
                                 } else {
                                     segments.push(Segment::Field(pair.as_str().into()));
@@ -247,8 +247,7 @@ impl SchemaBuilder {
                             }
                         }
                     }
-                },
-                _ => {}
+                }
             }
         }
         segments
@@ -261,15 +260,15 @@ impl SchemaBuilder {
             if pair.as_rule() == Rule::ident {
                 match (method, pair.as_str()) {
                     (None, "remove") => {
-                        method = Some("remove".into());
+                        method = Some("remove");
                         segment = Some(Segment::Remove);
                     }
                     (None, "hoist") => {
-                        method = Some("hoist".into());
+                        method = Some("hoist");
                         segment = Some(Segment::Hoist);
                     }
-                    (None, "rename") => method = Some("rename".into()),
-                    (None, "plunge") => method = Some("plunge".into()),
+                    (None, "rename") => method = Some("rename"),
+                    (None, "plunge") => method = Some("plunge"),
                     (Some("rename"), arg) => segment = Some(Segment::Rename(arg.into())),
                     (Some("plunge"), arg) => segment = Some(Segment::Plunge(arg.into())),
                     _ => panic!("unexpected lens {}", pair.as_str()),
@@ -328,7 +327,7 @@ todoapp {
   }
 }
     "#;
-        compile_lenses(&lenses)?;
+        compile_lenses(lenses)?;
         Ok(())
     }
 }

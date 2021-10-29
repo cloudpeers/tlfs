@@ -262,6 +262,7 @@ impl Backend {
 
     /// Creates a new in-memory backend for testing purposes.
     #[cfg(test)]
+    #[allow(clippy::ptr_arg)]
     pub fn memory(packages: &Vec<crate::registry::Package>) -> Result<Self> {
         use tracing_subscriber::fmt::format::FmtSpan;
         use tracing_subscriber::EnvFilter;
