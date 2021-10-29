@@ -192,7 +192,7 @@ impl<'a> Cursor<'a> {
     pub fn index(&mut self, ix: usize) -> Result<&mut Self> {
         if let ArchivedSchema::Array(schema) = &self.schema {
             self.schema = schema;
-            let (array, path) = ArrayWrapper::new(&self, ix)?;
+            let (array, path) = ArrayWrapper::new(self, ix)?;
             self.array.push(array);
             self.path = path;
             Ok(self)
@@ -407,13 +407,13 @@ impl<'a> Cursor<'a> {
     /// Moves the entry inside an array.
     pub fn r#move(&mut self, to: usize) -> Result<Causal> {
         let array = self.array.pop().context("Not inside an ORArray")?;
-        array.r#move(&self, to)
+        array.r#move(self, to)
     }
 
     /// Deletes the entry from an array.
     pub fn delete(&mut self) -> Result<Causal> {
         let array = self.array.pop().context("Not inside an ORArray")?;
-        array.delete(&self)
+        array.delete(self)
     }
 
     /// Augments a causal with array metadata if in an array, otherwise just returns the causal

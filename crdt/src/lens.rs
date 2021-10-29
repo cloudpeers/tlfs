@@ -381,9 +381,9 @@ impl<'a> LensesRef<'a> {
 
     /// Applies the [`Lens`]es to the identity schema [`Schema::Null`] and
     /// returns the archived result.
-    pub fn to_schema(&self) -> Result<Vec<u8>> {
+    pub fn to_schema(self) -> Result<Vec<u8>> {
         let mut schema = Schema::Null;
-        for lens in self.0.as_ref() {
+        for lens in self.0 {
             lens.to_ref().transform_schema(&mut schema)?;
         }
         let mut ser = AllocSerializer::<256>::default();
