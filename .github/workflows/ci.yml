@@ -1,113 +1,71 @@
-on: [push, pull_request]
+on:
+  push:
+    branches:
+    - master
+  pull_request:
 
 name: tlfs
 
 jobs:
-  ci:
-    strategy:
-      fail-fast: false
-      matrix:
-        toolchain:
-        - rust: stable
-        platform:
-        - target: x86_64-unknown-linux-gnu
-          host: self-hosted
-          cross: false
-
-            #        - target: x86_64-apple-darwin
-            #          host: macos-latest
-            #          cross: false
-
-            #        - target: x86_64-pc-windows-msvc
-            #          host: windows-latest
-            #          cross: false
-
-            # TODO: Install ndk in hosted runner
-            #        - target: armv7-linux-androideabi
-            #          host: self-hosted
-            #          cross: true
-
-            #        - target: aarch64-linux-android
-            #          host: self-hosted
-            #          cross: true
-
-            #        - target: aarch64-apple-ios
-            #          host: macos-latest
-            #          cross: true
-
-        # - target: wasm32-unknown-unknown
-        #   host: self-hosted
-        #   cross: true
-    env:
-      RUST_BACKTRACE: 1
-      CARGO_INCREMENTAL: 0
-      NDK_HOME: /usr/local/lib/android/sdk/ndk-bundle
-
-    runs-on: ${{ matrix.platform.host }}
-    steps:
-    - name: Checkout sources
-      uses: actions/checkout@v2
-
-    - name: Cache cargo folder
-      uses: actions/cache@v1
-      with:
-        path: ~/.cargo
-        key: ${{ matrix.platform.target }}-cargo-${{ matrix.toolchain.rust }}
-
-    - name: Install rust toolchain
-      uses: hecrj/setup-rust-action@v1
-      with:
-        rust-version: ${{ matrix.toolchain.rust }}
-        targets: ${{ matrix.platform.target }}
-
-    - name: Install cargo-apk
-      if: contains(matrix.platform.target, 'android')
-      run: cargo install cargo-apk
-
-    - name: Build
-      if: contains(matrix.platform.target, 'android') == false
-      run: cargo build --all-features --target ${{ matrix.platform.target }}
-
-    - name: Build android
-      if: contains(matrix.platform.target, 'android')
-      run: |
-        (cd cambria && cargo apk check --all-features --target ${{ matrix.platform.target }})
-        (cd crdt && cargo apk check --all-features --target ${{ matrix.platform.target }})
-
-    - name: Rust tests
-      if: matrix.platform.cross == false
-      run: cargo test --all-features --workspace
-
-  lint-rust:
+  test:
     runs-on: self-hosted
     steps:
     - name: Checkout sources
       uses: actions/checkout@v2
 
-    - name: Cache cargo folder
-      uses: actions/cache@v1
-      with:
-        path: ~/.cargo
-        key: lint-cargo
+    - name: Install rust toolchain
+      uses: hecrj/setup-rust-action@v1
+
+    - name: cargo test
+      run: cargo test --all-features --workspace
+
+  rustfmt:
+    runs-on: self-hosted
+    steps:
+    - name: Checkout sources
+      uses: actions/checkout@v2
 
     - name: Install rust toolchain
       uses: hecrj/setup-rust-action@v1
       with:
-        rust-version: stable
-        components: clippy, rustfmt
+        components: rustfmt
 
     - name: cargo fmt
       run: cargo fmt --all -- --check
 
+  clippy:
+    runs-on: self-hosted
+    steps:
+    - name: Checkout sources
+      uses: actions/checkout@v2
+
+    - name: Install rust toolchain
+      uses: hecrj/setup-rust-action@v1
+      with:
+        components: clippy
+
     - name: cargo clippy
       run: cargo clippy --workspace --examples --tests --all-features -- -D warnings
+
+  dart-format:
+    runs-on: self-hosted
+    steps:
+    - name: Checkout sources
+      uses: actions/checkout@v2
+
+    - name: dart format
+      working-directory: dart
+      run: dart format lib/tlfs.dart
 
   wasm:
     runs-on: self-hosted
     steps:
     - name: Checkout sources
       uses: actions/checkout@v2
-        
+
+    - name: Install rust toolchain
+      uses: hecrj/setup-rust-action@v1
+
     - name: build
       working-directory: wasm-ffi
       run: ./build.sh
@@ -118,3 +76,34 @@ jobs:
     - name: wasm-pack test
       working-directory: wasm-ffi
       run: wasm-pack test --headless --chrome --firefox
+
+  linux-capi-dart:
+    runs-on: self-hosted
+    steps:
+    - name: Checkout sources
+      uses: actions/checkout@v2
+
+    - name: Install rust toolchain
+      uses: hecrj/setup-rust-action@v1
+
+    - name: install cargo-c
+      run: cargo install cargo-c
+      continue-on-error: true
+
+    - name: install tlfs
+      working-directory: capi
+      run: cargo cinstall --prefix /opt/tlfs
+
+    - name: dart pub get
+      working-directory: dart
+      run: dart pub get
+
+    #- name: ffigen
+    #  working-directory: dart
+    #  run: dart run ffigen
+
+    - name: dart test
+      working-directory: dart
+      run: dart test
+      env:
+        LD_LIBRARY_PATH: /opt/tlfs/lib

@@ -4,7 +4,7 @@ use js_sys::{Array, Object, Promise, Proxy, Reflect};
 use libp2p::Multiaddr;
 use log::*;
 use serde::Serialize;
-use tlfs::{Causal, Doc, Hash, Keypair, Migrate, Sdk, ToLibp2pKeypair};
+use tlfs::{Backend, Causal, Doc, Keypair, Sdk, ToLibp2pKeypair};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::future_to_promise;
 
@@ -35,13 +35,12 @@ impl LocalFirst {
 
     #[wasm_bindgen(js_name = "init")]
     pub async fn new() -> Result<LocalFirst, JsValue> {
-        let kp = Keypair::generate();
         let signaling_server: Multiaddr = "/dns4/local1st.net/tcp/443/wss/p2p-webrtc-star"
             .parse()
             .unwrap();
         let cloud_relay =
             vec!["/dns4/local1st.net/tcp/4002/wss/p2p/12D3KooWCL3666CJUm6euzw34jMure6rgkQmW21qK4m4DEd9iWGy".parse().unwrap()];
-        Self::spawn(kp, signaling_server, cloud_relay, "demo".into())
+        Self::spawn(signaling_server, cloud_relay, "demo".into(), &[])
             .await
             .map_err(map_err)
     }
@@ -71,20 +70,24 @@ impl LocalFirst {
     //    }
 
     async fn spawn(
-        identity: Keypair,
         signaling_server: Multiaddr,
         bootstrap: Vec<Multiaddr>,
         discovery_namespace: String,
+        package: &[u8],
     ) -> anyhow::Result<Self> {
         // TODO: bootstrap and discovery!
+        let backend = Backend::memory(package)?;
+        let frontend = backend.frontend();
+        let identity = frontend.default_keypair()?;
         let transport = mk_transport(identity.to_libp2p());
-        let (inner, fut) = Migrate::memory()?
-            .finish_with_transport(
-                identity,
-                transport,
-                std::iter::once(signaling_server.clone()),
-            )
-            .await?;
+        let (inner, fut) = Sdk::new_with_transport(
+            backend,
+            frontend,
+            identity.peer_id(),
+            transport,
+            std::iter::once(signaling_server.clone()),
+        )
+        .await?;
         wasm_bindgen_futures::spawn_local(fut);
         /*
                     swarm.listen_on(signaling_server.clone()).expect("FIXME");
@@ -122,8 +125,7 @@ impl LocalFirst {
     }
 
     pub fn create_doc(&mut self, schema: &str) -> Result<DocWrapper, JsValue> {
-        let schema_hash: Hash = schema.parse().map_err(map_err)?;
-        let inner = self.inner.create_doc(&schema_hash).map_err(map_err)?;
+        let inner = self.inner.create_doc(&schema).map_err(map_err)?;
         Ok(DocWrapper { inner })
     }
 }

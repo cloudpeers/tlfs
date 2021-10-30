@@ -1,21 +1,17 @@
 use anyhow::Result;
 use clap::Parser;
-use tlfs_crdt::Ref;
+use std::path::PathBuf;
 
 #[derive(Parser)]
 struct Cli {
     #[clap(short, long)]
-    input: String,
+    input: PathBuf,
     #[clap(short, long)]
-    output: String,
+    output: PathBuf,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let input = std::fs::read(&cli.input)?;
-    let input = std::str::from_utf8(&input)?;
-    let lenses = tlfsc::compile_lenses(input)?;
-    let lenses = Ref::archive(&lenses);
-    std::fs::write(&cli.output, lenses.as_bytes())?;
+    tlfsc::compile(&cli.input, &cli.output)?;
     Ok(())
 }
