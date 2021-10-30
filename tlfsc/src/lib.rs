@@ -3,11 +3,21 @@ use fnv::FnvHashMap;
 use pest::iterators::Pair;
 use pest::Parser;
 use pest_derive::Parser;
+use std::path::Path;
 use tlfs_crdt::{Kind, Lens, Lenses, Package, PrimitiveKind, Ref, Schema};
 
 #[derive(Parser)]
 #[grammar = "grammar.pest"]
 struct GrammarParser;
+
+pub fn compile<P: AsRef<Path>>(input: P, output: P) -> Result<()> {
+    let input = std::fs::read(input)?;
+    let input = std::str::from_utf8(&input)?;
+    let lenses = compile_lenses(input)?;
+    let lenses = Ref::archive(&lenses);
+    std::fs::write(output, lenses.as_bytes())?;
+    Ok(())
+}
 
 pub fn compile_lenses(input: &str) -> Result<Vec<Package>> {
     let root = GrammarParser::parse(Rule::root, input)?;
