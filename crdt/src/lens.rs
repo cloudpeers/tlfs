@@ -5,12 +5,12 @@ use bytecheck::CheckBytes;
 use rkyv::ser::serializers::AllocSerializer;
 use rkyv::ser::Serializer;
 use rkyv::string::ArchivedString;
-use rkyv::{Archive, Serialize};
+use rkyv::{Archive, Deserialize, Serialize};
 
 type Prop = String;
 
 /// Kind of a sequence of [`Path`] [`Segment`]s.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Archive, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Archive, Deserialize, Serialize)]
 #[archive_attr(allow(missing_docs))]
 #[archive_attr(derive(Clone, Copy, Debug, Eq, PartialEq, CheckBytes))]
 #[repr(C)]
@@ -34,7 +34,7 @@ pub enum Kind {
 }
 
 /// A [`Lens`] is a bidirectional transform on [`Schema`]s.
-#[derive(Clone, Debug, Eq, PartialEq, Archive, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive_attr(allow(missing_docs))]
 #[archive_attr(derive(Debug, Eq, PartialEq, CheckBytes))]
 #[archive_attr(check_bytes(
@@ -345,10 +345,10 @@ impl<'a> LensRef<'a> {
 }
 
 /// An ordered sequence of [`Lens`]es.
-#[derive(Clone, Debug, Eq, PartialEq, Archive, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(Debug, Eq, PartialEq, CheckBytes))]
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
-#[repr(C)]
+#[repr(transparent)]
 pub struct Lenses(Vec<Lens>);
 
 impl Lenses {
@@ -364,11 +364,26 @@ impl ArchivedLenses {
         &self.0
     }
 
+    /// Returns a [`LensesRef`].
+    pub fn to_ref(&self) -> LensesRef {
+        LensesRef::new(&self.0)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct LensesRef<'a>(&'a [ArchivedLens]);
+
+impl<'a> LensesRef<'a> {
+    /// Creates a new ref.
+    pub fn new(lenses: &'a [ArchivedLens]) -> Self {
+        Self(lenses)
+    }
+
     /// Applies the [`Lens`]es to the identity schema [`Schema::Null`] and
     /// returns the archived result.
-    pub fn to_schema(&self) -> Result<Vec<u8>> {
+    pub fn to_schema(self) -> Result<Vec<u8>> {
         let mut schema = Schema::Null;
-        for lens in self.0.as_ref() {
+        for lens in self.0 {
             lens.to_ref().transform_schema(&mut schema)?;
         }
         let mut ser = AllocSerializer::<256>::default();
@@ -380,7 +395,7 @@ impl ArchivedLenses {
 
     /// Given another sequence of [`Lens`]es it returns the sequence of [`Lens`]es
     /// required to transfrom from one [`Schema`] to another.
-    pub fn transform<'a>(&'a self, b: &'a ArchivedLenses) -> Vec<LensRef<'a>> {
+    pub fn transform(&'a self, b: LensesRef<'a>) -> Vec<LensRef<'a>> {
         let mut prefix = 0;
         for (a, b) in self.0.iter().zip(b.0.iter()) {
             if a == b {
@@ -401,7 +416,7 @@ impl ArchivedLenses {
 
     /// Transforms a [`Path`] valid in the source [`Schema`] to a [`PathBuf`] valid in the
     /// target [`Schema`].
-    pub fn transform_path(&self, path: Path, target: &ArchivedLenses) -> Option<PathBuf> {
+    pub fn transform_path(&self, path: Path, target: LensesRef<'a>) -> Option<PathBuf> {
         let mut segments: Vec<Segment> = path.child().unwrap().into_iter().collect();
         for lens in self.transform(target) {
             segments = lens.transform_path(&segments);
@@ -421,7 +436,6 @@ impl ArchivedLenses {
 mod tests {
     use super::*;
     use crate::props::*;
-    use crate::registry::EMPTY_LENSES;
     use crate::util::Ref;
     use proptest::prelude::*;
 
@@ -438,12 +452,12 @@ mod tests {
         #[test]
         #[ignore] // props don't generate signatures
         fn transform_preserves_validity((lens, mut schema, mut causal) in lens_schema_and_causal()) {
-            let from = Ref::<Lenses>::new(EMPTY_LENSES.as_ref().into());
+            let from = Ref::archive(&Lenses::new(vec![]));
             let to = Ref::archive(&Lenses::new(vec![lens]));
             let lens = to.as_ref().lenses()[0].to_ref();
             prop_assume!(validate(&schema, &causal));
             prop_assume!(lens.transform_schema(&mut schema).is_ok());
-            causal.transform(from.as_ref(), to.as_ref());
+            causal.transform(from.as_ref().to_ref(), to.as_ref().to_ref());
             prop_assert!(validate(&schema, &causal));
         }
     }

@@ -4,17 +4,17 @@
 #![deny(missing_docs)]
 mod sync;
 
-pub use crate::sync::{ToLibp2pKeypair, ToLibp2pPublic};
+pub use crate::sync::ToLibp2pKeypair;
 use futures::Future;
 use libp2p::core::muxing::StreamMuxerBox;
 use libp2p::core::transport::Boxed;
 pub use libp2p::Multiaddr;
 pub use tlfs_crdt::{
-    Causal, Cursor, DocId, Event, Hash, Keypair, Kind, Lens, PeerId, Permission, PrimitiveKind,
-    Schema, Subscriber, EMPTY_HASH,
+    Backend, Causal, Cursor, DocId, Event, Frontend, Keypair, Kind, Lens, Lenses, Package, PeerId,
+    Permission, PrimitiveKind, Schema, Subscriber,
 };
 
-use crate::sync::Behaviour;
+use crate::sync::{Behaviour, ToLibp2pPublic};
 use anyhow::Result;
 use futures::channel::{mpsc, oneshot};
 use futures::future::poll_fn;
@@ -23,20 +23,41 @@ use libp2p::Swarm;
 use std::path::Path;
 use std::pin::Pin;
 use std::task::Poll;
-use tlfs_crdt::{Backend, Frontend};
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::EnvFilter;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
 
-/// Used to construct a new [`Sdk`]. Can migrate old documents to new [`Schema`]s at startup.
-pub struct Migrate {
-    backend: Backend,
+/// Main entry point for `tlfs`.
+pub struct Sdk {
+    frontend: Frontend,
+    peer: PeerId,
+    swarm: mpsc::UnboundedSender<Command>,
 }
 
-impl Migrate {
-    /// Create a new [`Migrate`] instance.
-    pub fn new(db: sled::Db) -> Result<Self> {
+impl Sdk {
+    /// Creates a new persistent [`Sdk`] instance.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub async fn persistent(db: &Path, package: &Path) -> Result<Self> {
+        let (sdk, driver) = Self::new(
+            sled::Config::new().path(db).open()?,
+            &std::fs::read(package)?,
+        )
+        .await?;
+        async_global_executor::spawn::<_, ()>(driver).detach();
+
+        Ok(sdk)
+    }
+
+    /// Create a new in-memory [`Sdk`] instance.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub async fn memory(package: &[u8]) -> Result<Self> {
+        let (sdk, driver) = Self::new(sled::Config::new().temporary(true).open()?, package).await?;
+        async_global_executor::spawn::<_, ()>(driver).detach();
+
+        Ok(sdk)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn new(db: sled::Db, package: &[u8]) -> Result<(Self, impl Future<Output = ()>)> {
         tracing_log::LogTracer::init().ok();
         let env = std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or_else(|_| "info".to_owned());
         let subscriber = tracing_subscriber::FmtSubscriber::builder()
@@ -47,85 +68,34 @@ impl Migrate {
         tracing::subscriber::set_global_default(subscriber).ok();
         log_panics::init();
 
-        let backend = Backend::new(db)?;
-        Ok(Self { backend })
-    }
-
-    /// Creates a new persistent [`Migrate`] instance.
-    pub fn persistent(path: &Path) -> Result<Self> {
-        Self::new(sled::Config::new().path(path).open()?)
-    }
-
-    /// Create a new in-memory [`Migrate`] instance.
-    pub fn memory() -> Result<Self> {
-        Self::new(sled::Config::new().temporary(true).open()?)
-    }
-
-    /// Register a new [`Schema`].
-    pub fn register(&self, lenses: Vec<Lens>) -> Result<Hash> {
-        self.backend.register(lenses)
-    }
-
-    /// Migrate a document to a registered [`Schema`].
-    pub fn migrate(&mut self, doc: &DocId, hash: &Hash) -> Result<()> {
-        self.backend.transform(doc, hash)
-    }
-
-    /// Returns a new [`Sdk`] instance and a future to drive the backend. The future needs to be
-    /// continuously polled in order for the [`Sdk`] to progress.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub async fn finish(self) -> Result<(Sdk, impl Future<Output = ()>)> {
-        Sdk::new(self.backend).await
-    }
-
-    /// Returns a new [`Sdk`] instance and a future to drive the backend. The future needs to be
-    /// continuously polled in order for the [`Sdk`] to progress.
-    pub async fn finish_with_transport(
-        self,
-        keypair: Keypair,
-        transport: Boxed<(libp2p::PeerId, StreamMuxerBox)>,
-        listen_on: impl Iterator<Item = Multiaddr>,
-    ) -> Result<(Sdk, impl Future<Output = ()>)> {
-        Sdk::new_with_transport(self.backend, keypair, transport, listen_on).await
-    }
-}
-
-/// Main entry point for `tlfs`.
-pub struct Sdk {
-    frontend: Frontend,
-    peer: PeerId,
-    swarm: mpsc::UnboundedSender<Command>,
-}
-
-impl Sdk {
-    #[cfg(not(target_arch = "wasm32"))]
-    async fn new(backend: Backend) -> Result<(Self, impl Future<Output = ()>)> {
+        let backend = Backend::new(db, package)?;
         let frontend = backend.frontend();
 
-        // TODO: load from db
-        let peer = frontend.generate_keypair()?;
-        let keypair = frontend.keypair(&peer)?;
+        let keypair = frontend.default_keypair()?;
+        let peer = keypair.peer_id();
         tracing::info!("our peer id is: {}", peer);
 
         let transport = libp2p::development_transport(keypair.to_libp2p()).await?;
+
         Self::new_with_transport(
             backend,
             frontend,
-            transport,
             peer,
+            transport,
             std::iter::once("/ip4/0.0.0.0/tcp/0".parse().unwrap()),
         )
         .await
     }
-    async fn new_with_transport(
+
+    /// Creates a new [`Sdk`] instance from the given [`Backend`], [`Frontend`] and libp2p
+    /// transport.
+    pub async fn new_with_transport(
         backend: Backend,
-        keypair: Keypair,
+        frontend: Frontend,
+        peer: PeerId,
         transport: Boxed<(libp2p::PeerId, StreamMuxerBox)>,
         listen_on: impl Iterator<Item = Multiaddr>,
     ) -> Result<(Self, impl Future<Output = ()>)> {
-        let frontend = backend.frontend();
-        let peer = frontend.add_keypair(keypair)?;
-
         let behaviour = Behaviour::new(backend)?;
         let mut swarm = Swarm::new(transport, behaviour, peer.to_libp2p().to_peer_id());
         for i in listen_on {
@@ -208,7 +178,7 @@ impl Sdk {
     }
 
     /// Creates a new document with an initial [`Schema`].
-    pub fn create_doc(&mut self, schema: &Hash) -> Result<Doc> {
+    pub fn create_doc(&self, schema: &str) -> Result<Doc> {
         let peer_id = self.peer_id();
         let doc = self
             .frontend
@@ -220,7 +190,7 @@ impl Sdk {
     }
 
     /// Adds a document with a [`Schema`].
-    pub fn add_doc(&self, id: DocId, schema: &Hash) -> Result<Doc> {
+    pub fn add_doc(&self, id: DocId, schema: &str) -> Result<Doc> {
         let peer_id = self.peer_id();
         let doc = self.frontend.add_doc(id, peer_id, schema)?;
         self.swarm
@@ -286,11 +256,11 @@ mod tests {
     use super::*;
     use futures::StreamExt;
     use std::time::Duration;
+    use tlfs_crdt::Ref;
 
     #[async_std::test]
     async fn test_api() -> Result<()> {
-        let migrate = Migrate::memory()?;
-        let lenses = vec![
+        let mut lenses = vec![
             Lens::Make(Kind::Struct),
             Lens::AddProperty("todos".into()),
             Lens::Make(Kind::Table(PrimitiveKind::U64)).lens_in("todos"),
@@ -310,11 +280,13 @@ mod tests {
                 .lens_map_value()
                 .lens_in("todos"),
         ];
-        let hash = migrate.register(lenses.clone())?;
-
-        let (mut sdk, driver) = migrate.finish().await?;
-        async_global_executor::spawn(driver).detach();
-        let doc = sdk.create_doc(&hash)?;
+        let packages = vec![Package::new(
+            "todoapp".into(),
+            8,
+            &Lenses::new(lenses.clone()),
+        )];
+        let sdk = Sdk::memory(Ref::archive(&packages).as_bytes()).await?;
+        let doc = sdk.create_doc("todoapp")?;
 
         async_std::task::sleep(Duration::from_millis(100)).await;
         assert!(doc.cursor().can(sdk.peer_id(), Permission::Write)?);
@@ -342,12 +314,10 @@ mod tests {
             .unwrap()?;
         assert_eq!(value, title);
 
-        let sdk2 = Migrate::memory()?;
-        let mut lenses2 = lenses.clone();
-        lenses2.push(Lens::RenameProperty("todos".into(), "tasks".into()));
-        let hash2 = sdk2.register(lenses2)?;
-        let (sdk2, driver) = sdk2.finish().await?;
-        async_global_executor::spawn(driver).detach();
+        lenses.push(Lens::RenameProperty("todos".into(), "tasks".into()));
+        let packages = vec![Package::new("todoapp".into(), 9, &Lenses::new(lenses))];
+        let sdk2 = Sdk::memory(Ref::archive(&packages).as_bytes()).await?;
+
         let op = doc
             .cursor()
             .say_can(Some(*sdk2.peer_id()), Permission::Write)?;
@@ -356,7 +326,7 @@ mod tests {
         for addr in sdk.addresses().await {
             sdk2.add_address(*sdk.peer_id(), addr);
         }
-        let doc2 = sdk2.add_doc(*doc.id(), &hash2)?;
+        let doc2 = sdk2.add_doc(*doc.id(), "todoapp")?;
         let mut sub = doc2.cursor().field("tasks")?.subscribe();
         let mut exit = false;
         while !exit {

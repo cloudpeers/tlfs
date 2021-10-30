@@ -56,6 +56,12 @@ pub enum Schema {
     Struct(#[omit_bounds] BTreeMap<String, Schema>),
 }
 
+impl Default for Schema {
+    fn default() -> Self {
+        Self::Null
+    }
+}
+
 impl ArchivedSchema {
     /// Returns if [`Causal`] matches [`ArchivedSchema`].
     pub fn validate(&self, causal: &Causal) -> bool {

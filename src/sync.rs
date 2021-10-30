@@ -202,7 +202,7 @@ impl Behaviour {
 
     pub fn broadcast(&mut self, doc: &DocId, causal: Causal) -> Result<()> {
         let topic = Topic::new(doc.as_ref());
-        let hash = self.backend.frontend().schema_id(doc)?;
+        let hash = self.backend.frontend().schema(doc)?.as_ref().hash();
         let delta = Delta {
             schema: hash.into(),
             causal,
@@ -219,7 +219,7 @@ impl Behaviour {
         schema: Hash,
         causal: Causal,
     ) -> Result<()> {
-        if self.backend.registry().contains(&schema)? {
+        if self.backend.registry().contains(&schema) {
             self.backend.join(&peer, &doc, &schema, causal)?;
         } else {
             self.buffer.push((schema, doc, peer, causal));
@@ -264,8 +264,8 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
                     match request.as_ref() {
                         Lenses(hash) => {
                             let hash = Hash::from(*hash);
-                            if let Some(lenses) = unwrap!(self.backend.registry().lenses(&hash)) {
-                                let resp = SyncResponse::Lenses(lenses.into());
+                            if let Some(lenses) = self.backend.registry().get(&hash) {
+                                let resp = SyncResponse::Lenses(lenses.as_ref().as_ref().to_vec());
                                 let resp = Ref::archive(&resp);
                                 self.req.send_response(channel, resp).ok();
                             }
@@ -273,7 +273,8 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
                         Unjoin(doc, ctx) => {
                             let peer = unwrap!(libp2p_peer_id(&peer));
                             let causal = unwrap!(self.backend.unjoin(&peer, doc, ctx));
-                            let schema = unwrap!(self.backend.frontend().schema_id(doc));
+                            let schema =
+                                self.backend.frontend().schema(doc).unwrap().as_ref().hash();
                             let resp = SyncResponse::Unjoin(schema.into(), causal);
                             let resp = Ref::archive(&resp);
                             self.req.send_response(channel, resp).ok();
