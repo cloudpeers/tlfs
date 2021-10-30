@@ -4,3 +4,5 @@ target
 *.pkcs8
 *.cert
 *.priv
+*.rkyv
+*.rkyv.zstd
