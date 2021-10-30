@@ -402,13 +402,13 @@ pub extern "C" fn cursor_map_key_str(
 }
 
 #[no_mangle]
-pub extern "C" fn cursor_map_remove(cursor: *mut Cursor) -> i32 {
+pub extern "C" fn cursor_map_remove(cursor: *mut Cursor) -> *mut Causal {
     catch_panic(move || {
         let cursor = unsafe { &mut *(cursor as *mut tlfs::Cursor) };
-        cursor.remove()?;
-        Ok(0)
+        let causal = cursor.remove()?;
+        Ok(Box::into_raw(Box::new(causal)) as *mut _)
     })
-    .unwrap_or(-1)
+    .unwrap_or_else(|_| std::ptr::null_mut())
 }
 
 #[no_mangle]

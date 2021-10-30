@@ -99,7 +99,7 @@ int32_t cursor_map_key_i64(struct Cursor *cursor, int64_t key);
 
 int32_t cursor_map_key_str(struct Cursor *cursor, const uint8_t *key, uintptr_t key_length);
 
-int32_t cursor_map_remove(struct Cursor *cursor);
+struct Causal *cursor_map_remove(struct Cursor *cursor);
 
 int32_t cursor_array_index(struct Cursor *cursor, uint32_t index);
 
