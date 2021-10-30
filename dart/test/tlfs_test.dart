@@ -7,9 +7,11 @@ void main() {
     final sdk = Sdk.memory(package);
     final peer = sdk.peerId();
     print('peer: $peer');
+
     final doc = sdk.createDoc("todoapp");
     final id = doc.id();
     print('doc: $id');
+
     final iter = sdk.docs();
     while (true) {
         final doc_id = iter.next();
@@ -18,6 +20,17 @@ void main() {
         }
         print(doc_id);
     }
+    iter.destroy();
+
+    final cursor = doc.cursor();
+    cursor.field("tasks");
+    cursor.key(0);
+    cursor.field("complete");
+    final causal = cursor.enable();
+    doc.apply(causal);
+    assert(cursor.enabled());
+    cursor.destroy();
+
     doc.destroy();
     sdk.destroy();
     print('closed');
