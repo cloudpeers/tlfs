@@ -228,6 +228,8 @@ impl std::fmt::Debug for Segment {
 /// An owned concatentation of binary encoded segments.
 #[derive(Clone, Default, Eq, PartialEq, Hash, Ord, PartialOrd, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(Debug, Eq, Hash, PartialEq, Ord, PartialOrd, CheckBytes))]
+// TODO: fromstring/tostring
+#[cfg_attr(target_arch = "wasm32", derive(serde::Serialize, serde::Deserialize))]
 #[repr(C)]
 pub struct PathBuf(Vec<u8>);
 

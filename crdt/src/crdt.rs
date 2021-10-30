@@ -16,6 +16,7 @@ use std::iter::FromIterator;
 #[archive_attr(check_bytes(
     bound = "__C: rkyv::validation::ArchiveContext, <__C as rkyv::Fallible>::Error: std::error::Error"
 ))]
+#[cfg_attr(target_arch = "wasm32", derive(serde::Serialize, serde::Deserialize))]
 #[repr(C)]
 pub struct DotStore(BTreeSet<PathBuf>);
 
@@ -144,6 +145,7 @@ impl std::fmt::Debug for CausalContext {
 /// Represents a state transition of a crdt. Multiple state transitions can be combined
 /// together into an atomic transaction.
 #[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[cfg_attr(target_arch = "wasm32", derive(serde::Serialize, serde::Deserialize))]
 #[archive_attr(derive(Debug, CheckBytes))]
 #[repr(C)]
 pub struct Causal {

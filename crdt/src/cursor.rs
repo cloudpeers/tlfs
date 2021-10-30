@@ -147,6 +147,8 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    //    pub fn values(&self) -> Result<impl Iterator<Item = Result<Prim
+
     /// Returns a cursor to a value in a table.
     pub fn key_bool(&mut self, key: bool) -> Result<&mut Self> {
         if let ArchivedSchema::Table(PrimitiveKind::Bool, schema) = &self.schema {
@@ -410,13 +412,13 @@ impl<'a> Cursor<'a> {
     /// Moves the entry inside an array.
     pub fn r#move(&mut self, to: usize) -> Result<Causal> {
         let array = self.array.pop().context("Not inside an ORArray")?;
-        array.r#move(&self, to)
+        array.r#move(self, to)
     }
 
     /// Deletes the entry from an array.
     pub fn delete(&mut self) -> Result<Causal> {
         let array = self.array.pop().context("Not inside an ORArray")?;
-        array.delete(&self)
+        array.delete(self)
     }
 
     /// Augments a causal with array metadata if in an array, otherwise just returns the causal

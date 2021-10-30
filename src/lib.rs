@@ -4,6 +4,7 @@
 #![deny(missing_docs)]
 mod sync;
 
+pub use crate::sync::{ToLibp2pKeypair, ToLibp2pPublic};
 use futures::Future;
 use libp2p::core::muxing::StreamMuxerBox;
 use libp2p::core::transport::Boxed;
@@ -13,7 +14,7 @@ pub use tlfs_crdt::{
     Schema, Subscriber, EMPTY_HASH,
 };
 
-use crate::sync::{Behaviour, ToLibp2pKeypair, ToLibp2pPublic};
+use crate::sync::Behaviour;
 use anyhow::Result;
 use futures::channel::{mpsc, oneshot};
 use futures::future::poll_fn;
@@ -25,13 +26,14 @@ use std::task::Poll;
 use tlfs_crdt::{Backend, Frontend};
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::EnvFilter;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
 
 /// Used to construct a new [`Sdk`]. Can migrate old documents to new [`Schema`]s at startup.
 pub struct Migrate {
     backend: Backend,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl Migrate {
     /// Create a new [`Migrate`] instance.
     pub fn new(db: sled::Db) -> Result<Self> {
@@ -71,8 +73,20 @@ impl Migrate {
 
     /// Returns a new [`Sdk`] instance and a future to drive the backend. The future needs to be
     /// continuously polled in order for the [`Sdk`] to progress.
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn finish(self) -> Result<(Sdk, impl Future<Output = ()>)> {
         Sdk::new(self.backend).await
+    }
+
+    /// Returns a new [`Sdk`] instance and a future to drive the backend. The future needs to be
+    /// continuously polled in order for the [`Sdk`] to progress.
+    pub async fn finish_with_transport(
+        self,
+        keypair: Keypair,
+        transport: Boxed<(libp2p::PeerId, StreamMuxerBox)>,
+        listen_on: impl Iterator<Item = Multiaddr>,
+    ) -> Result<(Sdk, impl Future<Output = ()>)> {
+        Sdk::new_with_transport(self.backend, keypair, transport, listen_on).await
     }
 }
 
@@ -94,17 +108,29 @@ impl Sdk {
         tracing::info!("our peer id is: {}", peer);
 
         let transport = libp2p::development_transport(keypair.to_libp2p()).await?;
-        Self::new_with_transport(backend, frontend, transport, peer).await
+        Self::new_with_transport(
+            backend,
+            frontend,
+            transport,
+            peer,
+            std::iter::once("/ip4/0.0.0.0/tcp/0".parse().unwrap()),
+        )
+        .await
     }
     async fn new_with_transport(
         backend: Backend,
-        frontend: Frontend,
+        keypair: Keypair,
         transport: Boxed<(libp2p::PeerId, StreamMuxerBox)>,
-        peer: PeerId,
+        listen_on: impl Iterator<Item = Multiaddr>,
     ) -> Result<(Self, impl Future<Output = ()>)> {
+        let frontend = backend.frontend();
+        let peer = frontend.add_keypair(keypair)?;
+
         let behaviour = Behaviour::new(backend)?;
         let mut swarm = Swarm::new(transport, behaviour, peer.to_libp2p().to_peer_id());
-        swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse().unwrap())?;
+        for i in listen_on {
+            swarm.listen_on(i)?;
+        }
 
         let (tx, mut rx) = mpsc::unbounded();
         let driver = poll_fn(move |cx| {
@@ -216,6 +242,7 @@ impl Sdk {
 }
 
 /// Document handle.
+#[derive(Clone)]
 pub struct Doc {
     doc: tlfs_crdt::Doc,
     swarm: mpsc::UnboundedSender<Command>,

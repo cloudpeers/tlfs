@@ -329,7 +329,9 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
     }
 }
 
+/// Conversion to libp2p
 pub trait ToLibp2pKeypair {
+    /// Converts the [`Keypair`] into a libp2p identity
     fn to_libp2p(self) -> libp2p::identity::Keypair;
 }
 
@@ -341,7 +343,9 @@ impl ToLibp2pKeypair for Keypair {
     }
 }
 
+/// Conversion to libp2p
 pub trait ToLibp2pPublic {
+    /// Converts the [`PeerId`] into a libp2p PeerId
     fn to_libp2p(self) -> libp2p::identity::PublicKey;
 }
 

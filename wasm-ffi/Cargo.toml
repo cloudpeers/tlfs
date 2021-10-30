@@ -41,3 +41,7 @@ wasm-bindgen-test = "0.3.28"
 
 [dependencies]
 tlfs = { path = ".." }
+#tlfs = { path = ".." }
+
+#[dependencies]
+#tlfs = { path = ".." }
