@@ -133,7 +133,7 @@ impl Sdk {
     }
 
     /// Returns an iterator of [`DocId`].
-    pub fn docs<'a>(&'a self, schema: &'a str) -> impl Iterator<Item = Result<DocId>> + 'a {
+    pub fn docs(&self, schema: String) -> impl Iterator<Item = Result<DocId>> {
         self.frontend.docs_by_schema(schema)
     }
 

@@ -24,6 +24,18 @@ typedef struct Causal {
 
 } Causal;
 
+typedef struct BoolIter {
+
+} BoolIter;
+
+typedef struct U64Iter {
+
+} U64Iter;
+
+typedef struct I64Iter {
+
+} I64Iter;
+
 typedef struct StrIter {
 
 } StrIter;
@@ -87,6 +99,24 @@ int32_t cursor_flag_enabled(struct Cursor *cursor);
 struct Causal *cursor_flag_enable(struct Cursor *cursor);
 
 struct Causal *cursor_flag_disable(struct Cursor *cursor);
+
+struct BoolIter *cursor_reg_bools(struct Cursor *cursor);
+
+int32_t bool_iter_next(struct BoolIter *iter, bool *value);
+
+int32_t bool_iter_destroy(struct BoolIter *iter);
+
+struct U64Iter *cursor_reg_u64s(struct Cursor *cursor);
+
+int32_t u64_iter_next(struct U64Iter *iter, uint64_t *value);
+
+int32_t u64_iter_destroy(struct U64Iter *iter);
+
+struct I64Iter *cursor_reg_i64s(struct Cursor *cursor);
+
+int32_t i64_iter_next(struct I64Iter *iter, int64_t *value);
+
+int32_t i64_iter_destroy(struct I64Iter *iter);
 
 struct StrIter *cursor_reg_strs(struct Cursor *cursor);
 

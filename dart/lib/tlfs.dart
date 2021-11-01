@@ -86,8 +86,7 @@ class Sdk {
     for (int i = 0; i < package.length; i++) {
       packagePtr[i] = package[i];
     }
-    final ret =
-        lib.sdk_create_memory(packagePtr.cast(), package.length);
+    final ret = lib.sdk_create_memory(packagePtr.cast(), package.length);
     malloc.free(packagePtr);
     if (ret == Pointer.fromAddress(0)) {
       throw FfiError(lib);
@@ -102,8 +101,8 @@ class Sdk {
     for (int i = 0; i < package.length; i++) {
       packagePtr[i] = package[i];
     }
-    final ret = lib.sdk_create_persistent(dbPathPtr.cast(), dbPathPtr.length,
-        packagePtr.cast(), package.length);
+    final ret = lib.sdk_create_persistent(
+        dbPathPtr.cast(), dbPathPtr.length, packagePtr.cast(), package.length);
     malloc.free(packagePtr);
     if (ret == Pointer.fromAddress(0)) {
       throw FfiError(lib);
@@ -155,8 +154,12 @@ class Sdk {
     }
   }
 
-  DocIter docs() {
-    final ret = this.lib.sdk_create_doc_iter(this.ptr);
+  DocIter docs(String schema) {
+    final schemaPtr = schema.toNativeUtf8();
+    final ret = this
+        .lib
+        .sdk_create_doc_iter(this.ptr, schemaPtr.cast(), schemaPtr.length);
+    malloc.free(schemaPtr);
     if (ret == Pointer.fromAddress(0)) {
       throw FfiError(this.lib);
     }
@@ -245,20 +248,28 @@ class Doc {
   }
 }
 
-class DocIter {
+class DocIter extends Iterable<DocId> implements Iterator<DocId> {
   final ffi.NativeLibrary lib;
   final Pointer<ffi.DocIter> ptr;
+  DocId _current = DocId(Uint8List(32));
+  DocId get current => _current;
 
   DocIter(this.lib, this.ptr);
 
-  DocId? next() {
+  @override
+  Iterator<DocId> get iterator => this;
+
+  @override
+  bool moveNext() {
     final ptr = malloc.allocate<Uint8>(32);
     final ret = this.lib.doc_iter_next(this.ptr, ptr.cast());
     if (ret == 0) {
-      return null;
+      this.destroy();
+      return false;
     }
     if (ret == 32) {
-      return DocId(ptr.asTypedList(32));
+      this._current = DocId(ptr.asTypedList(32));
+      return true;
     }
     throw FfiError(this.lib);
   }
@@ -278,6 +289,14 @@ class Cursor {
   Cursor(this.lib, this.ptr);
 
   // TODO: subscribe
+
+  Cursor clone() {
+    final ret = this.lib.cursor_clone(this.ptr);
+    if (ret == Pointer.fromAddress(0)) {
+      throw FfiError(this.lib);
+    }
+    return Cursor(this.lib, ret);
+  }
 
   void destroy() {
     final ret = this.lib.cursor_destroy(this.ptr);
@@ -310,21 +329,67 @@ class Cursor {
     return Causal(this.lib, ret);
   }
 
-  // TODO: values
-
-  Causal assign(dynamic value) {
-    final ret;
-    if (value is bool) {
-      ret = this.lib.cursor_reg_assign_bool(this.ptr, value as int);
-    } else if (value is int) {
-      // TODO: i64 vs u64
-      ret = this.lib.cursor_reg_assign_u64(this.ptr, value);
-    } else if (value is String) {
-      final valuePtr = value.toNativeUtf8();
-      ret = this.lib.cursor_reg_assign_str(this.ptr, valuePtr.cast(), valuePtr.length);
-    } else {
-        throw TypeError();
+  BoolIter bools() {
+    final ret = this.lib.cursor_reg_bools(this.ptr);
+    if (ret == Pointer.fromAddress(0)) {
+      throw FfiError(this.lib);
     }
+    return BoolIter(this.lib, ret);
+  }
+
+  Causal assignBool(bool value) {
+    final ret = this.lib.cursor_reg_assign_bool(this.ptr, value);
+    if (ret == Pointer.fromAddress(0)) {
+      throw FfiError(this.lib);
+    }
+    return Causal(this.lib, ret);
+  }
+
+  U64Iter u64s() {
+    final ret = this.lib.cursor_reg_u64s(this.ptr);
+    if (ret == Pointer.fromAddress(0)) {
+      throw FfiError(this.lib);
+    }
+    return U64Iter(this.lib, ret);
+  }
+
+  Causal assignU64(int value) {
+    final ret = this.lib.cursor_reg_assign_u64(this.ptr, value);
+    if (ret == Pointer.fromAddress(0)) {
+      throw FfiError(this.lib);
+    }
+    return Causal(this.lib, ret);
+  }
+
+  I64Iter i64s() {
+    final ret = this.lib.cursor_reg_i64s(this.ptr);
+    if (ret == Pointer.fromAddress(0)) {
+      throw FfiError(this.lib);
+    }
+    return I64Iter(this.lib, ret);
+  }
+
+  Causal assignI64(int value) {
+    final ret = this.lib.cursor_reg_assign_u64(this.ptr, value);
+    if (ret == Pointer.fromAddress(0)) {
+      throw FfiError(this.lib);
+    }
+    return Causal(this.lib, ret);
+  }
+
+  StrIter strs() {
+    final ret = this.lib.cursor_reg_strs(this.ptr);
+    if (ret == Pointer.fromAddress(0)) {
+      throw FfiError(this.lib);
+    }
+    return StrIter(this.lib, ret);
+  }
+
+  Causal assignStr(String value) {
+    final valuePtr = value.toNativeUtf8();
+    final ret = this
+        .lib
+        .cursor_reg_assign_str(this.ptr, valuePtr.cast(), valuePtr.length);
     if (ret == Pointer.fromAddress(0)) {
       throw FfiError(this.lib);
     }
@@ -333,8 +398,9 @@ class Cursor {
 
   void field(String field) {
     final fieldPtr = field.toNativeUtf8();
-    final ret =
-        this.lib.cursor_struct_field(this.ptr, fieldPtr.cast(), fieldPtr.length);
+    final ret = this
+        .lib
+        .cursor_struct_field(this.ptr, fieldPtr.cast(), fieldPtr.length);
     if (ret != 0) {
       throw FfiError(this.lib);
     }
@@ -343,7 +409,7 @@ class Cursor {
   void key(dynamic key) {
     final ret;
     if (key is bool) {
-      ret = this.lib.cursor_map_key_bool(this.ptr, key as int);
+      ret = this.lib.cursor_map_key_bool(this.ptr, key);
     } else if (key is int) {
       // TODO: i64 vs u64
       ret = this.lib.cursor_map_key_u64(this.ptr, key);
@@ -357,6 +423,8 @@ class Cursor {
       throw FfiError(this.lib);
     }
   }
+
+  // TODO: keys
 
   Causal remove() {
     final ret = this.lib.cursor_map_remove(this.ptr);
@@ -389,6 +457,8 @@ class Cursor {
     return Causal(this.lib, ret);
   }
 
+  // TODO: len
+
   // TODO: can, say_can, cond, say_can_if, revoke
 }
 
@@ -397,4 +467,164 @@ class Causal {
   final Pointer<ffi.Causal> ptr;
 
   Causal(this.lib, this.ptr);
+
+  void join(Causal other) {
+    final ret = this.lib.causal_join(this.ptr, other.ptr);
+    if (ret != 0) {
+      throw FfiError(this.lib);
+    }
+  }
+}
+
+class BoolIter extends Iterable<bool> implements Iterator<bool> {
+  final ffi.NativeLibrary lib;
+  final Pointer<ffi.BoolIter> ptr;
+  bool _current = false;
+  bool get current => _current;
+
+  BoolIter(this.lib, this.ptr);
+
+  @override
+  Iterator<bool> get iterator => this;
+
+  @override
+  bool moveNext() {
+    final ptr = malloc.allocate<Uint8>(1);
+    final ret = this.lib.bool_iter_next(this.ptr, ptr.cast());
+    if (ret == 0) {
+      malloc.free(ptr);
+      this.destroy();
+      return false;
+    }
+    if (ret == 1) {
+      this._current = ptr as int > 0;
+      malloc.free(ptr);
+      return true;
+    }
+    throw FfiError(this.lib);
+  }
+
+  void destroy() {
+    final ret = this.lib.bool_iter_destroy(this.ptr);
+    if (ret != 0) {
+      throw FfiError(this.lib);
+    }
+  }
+}
+
+class U64Iter extends Iterable<int> implements Iterator<int> {
+  final ffi.NativeLibrary lib;
+  final Pointer<ffi.U64Iter> ptr;
+  int _current = 0;
+  int get current => _current;
+
+  U64Iter(this.lib, this.ptr);
+
+  @override
+  Iterator<int> get iterator => this;
+
+  @override
+  bool moveNext() {
+    final ptr = malloc.allocate<Uint64>(1);
+    final ret = this.lib.u64_iter_next(this.ptr, ptr.cast());
+    if (ret == 0) {
+      malloc.free(ptr);
+      this.destroy();
+      return false;
+    }
+    if (ret == 1) {
+      this._current = ptr as int;
+      malloc.free(ptr);
+      return true;
+    }
+    throw FfiError(this.lib);
+  }
+
+  void destroy() {
+    final ret = this.lib.u64_iter_destroy(this.ptr);
+    if (ret != 0) {
+      throw FfiError(this.lib);
+    }
+  }
+}
+
+class I64Iter extends Iterable<int> implements Iterator<int> {
+  final ffi.NativeLibrary lib;
+  final Pointer<ffi.I64Iter> ptr;
+  int _current = 0;
+  int get current => _current;
+
+  I64Iter(this.lib, this.ptr);
+
+  @override
+  Iterator<int> get iterator => this;
+
+  @override
+  bool moveNext() {
+    final ptr = malloc.allocate<Int64>(1);
+    final ret = this.lib.i64_iter_next(this.ptr, ptr.cast());
+    if (ret == 0) {
+      malloc.free(ptr);
+      this.destroy();
+      return false;
+    }
+    if (ret == 1) {
+      this._current = ptr as int;
+      malloc.free(ptr);
+      return true;
+    }
+    throw FfiError(this.lib);
+  }
+
+  void destroy() {
+    final ret = this.lib.i64_iter_destroy(this.ptr);
+    if (ret != 0) {
+      throw FfiError(this.lib);
+    }
+  }
+}
+
+class StrIter extends Iterable<String> implements Iterator<String> {
+  final ffi.NativeLibrary lib;
+  final Pointer<ffi.StrIter> ptr;
+  String _current = "";
+  String get current => _current;
+
+  StrIter(this.lib, this.ptr);
+  @override
+  Iterator<String> get iterator => this;
+
+  @override
+  bool moveNext() {
+    final strPtr = malloc.allocate<IntPtr>(1);
+    final lenPtr = malloc.allocate<IntPtr>(1);
+    final ret = this.lib.str_iter_next(this.ptr, strPtr.cast(), lenPtr.cast());
+    if (ret == 0) {
+      malloc.free(strPtr);
+      malloc.free(lenPtr);
+      this.destroy();
+      return false;
+    }
+    if (ret == 1) {
+      final bytes = Uint8List(lenPtr.elementAt(0).value);
+      final Pointer<Uint8> ptr = Pointer.fromAddress(strPtr.elementAt(0).value);
+      for (int i = 0; i < bytes.length; i++) {
+        bytes[i] = ptr.elementAt(i).value;
+      }
+      final str = utf8.decode(bytes);
+      this.lib.str_destroy(ptr.cast());
+      this._current = str;
+      malloc.free(strPtr);
+      malloc.free(lenPtr);
+      return true;
+    }
+    throw FfiError(this.lib);
+  }
+
+  void destroy() {
+    final ret = this.lib.str_iter_destroy(this.ptr);
+    if (ret != 0) {
+      throw FfiError(this.lib);
+    }
+  }
 }

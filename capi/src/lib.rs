@@ -34,6 +34,8 @@ fn check_path(ptr: *const u8, len: usize) -> Result<&'static Path> {
     Ok(Path::new(s))
 }
 
+type DynIter<T> = dyn Iterator<Item = Result<T>>;
+
 #[repr(C)]
 pub struct Sdk;
 
@@ -142,8 +144,6 @@ pub extern "C" fn sdk_remove_address(
 }
 
 // TODO: addresses
-type DynDocIter = dyn Iterator<Item = Result<DocId>>;
-
 #[no_mangle]
 pub extern "C" fn sdk_create_doc_iter(
     sdk: *mut Sdk,
@@ -152,8 +152,8 @@ pub extern "C" fn sdk_create_doc_iter(
 ) -> *mut DocIter {
     catch_panic(move || {
         let sdk = unsafe { &mut *(sdk as *mut tlfs::Sdk) };
-        let schema = check_str(schema, schema_len)?;
-        let iter = Box::new(Box::new(sdk.docs(schema)) as Box<DynDocIter>);
+        let schema = check_str(schema, schema_len)?.to_string();
+        let iter = Box::new(Box::new(sdk.docs(schema)) as Box<DynIter<DocId>>);
         Ok(Box::into_raw(iter) as *mut _)
     })
     .unwrap_or_else(|_| std::ptr::null_mut())
@@ -162,7 +162,7 @@ pub extern "C" fn sdk_create_doc_iter(
 #[no_mangle]
 pub extern "C" fn doc_iter_next(iter: *mut DocIter, doc: *mut [u8; 32]) -> i32 {
     catch_panic(move || {
-        let iter = unsafe { &mut *(iter as *mut &mut DynDocIter) };
+        let iter = unsafe { &mut *(iter as *mut &mut DynIter<DocId>) };
         let doc = unsafe { &mut *doc };
         if let Some(res) = iter.next().transpose()? {
             doc.copy_from_slice(res.as_ref());
@@ -177,7 +177,7 @@ pub extern "C" fn doc_iter_next(iter: *mut DocIter, doc: *mut [u8; 32]) -> i32 {
 #[no_mangle]
 pub extern "C" fn doc_iter_destroy(iter: *mut DocIter) -> i32 {
     catch_panic(move || {
-        drop(unsafe { Box::from_raw(iter as *mut Box<DynDocIter>) });
+        drop(unsafe { Box::from_raw(iter as *mut Box<DynIter<DocId>>) });
         Ok(0)
     })
     .unwrap_or(-1)
@@ -326,78 +326,113 @@ pub extern "C" fn cursor_flag_disable(cursor: *mut Cursor) -> *mut Causal {
     .unwrap_or_else(|_| std::ptr::null_mut())
 }
 
-macro_rules! cursor_iter {
-    ($ty:ty, $iter:ty, $cons:ident, $create:ident, $next:ident, $destroy:ident) => {
-        #[no_mangle]
-        pub extern "C" fn $create(cursor: *mut Cursor) -> *mut $iter {
-            catch_panic(move || {
-                let cursor = unsafe { &mut *(cursor as *mut tlfs::Cursor) };
-                let iter =
-                    Box::new(Box::new(cursor.$cons()?) as Box<dyn Iterator<Item = Result<$ty>>>);
-                Ok(Box::into_raw(iter) as *mut _)
-            })
-            .unwrap_or_else(|_| std::ptr::null_mut())
-        }
-
-        #[no_mangle]
-        pub extern "C" fn $next(iter: *mut $iter, value: *mut $ty) -> i32 {
-            catch_panic(move || {
-                let iter =
-                    unsafe { &mut *(iter as *mut &mut Box<dyn Iterator<Item = Result<$ty>>>) };
-                let value = unsafe { &mut *value };
-                if let Some(res) = iter.next().transpose()? {
-                    *value = res;
-                    Ok(1)
-                } else {
-                    Ok(0)
-                }
-            })
-            .unwrap_or(-1)
-        }
-
-        #[no_mangle]
-        pub extern "C" fn $destroy(iter: *mut $iter) -> i32 {
-            catch_panic(move || {
-                drop(unsafe { Box::from_raw(iter as *mut Box<dyn Iterator<Item = Result<$ty>>>) });
-                Ok(0)
-            })
-            .unwrap_or(-1)
-        }
-    };
+#[no_mangle]
+pub extern "C" fn cursor_reg_bools(cursor: *mut Cursor) -> *mut BoolIter {
+    catch_panic(move || {
+        let cursor = unsafe { &mut *(cursor as *mut tlfs::Cursor) };
+        let iter = Box::new(Box::new(cursor.bools()?) as Box<DynIter<bool>>);
+        Ok(Box::into_raw(iter) as *mut _)
+    })
+    .unwrap_or_else(|_| std::ptr::null_mut())
 }
 
-cursor_iter!(
-    bool,
-    BoolIter,
-    bools,
-    cursor_reg_bools,
-    bool_iter_next,
-    bool_iter_destroy
-);
-cursor_iter!(
-    u64,
-    U64Iter,
-    u64s,
-    cursor_reg_u64s,
-    u64_iter_next,
-    u64_iter_destroy
-);
-cursor_iter!(
-    i64,
-    I64Iter,
-    i64s,
-    cursor_reg_i64s,
-    i64_iter_next,
-    i64_iter_destroy
-);
+#[no_mangle]
+pub extern "C" fn bool_iter_next(iter: *mut BoolIter, value: *mut bool) -> i32 {
+    catch_panic(move || {
+        let iter = unsafe { &mut *(iter as *mut &mut Box<DynIter<bool>>) };
+        let value = unsafe { &mut *value };
+        if let Some(res) = iter.next().transpose()? {
+            *value = res;
+            Ok(1)
+        } else {
+            Ok(0)
+        }
+    })
+    .unwrap_or(-1)
+}
 
-type DynStrIter = dyn Iterator<Item = Result<String>>;
+#[no_mangle]
+pub extern "C" fn bool_iter_destroy(iter: *mut BoolIter) -> i32 {
+    catch_panic(move || {
+        drop(unsafe { Box::from_raw(iter as *mut Box<DynIter<bool>>) });
+        Ok(0)
+    })
+    .unwrap_or(-1)
+}
+
+#[no_mangle]
+pub extern "C" fn cursor_reg_u64s(cursor: *mut Cursor) -> *mut U64Iter {
+    catch_panic(move || {
+        let cursor = unsafe { &mut *(cursor as *mut tlfs::Cursor) };
+        let iter = Box::new(Box::new(cursor.u64s()?) as Box<DynIter<u64>>);
+        Ok(Box::into_raw(iter) as *mut _)
+    })
+    .unwrap_or_else(|_| std::ptr::null_mut())
+}
+
+#[no_mangle]
+pub extern "C" fn u64_iter_next(iter: *mut U64Iter, value: *mut u64) -> i32 {
+    catch_panic(move || {
+        let iter = unsafe { &mut *(iter as *mut &mut Box<DynIter<u64>>) };
+        let value = unsafe { &mut *value };
+        if let Some(res) = iter.next().transpose()? {
+            *value = res;
+            Ok(1)
+        } else {
+            Ok(0)
+        }
+    })
+    .unwrap_or(-1)
+}
+
+#[no_mangle]
+pub extern "C" fn u64_iter_destroy(iter: *mut U64Iter) -> i32 {
+    catch_panic(move || {
+        drop(unsafe { Box::from_raw(iter as *mut Box<DynIter<u64>>) });
+        Ok(0)
+    })
+    .unwrap_or(-1)
+}
+
+#[no_mangle]
+pub extern "C" fn cursor_reg_i64s(cursor: *mut Cursor) -> *mut I64Iter {
+    catch_panic(move || {
+        let cursor = unsafe { &mut *(cursor as *mut tlfs::Cursor) };
+        let iter = Box::new(Box::new(cursor.i64s()?) as Box<DynIter<i64>>);
+        Ok(Box::into_raw(iter) as *mut _)
+    })
+    .unwrap_or_else(|_| std::ptr::null_mut())
+}
+
+#[no_mangle]
+pub extern "C" fn i64_iter_next(iter: *mut I64Iter, value: *mut i64) -> i32 {
+    catch_panic(move || {
+        let iter = unsafe { &mut *(iter as *mut &mut Box<DynIter<i64>>) };
+        let value = unsafe { &mut *value };
+        if let Some(res) = iter.next().transpose()? {
+            *value = res;
+            Ok(1)
+        } else {
+            Ok(0)
+        }
+    })
+    .unwrap_or(-1)
+}
+
+#[no_mangle]
+pub extern "C" fn i64_iter_destroy(iter: *mut I64Iter) -> i32 {
+    catch_panic(move || {
+        drop(unsafe { Box::from_raw(iter as *mut Box<DynIter<i64>>) });
+        Ok(0)
+    })
+    .unwrap_or(-1)
+}
 
 #[no_mangle]
 pub extern "C" fn cursor_reg_strs(cursor: *mut Cursor) -> *mut StrIter {
     catch_panic(move || {
         let cursor = unsafe { &mut *(cursor as *mut tlfs::Cursor) };
-        let iter = Box::new(Box::new(cursor.strs()?) as Box<DynStrIter>);
+        let iter = Box::new(Box::new(cursor.strs()?) as Box<DynIter<String>>);
         Ok(Box::into_raw(iter) as *mut _)
     })
     .unwrap_or_else(|_| std::ptr::null_mut())
@@ -410,13 +445,13 @@ pub extern "C" fn str_iter_next(
     value_len: *mut usize,
 ) -> i32 {
     catch_panic(move || {
-        let iter = unsafe { &mut *(iter as *mut &mut DynStrIter) };
+        let iter = unsafe { &mut *(iter as *mut &mut DynIter<String>) };
         let value = unsafe { &mut *value };
         let value_len = unsafe { &mut *value_len };
         if let Some(res) = iter.next().transpose()? {
-            let res = res.into_bytes().into_boxed_slice();
+            let res = res.into_bytes().leak();
             *value_len = res.len();
-            *value = Box::into_raw(Box::new(res)) as *mut _;
+            *value = res.as_mut_ptr();
             Ok(1)
         } else {
             Ok(0)
@@ -428,7 +463,7 @@ pub extern "C" fn str_iter_next(
 #[no_mangle]
 pub extern "C" fn str_destroy(ptr: *mut u8) -> i32 {
     catch_panic(move || {
-        drop(unsafe { &mut *(ptr as *mut Box<[u8]>) });
+        drop(unsafe { &mut *(ptr as *mut Vec<u8>) });
         Ok(0)
     })
     .unwrap_or(-1)
@@ -437,7 +472,7 @@ pub extern "C" fn str_destroy(ptr: *mut u8) -> i32 {
 #[no_mangle]
 pub extern "C" fn str_iter_destroy(iter: *mut StrIter) -> i32 {
     catch_panic(move || {
-        drop(unsafe { Box::from_raw(iter as *mut Box<DynStrIter>) });
+        drop(unsafe { Box::from_raw(iter as *mut Box<DynIter<String>>) });
         Ok(0)
     })
     .unwrap_or(-1)
@@ -689,6 +724,8 @@ mod tests {
         let mut len = 0;
         let ret = str_iter_next(iter, &mut ptr, &mut len);
         assert_eq!(ret, 1);
+        let s = check_str(ptr, len).unwrap();
+        println!("{}", s);
         assert_eq!(str_destroy(ptr), 0);
         assert_eq!(str_iter_destroy(iter), 0);
 
