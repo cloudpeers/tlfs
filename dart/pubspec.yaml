@@ -15,6 +15,7 @@ dev_dependencies:
 
 ffigen:
   output: 'lib/tlfs_capi.dart'
+  compiler-opts: '-I /usr/lib/clang/12.0.1/include'
   headers:
     entry-points:
     - '../capi/tlfs.h'

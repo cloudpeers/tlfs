@@ -1,6 +1,7 @@
 #ifndef TLFS_H
 #define TLFS_H
 
+#include "stdbool.h"
 #include "stdint.h"
 
 typedef struct Sdk {
