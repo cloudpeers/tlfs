@@ -83,14 +83,12 @@ impl Docs {
         Ok(())
     }
 
-    pub fn docs_by_schema<'a>(
-        &'a self,
-        schema: &'a str,
-    ) -> impl Iterator<Item = Result<DocId>> + 'a {
+    pub fn docs_by_schema(&self, schema: String) -> impl Iterator<Item = Result<DocId>> {
+        let docs = self.clone();
         self.docs()
             .map(move |res| {
                 let id = res?;
-                let info = self.schema(&id)?;
+                let info = docs.schema(&id)?;
                 Ok((id, info))
             })
             .filter_map(move |res| match res {
@@ -423,10 +421,7 @@ impl Frontend {
     }
 
     /// Returns an iterator of [`DocId`].
-    pub fn docs_by_schema<'a>(
-        &'a self,
-        schema: &'a str,
-    ) -> impl Iterator<Item = Result<DocId>> + 'a {
+    pub fn docs_by_schema(&self, schema: String) -> impl Iterator<Item = Result<DocId>> {
         self.docs.docs_by_schema(schema)
     }
 

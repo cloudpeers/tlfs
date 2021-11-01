@@ -433,6 +433,144 @@ class NativeLibrary {
   late final _cursor_flag_disable = _cursor_flag_disablePtr
       .asFunction<ffi.Pointer<Causal> Function(ffi.Pointer<Cursor>)>();
 
+  ffi.Pointer<BoolIter> cursor_reg_bools(
+    ffi.Pointer<Cursor> cursor,
+  ) {
+    return _cursor_reg_bools(
+      cursor,
+    );
+  }
+
+  late final _cursor_reg_boolsPtr = _lookup<
+      ffi.NativeFunction<
+          ffi.Pointer<BoolIter> Function(
+              ffi.Pointer<Cursor>)>>('cursor_reg_bools');
+  late final _cursor_reg_bools = _cursor_reg_boolsPtr
+      .asFunction<ffi.Pointer<BoolIter> Function(ffi.Pointer<Cursor>)>();
+
+  int bool_iter_next(
+    ffi.Pointer<BoolIter> iter,
+    ffi.Pointer<ffi.Uint8> value,
+  ) {
+    return _bool_iter_next(
+      iter,
+      value,
+    );
+  }
+
+  late final _bool_iter_nextPtr = _lookup<
+      ffi.NativeFunction<
+          ffi.Int32 Function(ffi.Pointer<BoolIter>,
+              ffi.Pointer<ffi.Uint8>)>>('bool_iter_next');
+  late final _bool_iter_next = _bool_iter_nextPtr.asFunction<
+      int Function(ffi.Pointer<BoolIter>, ffi.Pointer<ffi.Uint8>)>();
+
+  int bool_iter_destroy(
+    ffi.Pointer<BoolIter> iter,
+  ) {
+    return _bool_iter_destroy(
+      iter,
+    );
+  }
+
+  late final _bool_iter_destroyPtr =
+      _lookup<ffi.NativeFunction<ffi.Int32 Function(ffi.Pointer<BoolIter>)>>(
+          'bool_iter_destroy');
+  late final _bool_iter_destroy =
+      _bool_iter_destroyPtr.asFunction<int Function(ffi.Pointer<BoolIter>)>();
+
+  ffi.Pointer<U64Iter> cursor_reg_u64s(
+    ffi.Pointer<Cursor> cursor,
+  ) {
+    return _cursor_reg_u64s(
+      cursor,
+    );
+  }
+
+  late final _cursor_reg_u64sPtr = _lookup<
+      ffi.NativeFunction<
+          ffi.Pointer<U64Iter> Function(
+              ffi.Pointer<Cursor>)>>('cursor_reg_u64s');
+  late final _cursor_reg_u64s = _cursor_reg_u64sPtr
+      .asFunction<ffi.Pointer<U64Iter> Function(ffi.Pointer<Cursor>)>();
+
+  int u64_iter_next(
+    ffi.Pointer<U64Iter> iter,
+    ffi.Pointer<ffi.Uint64> value,
+  ) {
+    return _u64_iter_next(
+      iter,
+      value,
+    );
+  }
+
+  late final _u64_iter_nextPtr = _lookup<
+      ffi.NativeFunction<
+          ffi.Int32 Function(
+              ffi.Pointer<U64Iter>, ffi.Pointer<ffi.Uint64>)>>('u64_iter_next');
+  late final _u64_iter_next = _u64_iter_nextPtr.asFunction<
+      int Function(ffi.Pointer<U64Iter>, ffi.Pointer<ffi.Uint64>)>();
+
+  int u64_iter_destroy(
+    ffi.Pointer<U64Iter> iter,
+  ) {
+    return _u64_iter_destroy(
+      iter,
+    );
+  }
+
+  late final _u64_iter_destroyPtr =
+      _lookup<ffi.NativeFunction<ffi.Int32 Function(ffi.Pointer<U64Iter>)>>(
+          'u64_iter_destroy');
+  late final _u64_iter_destroy =
+      _u64_iter_destroyPtr.asFunction<int Function(ffi.Pointer<U64Iter>)>();
+
+  ffi.Pointer<I64Iter> cursor_reg_i64s(
+    ffi.Pointer<Cursor> cursor,
+  ) {
+    return _cursor_reg_i64s(
+      cursor,
+    );
+  }
+
+  late final _cursor_reg_i64sPtr = _lookup<
+      ffi.NativeFunction<
+          ffi.Pointer<I64Iter> Function(
+              ffi.Pointer<Cursor>)>>('cursor_reg_i64s');
+  late final _cursor_reg_i64s = _cursor_reg_i64sPtr
+      .asFunction<ffi.Pointer<I64Iter> Function(ffi.Pointer<Cursor>)>();
+
+  int i64_iter_next(
+    ffi.Pointer<I64Iter> iter,
+    ffi.Pointer<ffi.Int64> value,
+  ) {
+    return _i64_iter_next(
+      iter,
+      value,
+    );
+  }
+
+  late final _i64_iter_nextPtr = _lookup<
+      ffi.NativeFunction<
+          ffi.Int32 Function(
+              ffi.Pointer<I64Iter>, ffi.Pointer<ffi.Int64>)>>('i64_iter_next');
+  late final _i64_iter_next = _i64_iter_nextPtr
+      .asFunction<int Function(ffi.Pointer<I64Iter>, ffi.Pointer<ffi.Int64>)>();
+
+  int i64_iter_destroy(
+    ffi.Pointer<I64Iter> iter,
+  ) {
+    return _i64_iter_destroy(
+      iter,
+    );
+  }
+
+  late final _i64_iter_destroyPtr =
+      _lookup<ffi.NativeFunction<ffi.Int32 Function(ffi.Pointer<I64Iter>)>>(
+          'i64_iter_destroy');
+  late final _i64_iter_destroy =
+      _i64_iter_destroyPtr.asFunction<int Function(ffi.Pointer<I64Iter>)>();
+
   ffi.Pointer<StrIter> cursor_reg_strs(
     ffi.Pointer<Cursor> cursor,
   ) {
@@ -768,5 +906,11 @@ class Doc extends ffi.Opaque {}
 class Cursor extends ffi.Opaque {}
 
 class Causal extends ffi.Opaque {}
+
+class BoolIter extends ffi.Opaque {}
+
+class U64Iter extends ffi.Opaque {}
+
+class I64Iter extends ffi.Opaque {}
 
 class StrIter extends ffi.Opaque {}
