@@ -83,6 +83,23 @@ impl Docs {
         Ok(())
     }
 
+    pub fn docs_by_schema<'a>(
+        &'a self,
+        schema: &'a str,
+    ) -> impl Iterator<Item = Result<DocId>> + 'a {
+        self.docs()
+            .map(move |res| {
+                let id = res?;
+                let info = self.schema(&id)?;
+                Ok((id, info))
+            })
+            .filter_map(move |res| match res {
+                Ok((id, info)) if info.as_ref().name() == schema => Some(Ok(id)),
+                Ok(_) => None,
+                Err(err) => Some(Err(err)),
+            })
+    }
+
     pub fn schema(&self, id: &DocId) -> Result<Ref<SchemaInfo>> {
         let mut key = [0; 33];
         key[..32].copy_from_slice(id.as_ref());
@@ -403,6 +420,14 @@ impl Frontend {
     /// Returns an iterator of [`DocId`].
     pub fn docs(&self) -> impl Iterator<Item = Result<DocId>> {
         self.docs.docs()
+    }
+
+    /// Returns an iterator of [`DocId`].
+    pub fn docs_by_schema<'a>(
+        &'a self,
+        schema: &'a str,
+    ) -> impl Iterator<Item = Result<DocId>> + 'a {
+        self.docs.docs_by_schema(schema)
     }
 
     /// Creates a new document using [`Keypair`] with initial schema and owner.

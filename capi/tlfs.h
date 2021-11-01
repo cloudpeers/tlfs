@@ -23,16 +23,20 @@ typedef struct Causal {
 
 } Causal;
 
+typedef struct StrIter {
+
+} StrIter;
+
 int last_error_length(void);
 
 int error_message_utf8(char *buf, int length);
 
 struct Sdk *sdk_create_persistent(const uint8_t *db_path_ptr,
                                   uintptr_t db_path_len,
-                                  const uint8_t *package_path_ptr,
-                                  uintptr_t package_path_len);
+                                  const uint8_t *package_ptr,
+                                  uintptr_t package_len);
 
-struct Sdk *sdk_create_memory(const uint8_t *package_path_ptr, uintptr_t package_path_len);
+struct Sdk *sdk_create_memory(const uint8_t *package_ptr, uintptr_t package_len);
 
 int32_t sdk_destroy(struct Sdk *sdk);
 
@@ -48,7 +52,7 @@ int32_t sdk_remove_address(struct Sdk *sdk,
                            const uint8_t *addr,
                            uintptr_t addr_length);
 
-struct DocIter *sdk_create_doc_iter(struct Sdk *sdk);
+struct DocIter *sdk_create_doc_iter(struct Sdk *sdk, const uint8_t *schema, uintptr_t schema_len);
 
 int32_t doc_iter_next(struct DocIter *iter, uint8_t (*doc)[32]);
 
@@ -73,11 +77,23 @@ int32_t doc_apply_causal(struct Doc *doc, struct Causal *causal);
 
 int32_t doc_destroy(struct Doc *doc);
 
+int32_t causal_join(struct Causal *causal, struct Causal *other);
+
+struct Cursor *cursor_clone(struct Cursor *cursor);
+
 int32_t cursor_flag_enabled(struct Cursor *cursor);
 
 struct Causal *cursor_flag_enable(struct Cursor *cursor);
 
 struct Causal *cursor_flag_disable(struct Cursor *cursor);
+
+struct StrIter *cursor_reg_strs(struct Cursor *cursor);
+
+int32_t str_iter_next(struct StrIter *iter, uint8_t **value, uintptr_t *value_len);
+
+int32_t str_destroy(uint8_t *ptr);
+
+int32_t str_iter_destroy(struct StrIter *iter);
 
 struct Causal *cursor_reg_assign_bool(struct Cursor *cursor, bool value);
 
