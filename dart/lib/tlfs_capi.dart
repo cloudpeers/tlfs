@@ -47,14 +47,14 @@ class NativeLibrary {
   ffi.Pointer<Sdk> sdk_create_persistent(
     ffi.Pointer<ffi.Uint8> db_path_ptr,
     int db_path_len,
-    ffi.Pointer<ffi.Uint8> package_path_ptr,
-    int package_path_len,
+    ffi.Pointer<ffi.Uint8> package_ptr,
+    int package_len,
   ) {
     return _sdk_create_persistent(
       db_path_ptr,
       db_path_len,
-      package_path_ptr,
-      package_path_len,
+      package_ptr,
+      package_len,
     );
   }
 
@@ -67,12 +67,12 @@ class NativeLibrary {
           ffi.Pointer<ffi.Uint8>, int, ffi.Pointer<ffi.Uint8>, int)>();
 
   ffi.Pointer<Sdk> sdk_create_memory(
-    ffi.Pointer<ffi.Uint8> package_path_ptr,
-    int package_path_len,
+    ffi.Pointer<ffi.Uint8> package_ptr,
+    int package_len,
   ) {
     return _sdk_create_memory(
-      package_path_ptr,
-      package_path_len,
+      package_ptr,
+      package_len,
     );
   }
 

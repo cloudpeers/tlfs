@@ -80,23 +80,31 @@ class Sdk {
 
   Sdk(this.lib, this.ptr);
 
-  factory Sdk.memory(String packagePath) {
+  factory Sdk.memory(Uint8List package) {
     final lib = ffi.NativeLibrary(_open());
-    final packagePathPtr = packagePath.toNativeUtf8();
+    final packagePtr = malloc.allocate<Uint8>(package.length);
+    for (int i = 0; i < package.length; i++) {
+      packagePtr[i] = package[i];
+    }
     final ret =
-        lib.sdk_create_memory(packagePathPtr.cast(), packagePathPtr.length);
+        lib.sdk_create_memory(packagePtr.cast(), package.length);
+    malloc.free(packagePtr);
     if (ret == Pointer.fromAddress(0)) {
       throw FfiError(lib);
     }
     return Sdk(lib, ret);
   }
 
-  factory Sdk.persistent(String dbPath, String packagePath) {
+  factory Sdk.persistent(String dbPath, Uint8List package) {
     final lib = ffi.NativeLibrary(_open());
     final dbPathPtr = dbPath.toNativeUtf8();
-    final packagePathPtr = packagePath.toNativeUtf8();
+    final packagePtr = malloc.allocate<Uint8>(package.length);
+    for (int i = 0; i < package.length; i++) {
+      packagePtr[i] = package[i];
+    }
     final ret = lib.sdk_create_persistent(dbPathPtr.cast(), dbPathPtr.length,
-        packagePathPtr.cast(), packagePathPtr.length);
+        packagePtr.cast(), package.length);
+    malloc.free(packagePtr);
     if (ret == Pointer.fromAddress(0)) {
       throw FfiError(lib);
     }

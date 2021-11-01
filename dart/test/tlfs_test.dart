@@ -1,10 +1,15 @@
+import 'dart:io';
+import 'dart:typed_data';
 import 'package:tlfs/tlfs.dart';
 import 'package:test/test.dart';
 
 void main() {
   test('tlfs test', () {
     final package = "../capi/assets/capi/include/todoapp.tlfs.rkyv";
-    final sdk = Sdk.memory(package);
+    final f = File(package);
+    f.openSync();
+    final Uint8List bytes = f.readAsBytesSync();
+    final sdk = Sdk.memory(bytes);
     final peer = sdk.peerId();
     print('peer: $peer');
 
