@@ -166,17 +166,23 @@ class NativeLibrary {
 
   ffi.Pointer<DocIter> sdk_create_doc_iter(
     ffi.Pointer<Sdk> sdk,
+    ffi.Pointer<ffi.Uint8> schema,
+    int schema_len,
   ) {
     return _sdk_create_doc_iter(
       sdk,
+      schema,
+      schema_len,
     );
   }
 
   late final _sdk_create_doc_iterPtr = _lookup<
-          ffi.NativeFunction<ffi.Pointer<DocIter> Function(ffi.Pointer<Sdk>)>>(
-      'sdk_create_doc_iter');
-  late final _sdk_create_doc_iter = _sdk_create_doc_iterPtr
-      .asFunction<ffi.Pointer<DocIter> Function(ffi.Pointer<Sdk>)>();
+      ffi.NativeFunction<
+          ffi.Pointer<DocIter> Function(ffi.Pointer<Sdk>,
+              ffi.Pointer<ffi.Uint8>, ffi.Uint64)>>('sdk_create_doc_iter');
+  late final _sdk_create_doc_iter = _sdk_create_doc_iterPtr.asFunction<
+      ffi.Pointer<DocIter> Function(
+          ffi.Pointer<Sdk>, ffi.Pointer<ffi.Uint8>, int)>();
 
   int doc_iter_next(
     ffi.Pointer<DocIter> iter,
@@ -352,6 +358,37 @@ class NativeLibrary {
   late final _doc_destroy =
       _doc_destroyPtr.asFunction<int Function(ffi.Pointer<Doc>)>();
 
+  int causal_join(
+    ffi.Pointer<Causal> causal,
+    ffi.Pointer<Causal> other,
+  ) {
+    return _causal_join(
+      causal,
+      other,
+    );
+  }
+
+  late final _causal_joinPtr = _lookup<
+      ffi.NativeFunction<
+          ffi.Int32 Function(
+              ffi.Pointer<Causal>, ffi.Pointer<Causal>)>>('causal_join');
+  late final _causal_join = _causal_joinPtr
+      .asFunction<int Function(ffi.Pointer<Causal>, ffi.Pointer<Causal>)>();
+
+  ffi.Pointer<Cursor> cursor_clone(
+    ffi.Pointer<Cursor> cursor,
+  ) {
+    return _cursor_clone(
+      cursor,
+    );
+  }
+
+  late final _cursor_clonePtr = _lookup<
+      ffi.NativeFunction<
+          ffi.Pointer<Cursor> Function(ffi.Pointer<Cursor>)>>('cursor_clone');
+  late final _cursor_clone = _cursor_clonePtr
+      .asFunction<ffi.Pointer<Cursor> Function(ffi.Pointer<Cursor>)>();
+
   int cursor_flag_enabled(
     ffi.Pointer<Cursor> cursor,
   ) {
@@ -396,20 +433,85 @@ class NativeLibrary {
   late final _cursor_flag_disable = _cursor_flag_disablePtr
       .asFunction<ffi.Pointer<Causal> Function(ffi.Pointer<Cursor>)>();
 
+  ffi.Pointer<StrIter> cursor_reg_strs(
+    ffi.Pointer<Cursor> cursor,
+  ) {
+    return _cursor_reg_strs(
+      cursor,
+    );
+  }
+
+  late final _cursor_reg_strsPtr = _lookup<
+      ffi.NativeFunction<
+          ffi.Pointer<StrIter> Function(
+              ffi.Pointer<Cursor>)>>('cursor_reg_strs');
+  late final _cursor_reg_strs = _cursor_reg_strsPtr
+      .asFunction<ffi.Pointer<StrIter> Function(ffi.Pointer<Cursor>)>();
+
+  int str_iter_next(
+    ffi.Pointer<StrIter> iter,
+    ffi.Pointer<ffi.Pointer<ffi.Uint8>> value,
+    ffi.Pointer<ffi.Uint64> value_len,
+  ) {
+    return _str_iter_next(
+      iter,
+      value,
+      value_len,
+    );
+  }
+
+  late final _str_iter_nextPtr = _lookup<
+      ffi.NativeFunction<
+          ffi.Int32 Function(
+              ffi.Pointer<StrIter>,
+              ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+              ffi.Pointer<ffi.Uint64>)>>('str_iter_next');
+  late final _str_iter_next = _str_iter_nextPtr.asFunction<
+      int Function(ffi.Pointer<StrIter>, ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+          ffi.Pointer<ffi.Uint64>)>();
+
+  int str_destroy(
+    ffi.Pointer<ffi.Uint8> ptr,
+  ) {
+    return _str_destroy(
+      ptr,
+    );
+  }
+
+  late final _str_destroyPtr =
+      _lookup<ffi.NativeFunction<ffi.Int32 Function(ffi.Pointer<ffi.Uint8>)>>(
+          'str_destroy');
+  late final _str_destroy =
+      _str_destroyPtr.asFunction<int Function(ffi.Pointer<ffi.Uint8>)>();
+
+  int str_iter_destroy(
+    ffi.Pointer<StrIter> iter,
+  ) {
+    return _str_iter_destroy(
+      iter,
+    );
+  }
+
+  late final _str_iter_destroyPtr =
+      _lookup<ffi.NativeFunction<ffi.Int32 Function(ffi.Pointer<StrIter>)>>(
+          'str_iter_destroy');
+  late final _str_iter_destroy =
+      _str_iter_destroyPtr.asFunction<int Function(ffi.Pointer<StrIter>)>();
+
   ffi.Pointer<Causal> cursor_reg_assign_bool(
     ffi.Pointer<Cursor> cursor,
-    int value,
+    bool value,
   ) {
     return _cursor_reg_assign_bool(
       cursor,
-      value,
+      value ? 1 : 0,
     );
   }
 
   late final _cursor_reg_assign_boolPtr = _lookup<
       ffi.NativeFunction<
           ffi.Pointer<Causal> Function(
-              ffi.Pointer<Cursor>, ffi.Int32)>>('cursor_reg_assign_bool');
+              ffi.Pointer<Cursor>, ffi.Uint8)>>('cursor_reg_assign_bool');
   late final _cursor_reg_assign_bool = _cursor_reg_assign_boolPtr
       .asFunction<ffi.Pointer<Causal> Function(ffi.Pointer<Cursor>, int)>();
 
@@ -488,18 +590,18 @@ class NativeLibrary {
 
   int cursor_map_key_bool(
     ffi.Pointer<Cursor> cursor,
-    int key,
+    bool key,
   ) {
     return _cursor_map_key_bool(
       cursor,
-      key,
+      key ? 1 : 0,
     );
   }
 
   late final _cursor_map_key_boolPtr = _lookup<
       ffi.NativeFunction<
           ffi.Int32 Function(
-              ffi.Pointer<Cursor>, ffi.Int32)>>('cursor_map_key_bool');
+              ffi.Pointer<Cursor>, ffi.Uint8)>>('cursor_map_key_bool');
   late final _cursor_map_key_bool = _cursor_map_key_boolPtr
       .asFunction<int Function(ffi.Pointer<Cursor>, int)>();
 
@@ -666,3 +768,5 @@ class Doc extends ffi.Opaque {}
 class Cursor extends ffi.Opaque {}
 
 class Causal extends ffi.Opaque {}
+
+class StrIter extends ffi.Opaque {}
