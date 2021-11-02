@@ -213,6 +213,11 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    /// Returns if the array is empty.
+    pub fn is_empty(&mut self) -> Result<bool> {
+        Ok(self.len()? == 0)
+    }
+
     /// Returns a cursor to a field in a struct.
     pub fn field(&mut self, key: &str) -> Result<&mut Self> {
         if let ArchivedSchema::Struct(fields) = &self.schema {

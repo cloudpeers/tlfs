@@ -250,7 +250,7 @@ mod tests {
         async_std::task::sleep(Duration::from_millis(100)).await;
         assert!(doc.cursor().can(sdk.peer_id(), Permission::Write)?);
 
-        let docs = sdk.docs("todoapp").collect::<Result<Vec<_>>>()?;
+        let docs = sdk.docs("todoapp".into()).collect::<Result<Vec<_>>>()?;
         assert_eq!(docs.len(), 1);
         assert_eq!(docs[0], *doc.id());
 
