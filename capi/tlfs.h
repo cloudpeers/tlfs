@@ -65,12 +65,50 @@ struct Doc *sdk_add_doc(struct Sdk *sdk,
 
 int32_t sdk_remove_doc(struct Sdk *sdk, const uint8_t (*doc)[32]);
 
-int32_t doc_id(struct Doc *doc, uint8_t (*id)[32]);
+int32_t doc_get_id(struct Doc *doc, uint8_t (*id)[32]);
 
-struct Cursor *doc_cursor(struct Doc *doc);
+struct Cursor *doc_create_cursor(struct Doc *doc);
 
-int32_t doc_apply(struct Doc *doc, struct Causal *causal);
+int32_t doc_apply_causal(struct Doc *doc, struct Causal *causal);
 
 int32_t doc_destroy(struct Doc *doc);
+
+int32_t cursor_flag_enabled(struct Cursor *cursor);
+
+struct Causal *cursor_flag_enable(struct Cursor *cursor);
+
+struct Causal *cursor_flag_disable(struct Cursor *cursor);
+
+struct Causal *cursor_reg_assign_bool(struct Cursor *cursor, bool value);
+
+struct Causal *cursor_reg_assign_u64(struct Cursor *cursor, uint64_t value);
+
+struct Causal *cursor_reg_assign_i64(struct Cursor *cursor, int64_t value);
+
+struct Causal *cursor_reg_assign_str(struct Cursor *cursor,
+                                     const uint8_t *value,
+                                     uintptr_t value_length);
+
+int32_t cursor_struct_field(struct Cursor *cursor, const uint8_t *field, uintptr_t field_length);
+
+int32_t cursor_map_key_bool(struct Cursor *cursor, bool key);
+
+int32_t cursor_map_key_u64(struct Cursor *cursor, uint64_t key);
+
+int32_t cursor_map_key_i64(struct Cursor *cursor, int64_t key);
+
+int32_t cursor_map_key_str(struct Cursor *cursor, const uint8_t *key, uintptr_t key_length);
+
+struct Causal *cursor_map_remove(struct Cursor *cursor);
+
+int32_t cursor_array_index(struct Cursor *cursor, uint32_t index);
+
+struct Causal *cursor_array_move(struct Cursor *cursor, uint32_t index);
+
+struct Causal *cursor_array_delete(struct Cursor *cursor);
+
+int32_t cursor_acl_can(struct Cursor *cursor, const uint8_t (*peer)[32], Permission perm);
+
+int32_t cursor_destroy(struct Cursor *cursor);
 
 #endif /* TLFS_H */
