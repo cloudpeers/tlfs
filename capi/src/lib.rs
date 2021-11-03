@@ -715,6 +715,10 @@ mod tests {
         let field = "complete";
         let ret = cursor_struct_field(cursor, field.as_ptr(), field.len());
         assert_eq!(ret, 0);
+
+        // wait for acl to propagate.
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
         let causal = cursor_flag_enable(cursor);
         assert!(!causal.is_null());
 
