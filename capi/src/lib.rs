@@ -1,6 +1,7 @@
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 use anyhow::Result;
 use ffi_helpers::*;
+use std::mem::ManuallyDrop;
 use std::path::Path;
 use tlfs::{DocId, Multiaddr, PeerId, Permission};
 
@@ -83,7 +84,7 @@ pub extern "C" fn sdk_create_persistent(
 pub extern "C" fn sdk_create_memory(package_ptr: *const u8, package_len: usize) -> *mut Sdk {
     catch_panic(|| {
         let package = check_slice(package_ptr, package_len)?;
-        let sdk = async_global_executor::block_on(tlfs::Sdk::memory(&package))?;
+        let sdk = async_global_executor::block_on(tlfs::Sdk::memory(package))?;
         Ok(Box::into_raw(Box::new(sdk)) as *mut _)
     })
     .unwrap_or_else(|_| std::ptr::null_mut())
@@ -438,20 +439,23 @@ pub extern "C" fn cursor_reg_strs(cursor: *mut Cursor) -> *mut StrIter {
     .unwrap_or_else(|_| std::ptr::null_mut())
 }
 
+#[repr(C)]
+pub struct Buffer {
+    pub data: *mut u8,
+    pub len: usize,
+    pub cap: usize,
+}
+
 #[no_mangle]
-pub extern "C" fn str_iter_next(
-    iter: *mut StrIter,
-    value: *mut *mut u8,
-    value_len: *mut usize,
-) -> i32 {
+pub extern "C" fn str_iter_next(iter: *mut StrIter, buffer: *mut Buffer) -> i32 {
     catch_panic(move || {
         let iter = unsafe { &mut *(iter as *mut &mut DynIter<String>) };
-        let value = unsafe { &mut *value };
-        let value_len = unsafe { &mut *value_len };
+        let buffer = unsafe { &mut *buffer };
         if let Some(res) = iter.next().transpose()? {
-            let res = res.into_bytes().leak();
-            *value_len = res.len();
-            *value = res.as_mut_ptr();
+            let mut res = ManuallyDrop::new(res.into_bytes());
+            buffer.data = res.as_mut_ptr();
+            buffer.len = res.len();
+            buffer.cap = res.capacity();
             Ok(1)
         } else {
             Ok(0)
@@ -461,9 +465,9 @@ pub extern "C" fn str_iter_next(
 }
 
 #[no_mangle]
-pub extern "C" fn str_destroy(ptr: *mut u8) -> i32 {
+pub extern "C" fn buffer_destroy(buf: Buffer) -> i32 {
     catch_panic(move || {
-        drop(unsafe { &mut *(ptr as *mut Vec<u8>) });
+        unsafe { Vec::from_raw_parts(buf.data, buf.len, buf.cap) };
         Ok(0)
     })
     .unwrap_or(-1)
@@ -594,6 +598,15 @@ pub extern "C" fn cursor_map_remove(cursor: *mut Cursor) -> *mut Causal {
 }
 
 #[no_mangle]
+pub extern "C" fn cursor_array_length(cursor: *mut Cursor) -> i64 {
+    catch_panic(move || {
+        let cursor = unsafe { &mut *(cursor as *mut tlfs::Cursor) };
+        Ok(cursor.len()? as _)
+    })
+    .unwrap_or(-1)
+}
+
+#[no_mangle]
 pub extern "C" fn cursor_array_index(cursor: *mut Cursor, index: u32) -> i32 {
     catch_panic(move || {
         let cursor = unsafe { &mut *(cursor as *mut tlfs::Cursor) };
@@ -720,13 +733,12 @@ mod tests {
         assert_eq!(enabled, 1);
         let iter = cursor_reg_strs(cursor2);
         assert!(!iter.is_null());
-        let mut ptr = std::ptr::null_mut();
-        let mut len = 0;
-        let ret = str_iter_next(iter, &mut ptr, &mut len);
+        let mut buf: Buffer = unsafe { std::mem::zeroed() };
+        let ret = str_iter_next(iter, &mut buf);
         assert_eq!(ret, 1);
-        let s = check_str(ptr, len).unwrap();
+        let s = check_str(buf.data, buf.len).unwrap();
         println!("{}", s);
-        assert_eq!(str_destroy(ptr), 0);
+        assert_eq!(buffer_destroy(buf), 0);
         assert_eq!(str_iter_destroy(iter), 0);
 
         assert_eq!(cursor_destroy(cursor), 0);

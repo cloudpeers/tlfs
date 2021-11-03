@@ -588,39 +588,33 @@ class NativeLibrary {
 
   int str_iter_next(
     ffi.Pointer<StrIter> iter,
-    ffi.Pointer<ffi.Pointer<ffi.Uint8>> value,
-    ffi.Pointer<ffi.Uint64> value_len,
+    ffi.Pointer<Buffer> buffer,
   ) {
     return _str_iter_next(
       iter,
-      value,
-      value_len,
+      buffer,
     );
   }
 
   late final _str_iter_nextPtr = _lookup<
       ffi.NativeFunction<
           ffi.Int32 Function(
-              ffi.Pointer<StrIter>,
-              ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
-              ffi.Pointer<ffi.Uint64>)>>('str_iter_next');
-  late final _str_iter_next = _str_iter_nextPtr.asFunction<
-      int Function(ffi.Pointer<StrIter>, ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
-          ffi.Pointer<ffi.Uint64>)>();
+              ffi.Pointer<StrIter>, ffi.Pointer<Buffer>)>>('str_iter_next');
+  late final _str_iter_next = _str_iter_nextPtr
+      .asFunction<int Function(ffi.Pointer<StrIter>, ffi.Pointer<Buffer>)>();
 
-  int str_destroy(
-    ffi.Pointer<ffi.Uint8> ptr,
+  int buffer_destroy(
+    Buffer buf,
   ) {
-    return _str_destroy(
-      ptr,
+    return _buffer_destroy(
+      buf,
     );
   }
 
-  late final _str_destroyPtr =
-      _lookup<ffi.NativeFunction<ffi.Int32 Function(ffi.Pointer<ffi.Uint8>)>>(
-          'str_destroy');
-  late final _str_destroy =
-      _str_destroyPtr.asFunction<int Function(ffi.Pointer<ffi.Uint8>)>();
+  late final _buffer_destroyPtr =
+      _lookup<ffi.NativeFunction<ffi.Int32 Function(Buffer)>>('buffer_destroy');
+  late final _buffer_destroy =
+      _buffer_destroyPtr.asFunction<int Function(Buffer)>();
 
   int str_iter_destroy(
     ffi.Pointer<StrIter> iter,
@@ -811,6 +805,20 @@ class NativeLibrary {
   late final _cursor_map_remove = _cursor_map_removePtr
       .asFunction<ffi.Pointer<Causal> Function(ffi.Pointer<Cursor>)>();
 
+  int cursor_array_length(
+    ffi.Pointer<Cursor> cursor,
+  ) {
+    return _cursor_array_length(
+      cursor,
+    );
+  }
+
+  late final _cursor_array_lengthPtr =
+      _lookup<ffi.NativeFunction<ffi.Int64 Function(ffi.Pointer<Cursor>)>>(
+          'cursor_array_length');
+  late final _cursor_array_length =
+      _cursor_array_lengthPtr.asFunction<int Function(ffi.Pointer<Cursor>)>();
+
   int cursor_array_index(
     ffi.Pointer<Cursor> cursor,
     int index,
@@ -914,3 +922,13 @@ class U64Iter extends ffi.Opaque {}
 class I64Iter extends ffi.Opaque {}
 
 class StrIter extends ffi.Opaque {}
+
+class Buffer extends ffi.Struct {
+  external ffi.Pointer<ffi.Uint8> data;
+
+  @ffi.Uint64()
+  external int len;
+
+  @ffi.Uint64()
+  external int cap;
+}
