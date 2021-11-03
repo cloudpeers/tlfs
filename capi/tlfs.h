@@ -40,6 +40,12 @@ typedef struct StrIter {
 
 } StrIter;
 
+typedef struct Buffer {
+  uint8_t *data;
+  uintptr_t len;
+  uintptr_t cap;
+} Buffer;
+
 int last_error_length(void);
 
 int error_message_utf8(char *buf, int length);
@@ -120,9 +126,9 @@ int32_t i64_iter_destroy(struct I64Iter *iter);
 
 struct StrIter *cursor_reg_strs(struct Cursor *cursor);
 
-int32_t str_iter_next(struct StrIter *iter, uint8_t **value, uintptr_t *value_len);
+int32_t str_iter_next(struct StrIter *iter, struct Buffer *buffer);
 
-int32_t str_destroy(uint8_t *ptr);
+int32_t buffer_destroy(struct Buffer buf);
 
 int32_t str_iter_destroy(struct StrIter *iter);
 
@@ -147,6 +153,8 @@ int32_t cursor_map_key_i64(struct Cursor *cursor, int64_t key);
 int32_t cursor_map_key_str(struct Cursor *cursor, const uint8_t *key, uintptr_t key_length);
 
 struct Causal *cursor_map_remove(struct Cursor *cursor);
+
+int64_t cursor_array_length(struct Cursor *cursor);
 
 int32_t cursor_array_index(struct Cursor *cursor, uint32_t index);
 

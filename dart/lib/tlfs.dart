@@ -434,6 +434,14 @@ class Cursor {
     return Causal(this.lib, ret);
   }
 
+  int length() {
+    final ret = this.lib.cursor_array_length(this.ptr);
+    if (ret < 0) {
+      throw FfiError(this.lib);
+    }
+    return ret;
+  }
+
   void index(int index) {
     final ret = this.lib.cursor_array_index(this.ptr, index);
     if (ret != 0) {
@@ -591,31 +599,22 @@ class StrIter extends Iterable<String> implements Iterator<String> {
   String get current => _current;
 
   StrIter(this.lib, this.ptr);
+
   @override
   Iterator<String> get iterator => this;
 
   @override
   bool moveNext() {
-    final strPtr = malloc.allocate<IntPtr>(1);
-    final lenPtr = malloc.allocate<IntPtr>(1);
-    final ret = this.lib.str_iter_next(this.ptr, strPtr.cast(), lenPtr.cast());
+    final buffer = Buffer.allocate(this.lib);
+    final ret = this.lib.str_iter_next(this.ptr, buffer.ptr);
     if (ret == 0) {
-      malloc.free(strPtr);
-      malloc.free(lenPtr);
+      buffer.destroy();
       this.destroy();
       return false;
     }
     if (ret == 1) {
-      final bytes = Uint8List(lenPtr.elementAt(0).value);
-      final Pointer<Uint8> ptr = Pointer.fromAddress(strPtr.elementAt(0).value);
-      for (int i = 0; i < bytes.length; i++) {
-        bytes[i] = ptr.elementAt(i).value;
-      }
-      final str = utf8.decode(bytes);
-      this.lib.str_destroy(ptr.cast());
-      this._current = str;
-      malloc.free(strPtr);
-      malloc.free(lenPtr);
+      this._current = buffer.toString();
+      buffer.destroy();
       return true;
     }
     throw FfiError(this.lib);
@@ -623,6 +622,30 @@ class StrIter extends Iterable<String> implements Iterator<String> {
 
   void destroy() {
     final ret = this.lib.str_iter_destroy(this.ptr);
+    if (ret != 0) {
+      throw FfiError(this.lib);
+    }
+  }
+}
+
+class Buffer {
+  final ffi.NativeLibrary lib;
+  final Pointer<ffi.Buffer> ptr;
+
+  Buffer(this.lib, this.ptr);
+
+  factory Buffer.allocate(ffi.NativeLibrary lib) {
+    final ptr = malloc.allocate<ffi.Buffer>(1);
+    return Buffer(lib, ptr);
+  }
+
+  String toString() {
+    final buf = this.ptr.ref;
+    return buf.data.cast<Utf8>().toDartString(length: buf.len);
+  }
+
+  void destroy() {
+    final ret = this.lib.buffer_destroy(this.ptr.ref);
     if (ret != 0) {
       throw FfiError(this.lib);
     }
