@@ -1,0 +1,34 @@
+variant Primitive {
+  Bool(bool),
+  U64(u64),
+  I64(s64),
+  Str(string),
+}
+
+resource Sdk {
+  static persistent: async function(db_path: string, package: list<u8>) -> expected<Sdk, string>
+  static memory: async function(package: list<u8>) -> expected<Sdk, string>
+  peer_id: function() -> string
+  add_address: function(peer_id: string, addr: string) -> expected<u8, string>
+  remove_address: function(peer_id: string, addr: string) -> expected<u8, string>
+  create_doc: function(schema: string) -> expected<Doc, string>
+  open_doc: function(doc_id: string) -> expected<Doc, string>
+  add_doc: function(doc_id: string, schema: string) -> expected<Doc, string>
+  remove_doc: function(doc_id: string) -> expected<u8, string>
+}
+
+resource Doc {
+  doc_id: function() -> string
+  cursor: function() -> Cursor
+  apply: function(causal: Causal) -> expected<u8, string>
+}
+
+resource Cursor {
+  enabled: function() -> expected<bool, string>
+  enable: function() -> expected<Causal, string>
+  disable: function() -> expected<Causal, string>
+}
+
+resource Causal {
+  join: function(causal: Causal) -> expected<u8, string>
+}

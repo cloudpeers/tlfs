@@ -1584,6 +1584,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "id-arena"
+version = "2.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25a2bc672d1148e28034f176e01fffebb08b35768468cc954630da77a1449005"
+
+[[package]]
 name = "idna"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3922,6 +3928,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "tlfs-api"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "witx-bindgen-rust",
+]
+
+[[package]]
 name = "tlfs-capi"
 version = "0.1.0"
 dependencies = [
@@ -4698,6 +4712,63 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b2986deb581c4fe11b621998a5e53361efe6b48a151178d0cd9eeffa4dc6acc9"
 dependencies = [
  "winapi",
+]
+
+[[package]]
+name = "witx-bindgen-gen-core"
+version = "0.1.0"
+source = "git+https://github.com/bytecodealliance/witx-bindgen#160509774b3468f2ccba9b33732c199fa2cd7cef"
+dependencies = [
+ "anyhow",
+ "witx2",
+]
+
+[[package]]
+name = "witx-bindgen-gen-rust"
+version = "0.1.0"
+source = "git+https://github.com/bytecodealliance/witx-bindgen#160509774b3468f2ccba9b33732c199fa2cd7cef"
+dependencies = [
+ "heck",
+ "witx-bindgen-gen-core",
+]
+
+[[package]]
+name = "witx-bindgen-gen-rust-wasm"
+version = "0.1.0"
+source = "git+https://github.com/bytecodealliance/witx-bindgen#160509774b3468f2ccba9b33732c199fa2cd7cef"
+dependencies = [
+ "heck",
+ "witx-bindgen-gen-core",
+ "witx-bindgen-gen-rust",
+]
+
+[[package]]
+name = "witx-bindgen-rust"
+version = "0.1.0"
+source = "git+https://github.com/bytecodealliance/witx-bindgen#160509774b3468f2ccba9b33732c199fa2cd7cef"
+dependencies = [
+ "async-trait",
+ "witx-bindgen-rust-impl",
+]
+
+[[package]]
+name = "witx-bindgen-rust-impl"
+version = "0.1.0"
+source = "git+https://github.com/bytecodealliance/witx-bindgen#160509774b3468f2ccba9b33732c199fa2cd7cef"
+dependencies = [
+ "proc-macro2",
+ "syn",
+ "witx-bindgen-gen-core",
+ "witx-bindgen-gen-rust-wasm",
+]
+
+[[package]]
+name = "witx2"
+version = "0.1.0"
+source = "git+https://github.com/bytecodealliance/witx-bindgen#160509774b3468f2ccba9b33732c199fa2cd7cef"
+dependencies = [
+ "anyhow",
+ "id-arena",
 ]
 
 [[package]]
