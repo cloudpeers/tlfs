@@ -45,7 +45,7 @@ impl Sdk {
 
     /// Create a new in-memory [`Sdk`] instance.
     #[cfg(not(target_arch = "wasm32"))]
-    pub async fn memory(package: &[u8]) -> Result<Self> {
+    pub async fn in_memory(package: &[u8]) -> Result<Self> {
         let (sdk, driver) = Self::new(sled::Config::new().temporary(true).open()?, package).await?;
         async_global_executor::spawn::<_, ()>(driver).detach();
 
@@ -248,6 +248,7 @@ enum Command {
 }
 
 #[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
 mod tests {
     use super::*;
     use futures::StreamExt;
@@ -281,7 +282,7 @@ mod tests {
             8,
             &Lenses::new(lenses.clone()),
         )];
-        let sdk = Sdk::memory(Ref::archive(&packages).as_bytes()).await?;
+        let sdk = Sdk::in_memory(Ref::archive(&packages).as_bytes()).await?;
         let doc = sdk.create_doc("todoapp")?;
 
         async_std::task::sleep(Duration::from_millis(100)).await;
@@ -312,7 +313,7 @@ mod tests {
 
         lenses.push(Lens::RenameProperty("todos".into(), "tasks".into()));
         let packages = vec![Package::new("todoapp".into(), 9, &Lenses::new(lenses))];
-        let sdk2 = Sdk::memory(Ref::archive(&packages).as_bytes()).await?;
+        let sdk2 = Sdk::in_memory(Ref::archive(&packages).as_bytes()).await?;
 
         let op = doc
             .cursor()

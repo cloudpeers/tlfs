@@ -278,7 +278,7 @@ impl Backend {
     }
 
     /// Creates a new [`Backend`] from a in memory [`sled::Db`].
-    pub fn memory(package: &[u8]) -> Result<Self> {
+    pub fn in_memory(package: &[u8]) -> Result<Self> {
         Self::new(sled::Config::new().temporary(true).open()?, package)
     }
 

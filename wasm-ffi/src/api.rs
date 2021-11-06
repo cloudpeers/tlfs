@@ -1,12 +1,9 @@
-use std::{cell::RefCell, future::Future, rc::Rc};
-
-use js_sys::{Array, Object, Promise, Proxy, Reflect};
+use js_sys::{Array, Object, Proxy, Reflect};
 use libp2p::Multiaddr;
 use log::*;
-use serde::Serialize;
-use tlfs::{Backend, Causal, Doc, Keypair, Sdk, ToLibp2pKeypair};
+use std::{cell::RefCell, rc::Rc};
+use tlfs::{Backend, Causal, Doc, Sdk, ToLibp2pKeypair};
 use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::future_to_promise;
 
 use crate::p2p::mk_transport;
 
@@ -22,17 +19,11 @@ pub fn start() {
 
 #[wasm_bindgen]
 pub struct LocalFirst {
-    //inner: SwarmWrapper,
     inner: Sdk,
 }
 
 #[wasm_bindgen]
 impl LocalFirst {
-    //    #[wasm_bindgen(js_name = "initWithKey")]
-    //    pub async fn new_with_key(private_key: String) -> Result<LocalFirst, JsValue> {
-    //        todo!();
-    //    }
-
     #[wasm_bindgen(js_name = "init")]
     pub async fn new() -> Result<LocalFirst, JsValue> {
         let signaling_server: Multiaddr = "/dns4/local1st.net/tcp/443/wss/p2p-webrtc-star"
@@ -45,30 +36,6 @@ impl LocalFirst {
             .map_err(map_err)
     }
 
-    //    #[wasm_bindgen(js_name = "doSomething")]
-    //    pub async fn do_something(self) -> Result<(), JsValue> {
-    //        Ok(())
-    //    }
-    //
-    //    #[wasm_bindgen(js_name = "doSomethingElse")]
-    //    pub fn do_something_else(&self) -> Promise {
-    //        todo!()
-    //    }
-    //
-    //    pub fn dial(&self, addr: String) -> Promise {
-    //        let mut inner = self.inner.clone();
-    //        let fut = async move {
-    //            inner.dial(addr.parse()?).await?;
-    //            Result::<_, anyhow::Error>::Ok(())
-    //        };
-    //        to_promise(fut)
-    //    }
-    //
-    //    pub fn info(&self) -> Promise {
-    //        let mut inner = self.inner.clone();
-    //        to_promise(async move { inner.info().await })
-    //    }
-
     async fn spawn(
         signaling_server: Multiaddr,
         bootstrap: Vec<Multiaddr>,
@@ -76,7 +43,7 @@ impl LocalFirst {
         package: &[u8],
     ) -> anyhow::Result<Self> {
         // TODO: bootstrap and discovery!
-        let backend = Backend::memory(package)?;
+        let backend = Backend::in_memory(package)?;
         let frontend = backend.frontend();
         let identity = frontend.default_keypair()?;
         let transport = mk_transport(identity.to_libp2p());
@@ -108,25 +75,57 @@ impl LocalFirst {
     }
 
     #[wasm_bindgen(js_name = "peerId")]
-    // TODO: type annotations
     pub fn peer_id(&self) -> String {
         self.inner.peer_id().to_string()
     }
 
     // TODO: type annotations
-    pub fn docs(&self) -> Result<js_sys::Array, JsValue> {
-        let docs = self
-            .inner
-            .docs()
-            .map(|x| x.map(|y| JsValue::from(y.to_string())))
-            .collect::<anyhow::Result<_>>()
-            .map_err(map_err)?;
-        Ok(docs)
+    pub fn docs(&self, schema: String) -> Result<js_sys::Array, JsValue> {
+        wrap(move || {
+            let docs = self
+                .inner
+                .docs(schema)
+                .map(|x| x.map(|y| JsValue::from(y.to_string())))
+                .collect::<anyhow::Result<_>>()?;
+            Ok(docs)
+        })
     }
 
+    #[wasm_bindgen(js_name = "createDoc")]
     pub fn create_doc(&mut self, schema: &str) -> Result<DocWrapper, JsValue> {
-        let inner = self.inner.create_doc(&schema).map_err(map_err)?;
-        Ok(DocWrapper { inner })
+        wrap(|| {
+            let inner = self.inner.create_doc(schema)?;
+            Ok(DocWrapper { inner })
+        })
+    }
+
+    #[wasm_bindgen(js_name = "openDoc")]
+    pub fn open_doc(&mut self, doc: String) -> Result<DocWrapper, JsValue> {
+        wrap(|| {
+            let doc = doc.parse()?;
+            let inner = self.inner.doc(doc)?;
+            Ok(DocWrapper { inner })
+        })
+    }
+
+    #[wasm_bindgen(js_name = "addAddress")]
+    pub fn add_address(&self, peer: String, addr: String) -> Result<(), JsValue> {
+        wrap(|| {
+            let peer = peer.parse()?;
+            let addr = addr.parse()?;
+            self.inner.add_address(peer, addr);
+            Ok(())
+        })
+    }
+
+    #[wasm_bindgen(js_name = "addAddress")]
+    pub fn remove_address(&self, peer: String, addr: String) -> Result<(), JsValue> {
+        wrap(|| {
+            let peer = peer.parse()?;
+            let addr = addr.parse()?;
+            self.inner.remove_address(peer, addr);
+            Ok(())
+        })
     }
 }
 
@@ -276,16 +275,10 @@ impl DocWrapper {
     }
 }
 
-fn to_promise(
-    fut: impl Future<Output = std::result::Result<impl Serialize, impl std::fmt::Display>> + 'static,
-) -> Promise {
-    future_to_promise(async move {
-        fut.await
-            .map(|e| JsValue::from_serde(&e).unwrap())
-            .map_err(map_err)
-    })
-}
-
 fn map_err(err: impl std::fmt::Display) -> JsValue {
     js_sys::Error::new(&format!("Error: {:#}", err)).into()
+}
+
+fn wrap<T>(f: impl FnOnce() -> anyhow::Result<T>) -> Result<T, JsValue> {
+    f().map_err(map_err)
 }
