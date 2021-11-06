@@ -36,12 +36,8 @@ pub struct Sdk {
 impl Sdk {
     /// Creates a new persistent [`Sdk`] instance.
     #[cfg(not(target_arch = "wasm32"))]
-    pub async fn persistent(db: &Path, package: &Path) -> Result<Self> {
-        let (sdk, driver) = Self::new(
-            sled::Config::new().path(db).open()?,
-            &std::fs::read(package)?,
-        )
-        .await?;
+    pub async fn persistent(db: &Path, package: &[u8]) -> Result<Self> {
+        let (sdk, driver) = Self::new(sled::Config::new().path(db).open()?, package).await?;
         async_global_executor::spawn::<_, ()>(driver).detach();
 
         Ok(sdk)
@@ -173,8 +169,8 @@ impl Sdk {
     }
 
     /// Returns an iterator of [`DocId`].
-    pub fn docs(&self) -> impl Iterator<Item = Result<DocId>> {
-        self.frontend.docs()
+    pub fn docs(&self, schema: String) -> impl Iterator<Item = Result<DocId>> {
+        self.frontend.docs_by_schema(schema)
     }
 
     /// Creates a new document with an initial [`Schema`].
@@ -291,7 +287,7 @@ mod tests {
         async_std::task::sleep(Duration::from_millis(100)).await;
         assert!(doc.cursor().can(sdk.peer_id(), Permission::Write)?);
 
-        let docs = sdk.docs().collect::<Result<Vec<_>>>()?;
+        let docs = sdk.docs("todoapp".into()).collect::<Result<Vec<_>>>()?;
         assert_eq!(docs.len(), 1);
         assert_eq!(docs[0], *doc.id());
 

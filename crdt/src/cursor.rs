@@ -203,6 +203,23 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    /// Returns the length of the array.
+    pub fn len(&mut self) -> Result<u32> {
+        if let ArchivedSchema::Array(_) = &self.schema {
+            self.path.prim_str(array_util::ARRAY_VALUES);
+            let res = self.count_path(self.path.as_path());
+            self.path.pop();
+            res
+        } else {
+            anyhow::bail!("not an Array<_>");
+        }
+    }
+
+    /// Returns if the array is empty.
+    pub fn is_empty(&mut self) -> Result<bool> {
+        Ok(self.len()? == 0)
+    }
+
     /// Returns a cursor to a field in a struct.
     pub fn field(&mut self, key: &str) -> Result<&mut Self> {
         if let ArchivedSchema::Struct(fields) = &self.schema {
@@ -216,6 +233,15 @@ impl<'a> Cursor<'a> {
         } else {
             Err(anyhow!("not a struct"))
         }
+    }
+
+    fn count_path(&self, path: Path) -> Result<u32> {
+        let mut i = 0;
+        for res in self.crdt.scan_path(path) {
+            res?;
+            i += 1;
+        }
+        Ok(i)
     }
 
     fn nonce(&self, path: &mut PathBuf) {

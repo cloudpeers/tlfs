@@ -7,6 +7,7 @@ fn main() {
         .with_language(Language::C)
         .with_include_guard("TLFS_H")
         .with_no_includes()
+        .with_include("stdbool.h")
         .with_include("stdint.h")
         .generate()
         .expect("Unable to generate bindings")

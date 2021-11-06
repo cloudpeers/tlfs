@@ -1,6 +1,7 @@
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 use anyhow::Result;
 use ffi_helpers::*;
+use std::mem::ManuallyDrop;
 use std::path::Path;
 use tlfs::{DocId, Multiaddr, PeerId, Permission};
 
@@ -34,6 +35,8 @@ fn check_path(ptr: *const u8, len: usize) -> Result<&'static Path> {
     Ok(Path::new(s))
 }
 
+type DynIter<T> = dyn Iterator<Item = Result<T>>;
+
 #[repr(C)]
 pub struct Sdk;
 
@@ -47,33 +50,41 @@ pub struct DocIter;
 pub struct Cursor;
 
 #[repr(C)]
+pub struct BoolIter;
+
+#[repr(C)]
+pub struct U64Iter;
+
+#[repr(C)]
+pub struct I64Iter;
+
+#[repr(C)]
+pub struct StrIter;
+
+#[repr(C)]
 pub struct Causal;
 
 #[no_mangle]
 pub extern "C" fn sdk_create_persistent(
     db_path_ptr: *const u8,
     db_path_len: usize,
-    package_path_ptr: *const u8,
-    package_path_len: usize,
+    package_ptr: *const u8,
+    package_len: usize,
 ) -> *mut Sdk {
     catch_panic(|| {
         let db_path = check_path(db_path_ptr, db_path_len)?;
-        let package_path = check_path(package_path_ptr, package_path_len)?;
-        let sdk = async_global_executor::block_on(tlfs::Sdk::persistent(db_path, package_path))?;
+        let package = check_slice(package_ptr, package_len)?;
+        let sdk = async_global_executor::block_on(tlfs::Sdk::persistent(db_path, package))?;
         Ok(Box::into_raw(Box::new(sdk)) as *mut _)
     })
     .unwrap_or_else(|_| std::ptr::null_mut())
 }
 
 #[no_mangle]
-pub extern "C" fn sdk_create_memory(
-    package_path_ptr: *const u8,
-    package_path_len: usize,
-) -> *mut Sdk {
+pub extern "C" fn sdk_create_memory(package_ptr: *const u8, package_len: usize) -> *mut Sdk {
     catch_panic(|| {
-        let package_path = check_path(package_path_ptr, package_path_len)?;
-        let package = std::fs::read(package_path)?;
-        let sdk = async_global_executor::block_on(tlfs::Sdk::memory(&package))?;
+        let package = check_slice(package_ptr, package_len)?;
+        let sdk = async_global_executor::block_on(tlfs::Sdk::memory(package))?;
         Ok(Box::into_raw(Box::new(sdk)) as *mut _)
     })
     .unwrap_or_else(|_| std::ptr::null_mut())
@@ -134,14 +145,16 @@ pub extern "C" fn sdk_remove_address(
 }
 
 // TODO: addresses
-
-type DynDocIter = dyn Iterator<Item = Result<DocId>>;
-
 #[no_mangle]
-pub extern "C" fn sdk_create_doc_iter(sdk: *mut Sdk) -> *mut DocIter {
+pub extern "C" fn sdk_create_doc_iter(
+    sdk: *mut Sdk,
+    schema: *const u8,
+    schema_len: usize,
+) -> *mut DocIter {
     catch_panic(move || {
         let sdk = unsafe { &mut *(sdk as *mut tlfs::Sdk) };
-        let iter = Box::new(Box::new(sdk.docs()) as Box<DynDocIter>);
+        let schema = check_str(schema, schema_len)?.to_string();
+        let iter = Box::new(Box::new(sdk.docs(schema)) as Box<DynIter<DocId>>);
         Ok(Box::into_raw(iter) as *mut _)
     })
     .unwrap_or_else(|_| std::ptr::null_mut())
@@ -150,7 +163,7 @@ pub extern "C" fn sdk_create_doc_iter(sdk: *mut Sdk) -> *mut DocIter {
 #[no_mangle]
 pub extern "C" fn doc_iter_next(iter: *mut DocIter, doc: *mut [u8; 32]) -> i32 {
     catch_panic(move || {
-        let iter = unsafe { &mut *(iter as *mut &mut DynDocIter) };
+        let iter = unsafe { &mut *(iter as *mut &mut DynIter<DocId>) };
         let doc = unsafe { &mut *doc };
         if let Some(res) = iter.next().transpose()? {
             doc.copy_from_slice(res.as_ref());
@@ -165,7 +178,7 @@ pub extern "C" fn doc_iter_next(iter: *mut DocIter, doc: *mut [u8; 32]) -> i32 {
 #[no_mangle]
 pub extern "C" fn doc_iter_destroy(iter: *mut DocIter) -> i32 {
     catch_panic(move || {
-        drop(unsafe { Box::from_raw(iter as *mut Box<DynDocIter>) });
+        drop(unsafe { Box::from_raw(iter as *mut Box<DynIter<DocId>>) });
         Ok(0)
     })
     .unwrap_or(-1)
@@ -263,6 +276,26 @@ pub extern "C" fn doc_destroy(doc: *mut Doc) -> i32 {
     .unwrap_or(-1)
 }
 
+#[no_mangle]
+pub extern "C" fn causal_join(causal: *mut Causal, other: *mut Causal) -> i32 {
+    catch_panic(move || {
+        let causal = unsafe { &mut *(causal as *mut tlfs::Causal) };
+        let other = unsafe { Box::from_raw(other as *mut tlfs::Causal) };
+        causal.join(&other);
+        Ok(0)
+    })
+    .unwrap_or(-1)
+}
+
+#[no_mangle]
+pub extern "C" fn cursor_clone(cursor: *mut Cursor) -> *mut Cursor {
+    catch_panic(move || {
+        let cursor = unsafe { &*(cursor as *const tlfs::Cursor) };
+        Ok(Box::into_raw(Box::new(cursor.clone())) as *mut _)
+    })
+    .unwrap_or_else(|_| std::ptr::null_mut())
+}
+
 // TODO: subscribe
 
 #[no_mangle]
@@ -294,7 +327,160 @@ pub extern "C" fn cursor_flag_disable(cursor: *mut Cursor) -> *mut Causal {
     .unwrap_or_else(|_| std::ptr::null_mut())
 }
 
-// TODO: bools, u64s, i64s, strs
+#[no_mangle]
+pub extern "C" fn cursor_reg_bools(cursor: *mut Cursor) -> *mut BoolIter {
+    catch_panic(move || {
+        let cursor = unsafe { &mut *(cursor as *mut tlfs::Cursor) };
+        let iter = Box::new(Box::new(cursor.bools()?) as Box<DynIter<bool>>);
+        Ok(Box::into_raw(iter) as *mut _)
+    })
+    .unwrap_or_else(|_| std::ptr::null_mut())
+}
+
+#[no_mangle]
+pub extern "C" fn bool_iter_next(iter: *mut BoolIter, value: *mut bool) -> i32 {
+    catch_panic(move || {
+        let iter = unsafe { &mut *(iter as *mut &mut Box<DynIter<bool>>) };
+        let value = unsafe { &mut *value };
+        if let Some(res) = iter.next().transpose()? {
+            *value = res;
+            Ok(1)
+        } else {
+            Ok(0)
+        }
+    })
+    .unwrap_or(-1)
+}
+
+#[no_mangle]
+pub extern "C" fn bool_iter_destroy(iter: *mut BoolIter) -> i32 {
+    catch_panic(move || {
+        drop(unsafe { Box::from_raw(iter as *mut Box<DynIter<bool>>) });
+        Ok(0)
+    })
+    .unwrap_or(-1)
+}
+
+#[no_mangle]
+pub extern "C" fn cursor_reg_u64s(cursor: *mut Cursor) -> *mut U64Iter {
+    catch_panic(move || {
+        let cursor = unsafe { &mut *(cursor as *mut tlfs::Cursor) };
+        let iter = Box::new(Box::new(cursor.u64s()?) as Box<DynIter<u64>>);
+        Ok(Box::into_raw(iter) as *mut _)
+    })
+    .unwrap_or_else(|_| std::ptr::null_mut())
+}
+
+#[no_mangle]
+pub extern "C" fn u64_iter_next(iter: *mut U64Iter, value: *mut u64) -> i32 {
+    catch_panic(move || {
+        let iter = unsafe { &mut *(iter as *mut &mut Box<DynIter<u64>>) };
+        let value = unsafe { &mut *value };
+        if let Some(res) = iter.next().transpose()? {
+            *value = res;
+            Ok(1)
+        } else {
+            Ok(0)
+        }
+    })
+    .unwrap_or(-1)
+}
+
+#[no_mangle]
+pub extern "C" fn u64_iter_destroy(iter: *mut U64Iter) -> i32 {
+    catch_panic(move || {
+        drop(unsafe { Box::from_raw(iter as *mut Box<DynIter<u64>>) });
+        Ok(0)
+    })
+    .unwrap_or(-1)
+}
+
+#[no_mangle]
+pub extern "C" fn cursor_reg_i64s(cursor: *mut Cursor) -> *mut I64Iter {
+    catch_panic(move || {
+        let cursor = unsafe { &mut *(cursor as *mut tlfs::Cursor) };
+        let iter = Box::new(Box::new(cursor.i64s()?) as Box<DynIter<i64>>);
+        Ok(Box::into_raw(iter) as *mut _)
+    })
+    .unwrap_or_else(|_| std::ptr::null_mut())
+}
+
+#[no_mangle]
+pub extern "C" fn i64_iter_next(iter: *mut I64Iter, value: *mut i64) -> i32 {
+    catch_panic(move || {
+        let iter = unsafe { &mut *(iter as *mut &mut Box<DynIter<i64>>) };
+        let value = unsafe { &mut *value };
+        if let Some(res) = iter.next().transpose()? {
+            *value = res;
+            Ok(1)
+        } else {
+            Ok(0)
+        }
+    })
+    .unwrap_or(-1)
+}
+
+#[no_mangle]
+pub extern "C" fn i64_iter_destroy(iter: *mut I64Iter) -> i32 {
+    catch_panic(move || {
+        drop(unsafe { Box::from_raw(iter as *mut Box<DynIter<i64>>) });
+        Ok(0)
+    })
+    .unwrap_or(-1)
+}
+
+#[no_mangle]
+pub extern "C" fn cursor_reg_strs(cursor: *mut Cursor) -> *mut StrIter {
+    catch_panic(move || {
+        let cursor = unsafe { &mut *(cursor as *mut tlfs::Cursor) };
+        let iter = Box::new(Box::new(cursor.strs()?) as Box<DynIter<String>>);
+        Ok(Box::into_raw(iter) as *mut _)
+    })
+    .unwrap_or_else(|_| std::ptr::null_mut())
+}
+
+#[repr(C)]
+pub struct Buffer {
+    pub data: *mut u8,
+    pub len: usize,
+    pub cap: usize,
+}
+
+#[no_mangle]
+pub extern "C" fn str_iter_next(iter: *mut StrIter, buffer: *mut Buffer) -> i32 {
+    catch_panic(move || {
+        let iter = unsafe { &mut *(iter as *mut &mut DynIter<String>) };
+        let buffer = unsafe { &mut *buffer };
+        if let Some(res) = iter.next().transpose()? {
+            let mut res = ManuallyDrop::new(res.into_bytes());
+            buffer.data = res.as_mut_ptr();
+            buffer.len = res.len();
+            buffer.cap = res.capacity();
+            Ok(1)
+        } else {
+            Ok(0)
+        }
+    })
+    .unwrap_or(-1)
+}
+
+#[no_mangle]
+pub extern "C" fn buffer_destroy(buf: Buffer) -> i32 {
+    catch_panic(move || {
+        unsafe { Vec::from_raw_parts(buf.data, buf.len, buf.cap) };
+        Ok(0)
+    })
+    .unwrap_or(-1)
+}
+
+#[no_mangle]
+pub extern "C" fn str_iter_destroy(iter: *mut StrIter) -> i32 {
+    catch_panic(move || {
+        drop(unsafe { Box::from_raw(iter as *mut Box<DynIter<String>>) });
+        Ok(0)
+    })
+    .unwrap_or(-1)
+}
 
 #[no_mangle]
 pub extern "C" fn cursor_reg_assign_bool(cursor: *mut Cursor, value: bool) -> *mut Causal {
@@ -412,6 +598,15 @@ pub extern "C" fn cursor_map_remove(cursor: *mut Cursor) -> *mut Causal {
 }
 
 #[no_mangle]
+pub extern "C" fn cursor_array_length(cursor: *mut Cursor) -> i64 {
+    catch_panic(move || {
+        let cursor = unsafe { &mut *(cursor as *mut tlfs::Cursor) };
+        Ok(cursor.len()? as _)
+    })
+    .unwrap_or(-1)
+}
+
+#[no_mangle]
 pub extern "C" fn cursor_array_index(cursor: *mut Cursor, index: u32) -> i32 {
     catch_panic(move || {
         let cursor = unsafe { &mut *(cursor as *mut tlfs::Cursor) };
@@ -468,6 +663,7 @@ mod tests {
     #[test]
     fn test_api() {
         let packages = "assets/capi/include/todoapp.tlfs.rkyv";
+        let packages = std::fs::read(packages).unwrap();
         let package_name = "todoapp";
         let sdk = sdk_create_memory(packages.as_ptr(), packages.len());
         assert!(!sdk.is_null());
@@ -486,7 +682,7 @@ mod tests {
         let doc2 = sdk_create_doc(sdk, package_name.as_ptr(), package_name.len());
         assert!(!doc2.is_null());
 
-        let iter = sdk_create_doc_iter(sdk);
+        let iter = sdk_create_doc_iter(sdk, package_name.as_ptr(), package_name.len());
         assert!(!iter.is_null());
 
         let mut len = 0;
@@ -514,20 +710,43 @@ mod tests {
         let ret = cursor_map_key_u64(cursor, 0);
         assert_eq!(ret, 0);
 
+        let cursor2 = cursor_clone(cursor);
+
         let field = "complete";
         let ret = cursor_struct_field(cursor, field.as_ptr(), field.len());
         assert_eq!(ret, 0);
 
+        // wait for acl to propagate.
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
         let causal = cursor_flag_enable(cursor);
         assert!(!causal.is_null());
 
+        let field = "title";
+        let ret = cursor_struct_field(cursor2, field.as_ptr(), field.len());
+        assert_eq!(ret, 0);
+        let title = "do something";
+        let causal2 = cursor_reg_assign_str(cursor2, title.as_ptr(), title.len());
+
+        let ret = causal_join(causal, causal2);
+        assert_eq!(ret, 0);
         let ret = doc_apply_causal(doc, causal);
         assert_eq!(ret, 0);
 
         let enabled = cursor_flag_enabled(cursor);
         assert_eq!(enabled, 1);
+        let iter = cursor_reg_strs(cursor2);
+        assert!(!iter.is_null());
+        let mut buf: Buffer = unsafe { std::mem::zeroed() };
+        let ret = str_iter_next(iter, &mut buf);
+        assert_eq!(ret, 1);
+        let s = check_str(buf.data, buf.len).unwrap();
+        println!("{}", s);
+        assert_eq!(buffer_destroy(buf), 0);
+        assert_eq!(str_iter_destroy(iter), 0);
 
         assert_eq!(cursor_destroy(cursor), 0);
+        assert_eq!(cursor_destroy(cursor2), 0);
 
         assert_eq!(doc_destroy(doc), 0);
         assert_eq!(doc_destroy(doc2), 0);
