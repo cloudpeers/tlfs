@@ -5,7 +5,7 @@ version = "0.1.0"
 edition = "2018"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["lib", "cdylib"]
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = "0.1.6"
@@ -41,7 +41,3 @@ wasm-bindgen-test = "0.3.28"
 
 [dependencies]
 tlfs = { path = ".." }
-#tlfs = { path = ".." }
-
-#[dependencies]
-#tlfs = { path = ".." }

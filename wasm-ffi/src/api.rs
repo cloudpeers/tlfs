@@ -118,7 +118,7 @@ impl LocalFirst {
         })
     }
 
-    #[wasm_bindgen(js_name = "addAddress")]
+    #[wasm_bindgen(js_name = "removeAddress")]
     pub fn remove_address(&self, peer: String, addr: String) -> Result<(), JsValue> {
         wrap(|| {
             let peer = peer.parse()?;
