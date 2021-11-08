@@ -69,7 +69,8 @@ impl ArchivedSchema {
     }
 
     fn _validate(&self, causal: &Causal) -> Option<bool> {
-        for path in causal.store.iter() {
+        for buf in causal.store.iter() {
+            let path = buf.as_path();
             let path = verify_sig(path)?;
             let (doc, path) = path.split_first()?;
             doc.doc()?;
@@ -79,6 +80,7 @@ impl ArchivedSchema {
             }
         }
         for path in causal.expired.iter() {
+            let path = path.as_path();
             let path = verify_sig(path)?;
             let path = verify_sig(path)?;
             let (doc, path) = path.split_first()?;

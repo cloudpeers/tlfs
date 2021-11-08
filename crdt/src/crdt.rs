@@ -7,8 +7,8 @@ use crate::subscriber::Subscriber;
 use anyhow::Result;
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Archived, Deserialize, Serialize};
-use std::collections::BTreeSet;
 use std::iter::FromIterator;
+use vec_collections::{AbstractRadixTree, AbstractRadixTreeMut, RadixTree};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
@@ -17,7 +17,7 @@ use std::iter::FromIterator;
     bound = "__C: rkyv::validation::ArchiveContext, <__C as rkyv::Fallible>::Error: std::error::Error"
 ))]
 #[repr(C)]
-pub struct DotStore(BTreeSet<PathBuf>);
+pub struct DotStore(RadixTree<u8, ()>);
 
 impl DotStore {
     pub fn new() -> Self {
@@ -30,24 +30,18 @@ impl DotStore {
 
     /// prefix the entire dot store with a path
     pub fn prefix(&self, path: Path) -> Self {
-        Self(
-            self.0
-                .iter()
-                .map(|p| {
-                    let mut path = path.to_owned();
-                    path.extend(p.as_path());
-                    path
-                })
-                .collect(),
-        )
+        let mut res = self.0.clone();
+        res.prepend(path.as_ref());
+        Self(res)
     }
 
     pub fn contains(&self, path: Path) -> bool {
-        self.0.contains(path.as_ref())
+        self.0.contains_key(path.as_ref())
     }
 
     pub fn contains_prefix(&self, prefix: Path) -> bool {
         for path in self.iter() {
+            let path = path.as_path();
             if prefix.is_ancestor(path) {
                 return true;
             }
@@ -56,23 +50,19 @@ impl DotStore {
     }
 
     pub fn insert(&mut self, path: PathBuf) {
-        self.0.insert(path);
+        self.0.union_with(&RadixTree::single(path.as_ref(), ()));
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = Path<'_>> + '_ {
-        self.0.iter().map(|path| path.as_path())
+    pub fn iter(&self) -> impl Iterator<Item = PathBuf> + '_ {
+        self.0.iter().map(|path| Path::new(&path.0).to_owned())
     }
 
     pub fn union(&mut self, other: &Self) {
-        for path in other.iter() {
-            self.insert(path.to_owned());
-        }
+        self.0.union_with(&other.0)
     }
 
     pub fn extend(&mut self, other: Self) {
-        for p in other.0.into_iter() {
-            self.insert(p);
-        }
+        self.0.union_with(&other.0)
     }
 }
 
@@ -165,10 +155,12 @@ impl Causal {
     /// Computes the [`CausalContext`] of this transaction.
     pub fn ctx(&self) -> CausalContext {
         let mut ctx = CausalContext::new();
-        for path in self.store.iter() {
+        for buf in self.store.iter() {
+            let path = buf.as_path();
             ctx.store.insert(path.dot());
         }
-        for path in self.expired.iter() {
+        for buf in self.expired.iter() {
+            let path = buf.as_path();
             let dot = path.parent().unwrap().parent().unwrap().dot();
             ctx.expired.insert(dot);
         }
@@ -180,25 +172,25 @@ impl Causal {
         self.store.union(&that.store);
         self.expired.union(&that.expired);
         let expired = &self.expired;
-        self.store
-            .0
-            .retain(|path| !expired.contains(path.as_path()));
+        self.store.0.difference_with(&expired.0);
     }
 
     /// Returns the difference of a transaction and a [`CausalContext`].
     pub fn unjoin(&self, ctx: &CausalContext) -> Self {
         let mut expired = DotStore::new();
-        for path in self.expired.iter() {
+        for buf in self.expired.iter() {
+            let path = buf.as_path();
             let dot = path.parent().unwrap().parent().unwrap().dot();
             if !ctx.expired.contains(&dot) {
-                expired.insert(path.to_owned());
+                expired.insert(buf);
             }
         }
         let mut store = DotStore::new();
-        for path in self.store.iter() {
+        for buf in self.store.iter() {
+            let path = buf.as_path();
             let dot = path.dot();
             if !ctx.store.contains(&dot) && !ctx.expired.contains(&dot) && !expired.contains(path) {
-                store.insert(path.to_owned());
+                store.insert(buf);
             }
         }
         Self { expired, store }
@@ -208,6 +200,7 @@ impl Causal {
     pub fn transform(&mut self, from: LensesRef, to: LensesRef) {
         let mut store = DotStore::new();
         for path in self.store.iter() {
+            let path = path.as_path();
             if let Some(path) = from.transform_path(path, to) {
                 store.insert(path);
             }
@@ -215,6 +208,7 @@ impl Causal {
         self.store = store;
         let mut expired = DotStore::new();
         for path in self.expired.iter() {
+            let path = path.as_path();
             if let Some(path) = from.transform_path(path, to) {
                 expired.insert(path);
             }
@@ -318,6 +312,7 @@ impl Crdt {
 
     pub fn join_policy(&self, causal: &Causal) -> Result<()> {
         for path in causal.store.iter() {
+            let path = path.as_path();
             if path
                 .parent()
                 .unwrap()
@@ -346,8 +341,8 @@ impl Crdt {
                 .next()
                 .transpose()?
                 .is_some();
-            if !is_expired && !causal.expired.contains_prefix(path) {
-                if !self.can(peer, Permission::Write, path)? {
+            if !is_expired && !causal.expired.contains_prefix(path.as_path()) {
+                if !self.can(peer, Permission::Write, path.as_path())? {
                     tracing::info!("join: peer is unauthorized to insert {}", path);
                     continue;
                 }
@@ -355,7 +350,7 @@ impl Crdt {
             }
         }
         for path in causal.expired.iter() {
-            let store_path = path.parent().unwrap().parent().unwrap();
+            let store_path = path.as_path().parent().unwrap().parent().unwrap();
             if !self.can(peer, Permission::Write, store_path)? {
                 tracing::info!("join: peer is unauthorized to remove {}", store_path);
                 continue;
@@ -466,6 +461,7 @@ mod tests {
     use crate::util::Ref;
     use crate::{props::*, Keypair};
     use proptest::prelude::*;
+    use std::collections::BTreeSet;
     use std::pin::Pin;
 
     #[async_std::test]
