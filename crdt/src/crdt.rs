@@ -165,8 +165,7 @@ impl Causal {
     pub fn join(&mut self, that: &Causal) {
         self.store.union(&that.store);
         self.expired.union(&that.expired);
-        let expired = &self.expired;
-        self.store.0.difference_with(&expired.0);
+        self.store.0.difference_with(&self.expired.0);
     }
 
     /// Returns the difference of a transaction and a [`CausalContext`].
@@ -193,16 +192,16 @@ impl Causal {
     /// Transforms a transaction so that it can be applied to a target document.
     pub fn transform(&mut self, from: LensesRef, to: LensesRef) {
         let mut store = DotStore::new();
-        for path in self.store.iter() {
-            let path = path.as_path();
+        for buf in self.store.iter() {
+            let path = buf.as_path();
             if let Some(path) = from.transform_path(path, to) {
                 store.insert(path);
             }
         }
         self.store = store;
         let mut expired = DotStore::new();
-        for path in self.expired.iter() {
-            let path = path.as_path();
+        for buf in self.expired.iter() {
+            let path = buf.as_path();
             if let Some(path) = from.transform_path(path, to) {
                 expired.insert(path);
             }
@@ -305,8 +304,8 @@ impl Crdt {
     }
 
     pub fn join_policy(&self, causal: &Causal) -> Result<()> {
-        for path in causal.store.iter() {
-            let path = path.as_path();
+        for buf in causal.store.iter() {
+            let path = buf.as_path();
             if path
                 .parent()
                 .unwrap()
@@ -328,23 +327,25 @@ impl Crdt {
     /// would be a little bit more complicated to ensure convergence in the presence of
     /// revocations.
     pub fn join(&self, peer: &PeerId, causal: &Causal) -> Result<()> {
-        for path in causal.store.iter() {
+        for buf in causal.store.iter() {
+            let path = buf.as_path();
             let is_expired = self
                 .expired
                 .scan_prefix(path.as_ref())
                 .next()
                 .transpose()?
                 .is_some();
-            if !is_expired && !causal.expired.contains_prefix(path.as_path()) {
-                if !self.can(peer, Permission::Write, path.as_path())? {
+            if !is_expired && !causal.expired.contains_prefix(path) {
+                if !self.can(peer, Permission::Write, path)? {
                     tracing::info!("join: peer is unauthorized to insert {}", path);
                     continue;
                 }
                 self.store.insert(&path, &[])?;
             }
         }
-        for path in causal.expired.iter() {
-            let store_path = path.as_path().parent().unwrap().parent().unwrap();
+        for buf in causal.expired.iter() {
+            let path = buf.as_path();
+            let store_path = path.parent().unwrap().parent().unwrap();
             if !self.can(peer, Permission::Write, store_path)? {
                 tracing::info!("join: peer is unauthorized to remove {}", store_path);
                 continue;
