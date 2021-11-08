@@ -40,13 +40,7 @@ impl DotStore {
     }
 
     pub fn contains_prefix(&self, prefix: Path) -> bool {
-        for path in self.iter() {
-            let path = path.as_path();
-            if prefix.is_ancestor(path) {
-                return true;
-            }
-        }
-        false
+        self.0.scan_prefix(prefix.as_ref()).next().is_some()
     }
 
     pub fn insert(&mut self, path: PathBuf) {
