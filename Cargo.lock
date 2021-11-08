@@ -1734,6 +1734,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "lazy-init"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23517540be87a91d06324e6bf6286ba8214171123ee8862ae9a5e7d938d71815"
+
+[[package]]
 name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3631,6 +3637,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "sorted-iter"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cbe9135ed5fd05813a47006636308dc34f5df43e6be5bf3f76744669248c2c8b"
+
+[[package]]
 name = "spin"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3956,6 +3968,7 @@ dependencies = [
  "tracing",
  "tracing-log",
  "tracing-subscriber",
+ "vec-collections",
 ]
 
 [[package]]
@@ -4397,6 +4410,21 @@ name = "vcpkg"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
+
+[[package]]
+name = "vec-collections"
+version = "0.3.6"
+source = "git+https://github.com/rklaehn/vec-collections?branch=radixdb#28103e28e3bad50f2085e4dc5306fe55901e3980"
+dependencies = [
+ "bytecheck",
+ "lazy-init",
+ "num-traits",
+ "parking_lot",
+ "rkyv",
+ "serde",
+ "smallvec",
+ "sorted-iter",
+]
 
 [[package]]
 name = "vec_map"
