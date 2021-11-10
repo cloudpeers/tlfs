@@ -247,7 +247,7 @@ impl Backend {
     pub fn new(db: sled::Db, package: &[u8]) -> Result<Self> {
         let registry = Registry::new(package)?;
         let docs = Docs::new(BlobMap::memory("docs")?);
-        let acl = Acl::new(db.open_tree("acl")?);
+        let acl = Acl::new(BlobMap::memory("acl")?);
         let crdt = Crdt::new(
             db.open_tree("store")?,
             BlobMap::memory("expired")?,

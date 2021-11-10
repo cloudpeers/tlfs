@@ -57,7 +57,13 @@ impl<K: TKey, V: TValue> Batch<K, V> {
         res.difference_with(&self.v1);
         res
     }
+    pub fn iter<'a>(&self) -> impl Iterator<Item = (IterKey<K>, Option<&'a V>)> + 'a {
+        let added = self.added().into_iter().map(|(k, v)| (k, Some(v)));
+        let removed = self.removed().into_iter().map(|(k, _)| (k, None));
+        added.chain(removed)
+    }
 }
+
 #[derive(Debug, Default)]
 pub struct SharedSerializeMap2 {
     /// mapping from the rc/arc to the position in the buffer
@@ -425,27 +431,6 @@ impl std::fmt::Debug for BlobMap {
     }
 }
 
-struct BlobMapIter<'a>(
-    Box<ArcRadixTree<u8, Arc<[u8]>>>,
-    vec_collections::Iter<'a, u8, Arc<[u8]>, ArcRadixTree<u8, Arc<[u8]>>>,
-);
-
-impl<'a> BlobMapIter<'a> {
-    fn new(value: ArcRadixTree<u8, Arc<[u8]>>) -> Self {
-        let b = Box::new(value);
-        let t: &'a ArcRadixTree<u8, Arc<[u8]>> = unsafe { std::mem::transmute(b.as_ref()) };
-        Self(b, t.iter())
-    }
-}
-
-impl<'a> Iterator for BlobMapIter<'a> {
-    type Item = (IterKey<u8>, &'a Arc<[u8]>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.1.next()
-    }
-}
-
 impl BlobMap {
     pub fn memory(name: &str) -> anyhow::Result<Self> {
         Ok(Self(Arc::new(Mutex::new(RadixDb::memory(name)?))))
@@ -474,13 +459,22 @@ impl BlobMap {
     }
 
     pub fn iter<'a>(&'a self) -> impl Iterator<Item = (IterKey<u8>, &'a Arc<[u8]>)> + '_ {
-        BlobMapIter::new(self.0.lock().tree().clone())
+        let tree = self.0.lock().tree().clone();
+        tree.into_iter()
     }
 
     pub fn scan_prefix<'a>(
         &'a self,
         prefix: impl AsRef<[u8]>,
     ) -> impl Iterator<Item = (IterKey<u8>, &'a Arc<[u8]>)> + '_ {
-        BlobMapIter::new(self.0.lock().tree().filter_prefix(prefix.as_ref()))
+        let tree = self.0.lock().tree().filter_prefix(prefix.as_ref());
+        tree.into_iter()
+    }
+
+    pub fn watch_prefix<'a>(
+        &'a self,
+        prefix: impl AsRef<[u8]>,
+    ) -> BoxStream<'static, Batch<u8, Arc<[u8]>>> {
+        self.0.lock().watch_prefix(prefix.as_ref().into())
     }
 }

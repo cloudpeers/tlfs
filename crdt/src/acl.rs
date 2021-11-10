@@ -1,12 +1,15 @@
 use crate::dotset::Dot;
 use crate::id::{DocId, PeerId};
 use crate::path::{Path, PathBuf};
+use crate::radixdb::{Batch, BlobMap};
 use crate::util::Ref;
 use anyhow::Result;
 use bytecheck::CheckBytes;
 use crepe::crepe;
+use futures::stream::BoxStream;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 /// Permission type.
 #[derive(
@@ -290,19 +293,19 @@ impl Rule {
 }
 
 #[derive(Clone)]
-pub struct Acl(sled::Tree);
+pub struct Acl(BlobMap);
 
 impl Acl {
-    pub fn new(tree: sled::Tree) -> Self {
+    pub fn new(tree: BlobMap) -> Self {
         Self(tree)
     }
 
     pub fn memory(name: &str) -> Result<Self> {
         let db = sled::Config::new().temporary(true).open()?;
-        Ok(Self(db.open_tree(name)?))
+        Ok(Self(BlobMap::memory(name)?))
     }
 
-    pub fn subscribe(&self, doc: &DocId) -> sled::Subscriber {
+    pub fn subscribe(&self, doc: &DocId) -> BoxStream<'static, Batch<u8, Arc<[u8]>>> {
         let mut path = PathBuf::new();
         path.doc(doc);
         self.0.watch_prefix(path)
@@ -325,9 +328,8 @@ impl Acl {
     }
 
     fn revoke_rules(&self, revoked: BTreeSet<Dot>) -> Result<()> {
-        for r in self.0.iter() {
-            let (k, v) = r?;
-            if revoked.contains(&Ref::<Rule>::new(v).as_ref().id) {
+        for (k, v) in self.0.iter() {
+            if revoked.contains(&Ref::<Rule>::new(v.as_ref().into()).as_ref().id) {
                 self.0.remove(k)?;
             }
         }
@@ -338,10 +340,9 @@ impl Acl {
         let mut prefix = PathBuf::new();
         prefix.doc(doc);
         prefix.peer(peer);
-        for r in self.0.scan_prefix(prefix) {
-            let (k, v) = r?;
+        for (k, v) in self.0.scan_prefix(prefix) {
             let p = Path::new(&k);
-            let rule = Ref::<Rule>::new(v);
+            let rule = Ref::<Rule>::new(v.as_ref().into());
             if p.child().unwrap().child().unwrap().is_ancestor(path) && rule.as_ref().perm >= perm {
                 return Ok(true);
             }
@@ -365,15 +366,14 @@ impl Acl {
     }
 }
 
-struct AclDebug<'a>(&'a sled::Tree);
+struct AclDebug<'a>(&'a BlobMap);
 
 impl<'a> std::fmt::Debug for AclDebug<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut m = f.debug_map();
-        for e in self.0.iter() {
-            let (k, v) = e.map_err(|_| std::fmt::Error::default())?;
+        for (k, v) in self.0.iter() {
             let path = Path::new(&k);
-            let rule = Ref::<Rule>::new(v);
+            let rule = Ref::<Rule>::new(v.as_ref().into());
             m.entry(&path, rule.as_ref());
         }
         m.finish()
