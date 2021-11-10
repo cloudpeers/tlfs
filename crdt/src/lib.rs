@@ -145,6 +145,7 @@ mod registry;
 mod schema;
 mod subscriber;
 mod util;
+mod radixdb;
 
 pub use crate::acl::{Actor, Permission, Policy};
 pub use crate::crdt::{Causal, CausalContext};

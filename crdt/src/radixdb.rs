@@ -31,8 +31,7 @@ use rkyv::{
     },
     AlignedVec, Archived, Deserialize, Fallible, Serialize,
 };
-use vec_collections::{AbstractRadixTreeMut, ArcRadixTree, TKey, TValue};
-use vec_collections::AbstractRadixTree;
+use vec_collections::{AbstractRadixTree, AbstractRadixTreeMut, ArcRadixTree, IterKey, TKey, TValue};
 
 pub struct Batch<K: TKey, V: TValue> {
     v0: ArcRadixTree<K, V>,
@@ -150,7 +149,7 @@ pub trait AbstractRadixDb<K: TKey, V: TValue> {
     }
 }
 
-pub trait Storage {
+pub trait Storage: Send + Sync + 'static {
     /// appends to a file. Should only return when the data is safely on disk (flushed)!
     /// appending will usually be done in large chunks.
     /// appending to a non existing file creates it.
@@ -404,49 +403,67 @@ where
     }
 }
 
-#[async_std::main]
-async fn main() -> anyhow::Result<()> {
-    let mut db = RadixDb::open(std::env::current_dir()?, "test")?;
-    let mut stream = db.watch_prefix("9".as_bytes().to_vec());
-    async_std::task::spawn(async move {
-        while let Some(x) = stream.next().await {
-            for (added, _) in x.added().iter() {
-                let text = std::str::from_utf8(&added).unwrap();
-                println!("added {}", text);
-            }
-            for (removed, _) in x.removed().iter() {
-                let text = std::str::from_utf8(&removed).unwrap();
-                println!("removed {}", text);
-            }
-        }
-    });
-    for i in 0..100 {
-        for j in 0..100 {
-            let key = format!("{}-{}", i, j);
-            db.tree_mut()
-                .union_with(&ArcRadixTree::single(key.as_bytes(), ()));
-        }
-        if i % 10 == 0 {
-            db.vacuum()?;
-        } else {
-            db.flush()?;
-        }
-        // db.flush()?;
-        println!("{} {}", i, db.pos);
+#[derive(Clone)]
+pub struct BlobSet(Arc<Mutex<RadixDb<u8, Arc<[u8]>>>>);
+
+struct BlobSetIter<'a>(
+    Box<ArcRadixTree<u8, Arc<[u8]>>>,
+    vec_collections::Iter<'a, u8, Arc<[u8]>, ArcRadixTree<u8, Arc<[u8]>>>
+);
+
+impl<'a> BlobSetIter<'a> {
+    fn new(value: &ArcRadixTree<u8, Arc<[u8]>>) -> Self {
+        let b = Box::new(value.clone());
+        let t: &'a ArcRadixTree<u8, Arc<[u8]>> = unsafe {
+            std::mem::transmute(b.as_ref())
+        };
+        Self(
+            b,
+            t.iter()
+        )
     }
-    db.flush()?;
-    println!("{}", db.pos);
-    println!("db");
-    for (k, v) in db.tree().iter() {
-        println!("{}", std::str::from_utf8(&k)?);
+}
+
+impl<'a> Iterator for BlobSetIter<'a> {
+    type Item = (IterKey<u8>, &'a Arc<[u8]>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        println!("next");
+        self.1.next()
     }
-    let mut db2: RadixDb<u8, ()> = RadixDb::load(db.storage().clone(), "test")?;
-    db2.vacuum()?;
-    println!("db2");
-    for (k, v) in db2.tree().iter() {
-        println!("{}", std::str::from_utf8(&k)?);
+}
+
+impl BlobSet {
+
+    pub fn memory(name: &str) -> anyhow::Result<Self> {
+        Ok(Self(Arc::new(Mutex::new(RadixDb::memory(name)?))))
     }
 
-    println!("{} {}", db.pos, db2.pos);
-    Ok(())
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item = (IterKey<u8>, &'a Arc<[u8]>)> + '_ {
+        println!("iter");
+        BlobSetIter::new(self.0.lock().tree())
+    }
+
+    pub fn insert(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> anyhow::Result<()> {
+        println!("ins {} {}", hex::encode(key.as_ref()), hex::encode(value.as_ref()));
+        let t = ArcRadixTree::single(key.as_ref(), value.as_ref().into());
+        self.0.lock().tree_mut().union_with(&t);
+        Ok(())
+    }
+
+    pub fn remove(&self, key: impl AsRef<[u8]>) -> anyhow::Result<()> {
+        println!("remove");
+        let t = ArcRadixTree::single(key.as_ref(), ());
+        self.0.lock().tree_mut().difference_with(&t);
+        Ok(())
+    }
+
+    pub fn get(&self, key: impl AsRef<[u8]>) -> anyhow::Result<Option<Arc<[u8]>>> {
+        println!("get {}", hex::encode(key.as_ref()));
+        let lock = self.0.lock();
+        let res = lock.tree().get(key.as_ref()).cloned();
+        println!("res {}", hex::encode(res.as_ref().map(|x| x.as_ref()).unwrap_or_default()));
+        Ok(res)
+    }
+    
 }

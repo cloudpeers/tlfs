@@ -3959,6 +3959,7 @@ dependencies = [
  "ed25519-dalek",
  "futures",
  "getrandom 0.2.3",
+ "hex",
  "log-panics",
  "parking_lot",
  "proptest",

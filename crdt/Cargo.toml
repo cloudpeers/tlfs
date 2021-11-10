@@ -12,6 +12,7 @@ crepe = "0.1.5"
 ed25519-dalek = "1.0.1"
 futures = "0.3.17"
 getrandom = "0.2.3"
+hex = "0.4.3"
 parking_lot = "0.11.2"
 rkyv = { version = "0.7.19", features = ["validation"] }
 sled = { git = "https://github.com/spacejam/sled" }
