@@ -569,7 +569,9 @@ mod tests {
         Pin::new(&mut sdk).await?;
         assert!(doc.cursor().can(&b, Write)?);
 
-        let op = doc.cursor().revoke(op.store.iter().next().unwrap().dot())?;
+        let op = doc
+            .cursor()
+            .revoke(op.store.iter().next().unwrap().as_path().dot())?;
         doc.apply(&op)?;
         Pin::new(&mut sdk).await?;
         assert!(!doc.cursor().can(&b, Write)?);
@@ -593,7 +595,7 @@ mod tests {
         let bdoc = sdk.frontend().doc_as(*doc.id(), &b)?;
         let op = bdoc
             .cursor()
-            .revoke(op.store.iter().next().unwrap().dot())?;
+            .revoke(op.store.iter().next().unwrap().as_path().dot())?;
         doc.apply(&op)?;
 
         assert!(doc.cursor().can(&a, Own)?);
