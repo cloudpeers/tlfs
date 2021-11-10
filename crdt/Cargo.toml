@@ -17,7 +17,7 @@ rkyv = { version = "0.7.19", features = ["validation"] }
 sled = { git = "https://github.com/spacejam/sled" }
 smallvec = "1.7.0"
 tracing = "0.1.29"
-vec-collections = { git = "https://github.com/rklaehn/vec-collections", branch = "radixdb" }
+vec-collections = { path = "../../../projects_git/vec-collections" }
 
 [dev-dependencies]
 async-std = { version = "1.10.0", features = ["attributes"] }

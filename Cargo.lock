@@ -4414,7 +4414,6 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 [[package]]
 name = "vec-collections"
 version = "0.3.6"
-source = "git+https://github.com/rklaehn/vec-collections?branch=radixdb#28103e28e3bad50f2085e4dc5306fe55901e3980"
 dependencies = [
  "bytecheck",
  "lazy-init",
