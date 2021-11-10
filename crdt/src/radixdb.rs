@@ -410,6 +410,9 @@ where
 }
 
 #[derive(Clone)]
+pub struct BlobSet(Arc<Mutex<RadixDb<u8, ()>>>);
+
+#[derive(Clone)]
 pub struct BlobMap(Arc<Mutex<RadixDb<u8, Arc<[u8]>>>>);
 
 impl std::fmt::Debug for BlobMap {
@@ -428,8 +431,8 @@ struct BlobMapIter<'a>(
 );
 
 impl<'a> BlobMapIter<'a> {
-    fn new(value: &ArcRadixTree<u8, Arc<[u8]>>) -> Self {
-        let b = Box::new(value.clone());
+    fn new(value: ArcRadixTree<u8, Arc<[u8]>>) -> Self {
+        let b = Box::new(value);
         let t: &'a ArcRadixTree<u8, Arc<[u8]>> = unsafe { std::mem::transmute(b.as_ref()) };
         Self(b, t.iter())
     }
@@ -446,10 +449,6 @@ impl<'a> Iterator for BlobMapIter<'a> {
 impl BlobMap {
     pub fn memory(name: &str) -> anyhow::Result<Self> {
         Ok(Self(Arc::new(Mutex::new(RadixDb::memory(name)?))))
-    }
-
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item = (IterKey<u8>, &'a Arc<[u8]>)> + '_ {
-        BlobMapIter::new(self.0.lock().tree())
     }
 
     pub fn insert(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> anyhow::Result<()> {
@@ -472,5 +471,16 @@ impl BlobMap {
         let lock = self.0.lock();
         let res = lock.tree().get(key.as_ref()).cloned();
         Ok(res)
+    }
+
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item = (IterKey<u8>, &'a Arc<[u8]>)> + '_ {
+        BlobMapIter::new(self.0.lock().tree().clone())
+    }
+
+    pub fn scan_prefix<'a>(
+        &'a self,
+        prefix: impl AsRef<[u8]>,
+    ) -> impl Iterator<Item = (IterKey<u8>, &'a Arc<[u8]>)> + '_ {
+        BlobMapIter::new(self.0.lock().tree().filter_prefix(prefix.as_ref()))
     }
 }

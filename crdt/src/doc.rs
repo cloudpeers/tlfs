@@ -250,7 +250,7 @@ impl Backend {
         let acl = Acl::new(db.open_tree("acl")?);
         let crdt = Crdt::new(
             db.open_tree("store")?,
-            db.open_tree("expired")?,
+            BlobMap::memory("expired")?,
             acl.clone(),
         );
         let engine = Engine::new(acl)?;

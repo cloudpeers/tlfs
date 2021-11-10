@@ -3,6 +3,7 @@ use crate::dotset::DotSet;
 use crate::id::{DocId, PeerId};
 use crate::lens::LensesRef;
 use crate::path::{Path, PathBuf};
+use crate::radixdb::{BlobMap, BlobSet};
 use crate::subscriber::Subscriber;
 use anyhow::Result;
 use bytecheck::CheckBytes;
@@ -213,7 +214,7 @@ impl Causal {
 #[derive(Clone)]
 pub struct Crdt {
     store: sled::Tree,
-    expired: sled::Tree,
+    expired: BlobMap,
     acl: Acl,
 }
 
@@ -241,13 +242,12 @@ impl<'a> std::fmt::Debug for StoreDebug<'a> {
     }
 }
 
-struct ExpiredDebug<'a>(&'a sled::Tree);
+struct ExpiredDebug<'a>(&'a BlobMap);
 
 impl<'a> std::fmt::Debug for ExpiredDebug<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut m = f.debug_map();
-        for e in self.0.iter().keys() {
-            let k = e.map_err(|_| std::fmt::Error::default())?;
+        for (k, v) in self.0.iter() {
             let path = Path::new(&k);
             m.entry(&path.parent().unwrap().parent().unwrap().dot(), &path);
         }
@@ -256,7 +256,7 @@ impl<'a> std::fmt::Debug for ExpiredDebug<'a> {
 }
 
 impl Crdt {
-    pub fn new(store: sled::Tree, expired: sled::Tree, acl: Acl) -> Self {
+    pub fn new(store: sled::Tree, expired: BlobMap, acl: Acl) -> Self {
         Self {
             store,
             expired,
@@ -295,8 +295,7 @@ impl Crdt {
             let dot = Path::new(&k).dot();
             ctx.store.insert(dot);
         }
-        for r in self.expired.scan_prefix(path.as_path()).keys() {
-            let k = r?;
+        for (k, v) in self.expired.scan_prefix(path.as_path()) {
             let dot = Path::new(&k).parent().unwrap().parent().unwrap().dot();
             ctx.expired.insert(dot);
         }
@@ -329,12 +328,7 @@ impl Crdt {
     pub fn join(&self, peer: &PeerId, causal: &Causal) -> Result<()> {
         for buf in causal.store.iter() {
             let path = buf.as_path();
-            let is_expired = self
-                .expired
-                .scan_prefix(path.as_ref())
-                .next()
-                .transpose()?
-                .is_some();
+            let is_expired = self.expired.scan_prefix(path.as_ref()).next().is_some();
             if !is_expired && !causal.expired.contains_prefix(path) {
                 if !self.can(peer, Permission::Write, path)? {
                     tracing::info!("join: peer is unauthorized to insert {}", path);
@@ -391,9 +385,8 @@ impl Crdt {
             }
         }
         let mut expired = DotStore::new();
-        for r in self.expired.scan_prefix(path.as_ref()).keys() {
-            let k = r?;
-            let path = Path::new(&k[..]);
+        for (k, v) in self.expired.scan_prefix(path.as_ref()) {
+            let path = Path::new(&k);
             let dot = path.parent().unwrap().parent().unwrap().dot();
             if !expired_dots.contains(&dot) {
                 continue;
@@ -416,8 +409,7 @@ impl Crdt {
             let k = r?;
             self.store.remove(k)?;
         }
-        for r in self.expired.scan_prefix(&path).keys() {
-            let k = r?;
+        for (k, v) in self.expired.scan_prefix(&path) {
             self.expired.remove(k)?;
         }
         Ok(())
