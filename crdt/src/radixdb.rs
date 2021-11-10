@@ -31,7 +31,9 @@ use rkyv::{
     },
     AlignedVec, Archived, Deserialize, Fallible, Serialize,
 };
-use vec_collections::{AbstractRadixTree, AbstractRadixTreeMut, ArcRadixTree, IterKey, TKey, TValue};
+use vec_collections::{
+    AbstractRadixTree, AbstractRadixTreeMut, ArcRadixTree, IterKey, TKey, TValue,
+};
 
 pub struct Batch<K: TKey, V: TValue> {
     v0: ArcRadixTree<K, V>,
@@ -237,7 +239,7 @@ impl Storage for FileStorage {
     }
 
     fn load(&self, file: &str, mut f: Box<dyn FnMut(&[u8]) + '_>) -> io::Result<()> {
-         match std::fs::read(self.base.join(file)) {
+        match std::fs::read(self.base.join(file)) {
             Ok(data) => f(&data),
             Err(e) if e.kind() == io::ErrorKind::NotFound => f(&[]),
             Err(e) => return Err(e),
@@ -302,19 +304,23 @@ impl<K: TKey, V: TValue> RadixDb<K, V> {
         let mut map = Default::default();
         let mut arcs = Default::default();
         let mut pos = Default::default();
-        storage.load(&name, Box::new(|data| {
-            if !data.is_empty() {
-                let mut deserializer = SharedDeserializeMap2::default();
-                let archived: &Archived<ArcRadixTree<K, V>> =
-                    unsafe { archived_root::<ArcRadixTree<K, V>>(data) };
-                tree = archived
-                    .deserialize(&mut deserializer)
-                    .map_err(|e| anyhow::anyhow!("Error while deserializing: {}", e)).unwrap();
-                map = deserializer.to_shared_serializer_map(&data[0] as *const u8);
-                tree.all_arcs(&mut arcs);
-                pos = data.len();
-            }
-        }))?;
+        storage.load(
+            &name,
+            Box::new(|data| {
+                if !data.is_empty() {
+                    let mut deserializer = SharedDeserializeMap2::default();
+                    let archived: &Archived<ArcRadixTree<K, V>> =
+                        unsafe { archived_root::<ArcRadixTree<K, V>>(data) };
+                    tree = archived
+                        .deserialize(&mut deserializer)
+                        .map_err(|e| anyhow::anyhow!("Error while deserializing: {}", e))
+                        .unwrap();
+                    map = deserializer.to_shared_serializer_map(&data[0] as *const u8);
+                    tree.all_arcs(&mut arcs);
+                    pos = data.len();
+                }
+            }),
+        )?;
         Ok(Self {
             tree,
             name,
@@ -404,66 +410,67 @@ where
 }
 
 #[derive(Clone)]
-pub struct BlobSet(Arc<Mutex<RadixDb<u8, Arc<[u8]>>>>);
+pub struct BlobMap(Arc<Mutex<RadixDb<u8, Arc<[u8]>>>>);
 
-struct BlobSetIter<'a>(
-    Box<ArcRadixTree<u8, Arc<[u8]>>>,
-    vec_collections::Iter<'a, u8, Arc<[u8]>, ArcRadixTree<u8, Arc<[u8]>>>
-);
-
-impl<'a> BlobSetIter<'a> {
-    fn new(value: &ArcRadixTree<u8, Arc<[u8]>>) -> Self {
-        let b = Box::new(value.clone());
-        let t: &'a ArcRadixTree<u8, Arc<[u8]>> = unsafe {
-            std::mem::transmute(b.as_ref())
-        };
-        Self(
-            b,
-            t.iter()
-        )
+impl std::fmt::Debug for BlobMap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut t = f.debug_map();
+        for (k, v) in self.0.lock().tree().iter() {
+            t.entry(&hex::encode(k), &hex::encode(v));
+        }
+        t.finish()
     }
 }
 
-impl<'a> Iterator for BlobSetIter<'a> {
+struct BlobMapIter<'a>(
+    Box<ArcRadixTree<u8, Arc<[u8]>>>,
+    vec_collections::Iter<'a, u8, Arc<[u8]>, ArcRadixTree<u8, Arc<[u8]>>>,
+);
+
+impl<'a> BlobMapIter<'a> {
+    fn new(value: &ArcRadixTree<u8, Arc<[u8]>>) -> Self {
+        let b = Box::new(value.clone());
+        let t: &'a ArcRadixTree<u8, Arc<[u8]>> = unsafe { std::mem::transmute(b.as_ref()) };
+        Self(b, t.iter())
+    }
+}
+
+impl<'a> Iterator for BlobMapIter<'a> {
     type Item = (IterKey<u8>, &'a Arc<[u8]>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        println!("next");
         self.1.next()
     }
 }
 
-impl BlobSet {
-
+impl BlobMap {
     pub fn memory(name: &str) -> anyhow::Result<Self> {
         Ok(Self(Arc::new(Mutex::new(RadixDb::memory(name)?))))
     }
 
     pub fn iter<'a>(&'a self) -> impl Iterator<Item = (IterKey<u8>, &'a Arc<[u8]>)> + '_ {
-        println!("iter");
-        BlobSetIter::new(self.0.lock().tree())
+        BlobMapIter::new(self.0.lock().tree())
     }
 
     pub fn insert(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> anyhow::Result<()> {
-        println!("ins {} {}", hex::encode(key.as_ref()), hex::encode(value.as_ref()));
         let t = ArcRadixTree::single(key.as_ref(), value.as_ref().into());
-        self.0.lock().tree_mut().union_with(&t);
+        // right biased union
+        self.0.lock().tree_mut().outer_combine_with(&t, |a, b| {
+            *a = b.clone();
+            true
+        });
         Ok(())
     }
 
     pub fn remove(&self, key: impl AsRef<[u8]>) -> anyhow::Result<()> {
-        println!("remove");
         let t = ArcRadixTree::single(key.as_ref(), ());
         self.0.lock().tree_mut().difference_with(&t);
         Ok(())
     }
 
     pub fn get(&self, key: impl AsRef<[u8]>) -> anyhow::Result<Option<Arc<[u8]>>> {
-        println!("get {}", hex::encode(key.as_ref()));
         let lock = self.0.lock();
         let res = lock.tree().get(key.as_ref()).cloned();
-        println!("res {}", hex::encode(res.as_ref().map(|x| x.as_ref()).unwrap_or_default()));
         Ok(res)
     }
-    
 }

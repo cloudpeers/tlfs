@@ -31,8 +31,8 @@ use rkyv::{
     },
     AlignedVec, Archived, Deserialize, Fallible, Serialize,
 };
-use vec_collections::{AbstractRadixTreeMut, ArcRadixTree, TKey, TValue};
 use vec_collections::AbstractRadixTree;
+use vec_collections::{AbstractRadixTreeMut, ArcRadixTree, TKey, TValue};
 
 pub struct Batch<K: TKey, V: TValue> {
     v0: ArcRadixTree<K, V>,
@@ -238,7 +238,7 @@ impl Storage for FileStorage {
     }
 
     fn load(&self, file: &str, mut f: Box<dyn FnMut(&[u8]) + '_>) -> io::Result<()> {
-         match std::fs::read(self.base.join(file)) {
+        match std::fs::read(self.base.join(file)) {
             Ok(data) => f(&data),
             Err(e) if e.kind() == io::ErrorKind::NotFound => f(&[]),
             Err(e) => return Err(e),
@@ -303,19 +303,23 @@ impl<K: TKey, V: TValue> RadixDb<K, V> {
         let mut map = Default::default();
         let mut arcs = Default::default();
         let mut pos = Default::default();
-        storage.load(&name, Box::new(|data| {
-            if !data.is_empty() {
-                let mut deserializer = SharedDeserializeMap2::default();
-                let archived: &Archived<ArcRadixTree<K, V>> =
-                    unsafe { archived_root::<ArcRadixTree<K, V>>(data) };
-                tree = archived
-                    .deserialize(&mut deserializer)
-                    .map_err(|e| anyhow::anyhow!("Error while deserializing: {}", e)).unwrap();
-                map = deserializer.to_shared_serializer_map(&data[0] as *const u8);
-                tree.all_arcs(&mut arcs);
-                pos = data.len();
-            }
-        }))?;
+        storage.load(
+            &name,
+            Box::new(|data| {
+                if !data.is_empty() {
+                    let mut deserializer = SharedDeserializeMap2::default();
+                    let archived: &Archived<ArcRadixTree<K, V>> =
+                        unsafe { archived_root::<ArcRadixTree<K, V>>(data) };
+                    tree = archived
+                        .deserialize(&mut deserializer)
+                        .map_err(|e| anyhow::anyhow!("Error while deserializing: {}", e))
+                        .unwrap();
+                    map = deserializer.to_shared_serializer_map(&data[0] as *const u8);
+                    tree.all_arcs(&mut arcs);
+                    pos = data.len();
+                }
+            }),
+        )?;
         Ok(Self {
             tree,
             name,

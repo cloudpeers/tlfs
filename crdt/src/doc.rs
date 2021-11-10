@@ -5,6 +5,7 @@ use crate::cursor::Cursor;
 use crate::id::{DocId, PeerId};
 use crate::lens::LensesRef;
 use crate::path::Path;
+use crate::radixdb::BlobMap;
 use crate::registry::{Expanded, Hash, Registry};
 use crate::util::Ref;
 use anyhow::{anyhow, Result};
@@ -50,26 +51,30 @@ impl ArchivedSchemaInfo {
 }
 
 #[derive(Clone)]
-struct Docs(sled::Tree);
+struct Docs(BlobMap);
 
 impl Docs {
-    pub fn new(tree: sled::Tree) -> Self {
+    pub fn new(tree: BlobMap) -> Self {
         Self(tree)
     }
 
-    pub fn docs(&self) -> impl Iterator<Item = Result<DocId>> {
-        self.0.iter().keys().filter_map(|r| match r {
-            Ok(k) if k[32] == 1 => Some(Ok(DocId::new((&k[..32]).try_into().unwrap()))),
-            Ok(_) => None,
-            Err(err) => Some(Err(err.into())),
+    pub fn docs(&self) -> impl Iterator<Item = Result<DocId>> + '_ {
+        self.0.iter().filter_map(|(k, _)| {
+            if k[32] == 1 {
+                Some(Ok(DocId::new((&k[..32]).try_into().unwrap())))
+            } else {
+                None
+            }
         })
     }
 
-    pub fn keys(&self) -> impl Iterator<Item = Result<PeerId>> {
-        self.0.iter().keys().filter_map(|r| match r {
-            Ok(k) if k[32] == 2 => Some(Ok(PeerId::new((&k[..32]).try_into().unwrap()))),
-            Ok(_) => None,
-            Err(err) => Some(Err(err.into())),
+    pub fn keys(&self) -> impl Iterator<Item = Result<PeerId>> + '_ {
+        self.0.iter().filter_map(|(k, _)| {
+            if k[32] == 2 {
+                Some(Ok(PeerId::new((&k[..32]).try_into().unwrap())))
+            } else {
+                None
+            }
         })
     }
 
@@ -83,7 +88,7 @@ impl Docs {
         Ok(())
     }
 
-    pub fn docs_by_schema(&self, schema: String) -> impl Iterator<Item = Result<DocId>> {
+    pub fn docs_by_schema(&self, schema: String) -> impl Iterator<Item = Result<DocId>> + '_ {
         let docs = self.clone();
         self.docs()
             .map(move |res| {
@@ -103,7 +108,8 @@ impl Docs {
         key[..32].copy_from_slice(id.as_ref());
         key[32] = 0;
         let schema = self.0.get(key)?.unwrap();
-        Ok(Ref::new(schema))
+        // TODO: get rid of creation of IVec
+        Ok(Ref::new(schema.as_ref().into()))
     }
 
     pub fn set_schema(&self, id: &DocId, schema: &SchemaInfo) -> Result<()> {
@@ -240,7 +246,7 @@ impl Backend {
     /// Creates a new [`Backend`] from a [`sled::Db`].
     pub fn new(db: sled::Db, package: &[u8]) -> Result<Self> {
         let registry = Registry::new(package)?;
-        let docs = Docs::new(db.open_tree("docs")?);
+        let docs = Docs::new(BlobMap::memory("docs")?);
         let acl = Acl::new(db.open_tree("acl")?);
         let crdt = Crdt::new(
             db.open_tree("store")?,
@@ -416,12 +422,12 @@ impl Frontend {
     }
 
     /// Returns an iterator of [`DocId`].
-    pub fn docs(&self) -> impl Iterator<Item = Result<DocId>> {
+    pub fn docs(&self) -> impl Iterator<Item = Result<DocId>> + '_ {
         self.docs.docs()
     }
 
     /// Returns an iterator of [`DocId`].
-    pub fn docs_by_schema(&self, schema: String) -> impl Iterator<Item = Result<DocId>> {
+    pub fn docs_by_schema(&self, schema: String) -> impl Iterator<Item = Result<DocId>> + '_ {
         self.docs.docs_by_schema(schema)
     }
 
