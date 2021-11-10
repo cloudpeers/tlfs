@@ -1,8 +1,10 @@
-import React from 'react';
-import logo from './logo.svg';
-import './App.css';
+import React from 'react'
+import logo from './logo.svg'
+import './App.css'
+import { Route, Router } from 'react-router'
+import { Routes } from 'react-router-dom'
 
-function App() {
+const App = () => {
   return (
     <div className="App">
       <header className="App-header">
@@ -20,7 +22,11 @@ function App() {
         </a>
       </header>
     </div>
-  );
+  )
 }
 
-export default App;
+const AppRoutes = () => (<Routes>
+  <Route path = "shopping"><div>Shopping List</div></Route>
+</Routes>)
+
+export default App
