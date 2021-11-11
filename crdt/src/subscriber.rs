@@ -3,7 +3,7 @@ use crate::id::PeerId;
 use crate::path::Path;
 use crate::PathBuf;
 use futures::stream::BoxStream;
-use futures::{Future, Stream};
+use futures::Stream;
 use rkyv::archived_root;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -23,6 +23,7 @@ pub enum Event {
     Revoked(PathBuf, Option<PeerId>),
 }
 
+#[allow(clippy::type_complexity)]
 enum InnerIter<'a> {
     State(Box<dyn Iterator<Item = (IterKey<u8>, Option<&'a ()>)> + 'a>),
     Acl(Box<dyn Iterator<Item = (IterKey<u8>, Option<&'a Arc<[u8]>>)> + 'a>),

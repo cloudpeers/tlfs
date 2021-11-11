@@ -15,20 +15,16 @@ use futures::{
 use parking_lot::Mutex;
 use rkyv::{
     archived_root,
-    de::{
-        deserializers::{SharedDeserializeMap, SharedDeserializeMapError},
-        SharedDeserializeRegistry, SharedPointer,
-    },
-    ser::{
-        serializers::{
-            AlignedSerializer, AllocSerializer, CompositeSerializer, SharedSerializeMapError,
-            WriteSerializer,
-        },
-        SharedSerializeRegistry,
-    },
+    de::{deserializers::SharedDeserializeMapError, SharedDeserializeRegistry, SharedPointer},
     ser::{
         serializers::{AllocScratch, FallbackScratch, HeapScratch},
         Serializer,
+    },
+    ser::{
+        serializers::{
+            AllocSerializer, CompositeSerializer, SharedSerializeMapError, WriteSerializer,
+        },
+        SharedSerializeRegistry,
     },
     AlignedVec, Archive, Archived, Deserialize, Fallible, Serialize,
 };
@@ -166,6 +162,9 @@ pub trait AbstractRadixDb<K: TKey, V: TValue> {
     }
 }
 
+/// Trait for radixdb storage
+///
+/// basically supports append and rename
 pub trait Storage: Send + Sync + 'static {
     /// appends to a file. Should only return when the data is safely on disk (flushed)!
     /// appending will usually be done in large chunks.
@@ -182,6 +181,7 @@ pub trait Storage: Send + Sync + 'static {
     fn mv(&self, from: &str, to: &str) -> io::Result<()>;
 }
 
+/// A memory based storage implementation.
 #[derive(Default, Clone)]
 pub struct MemStorage {
     data: Arc<Mutex<BTreeMap<String, AlignedVec>>>,
@@ -204,7 +204,7 @@ impl Storage for MemStorage {
     fn load(&self, file: &str, mut f: Box<dyn FnMut(&[u8]) + '_>) -> std::io::Result<()> {
         let data = self.data.lock();
         if let Some(vec) = data.get(file) {
-            f(&vec)
+            f(vec)
         } else {
             f(&[])
         };
@@ -228,12 +228,14 @@ impl Storage for MemStorage {
     }
 }
 
+/// Very basic file based storage
 #[derive(Default, Clone)]
 pub struct FileStorage {
     base: PathBuf,
 }
 
 impl FileStorage {
+    /// creates a new file storage in the given base directory
     pub fn new(base: impl AsRef<std::path::Path>) -> Self {
         Self {
             base: base.as_ref().to_path_buf(),
@@ -278,6 +280,7 @@ impl Storage for FileStorage {
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct RadixDb<K: TKey, V: TValue> {
     storage: Arc<dyn Storage>,
     name: String,
@@ -290,25 +293,7 @@ pub struct RadixDb<K: TKey, V: TValue> {
     watchers: Vec<UnboundedSender<ArcRadixTree<K, V>>>,
 }
 
-impl<K: TKey, V: TValue> RadixDb<K, V>
-where
-    Archived<K>: Deserialize<K, SharedDeserializeMap2>,
-    Archived<V>: Deserialize<V, SharedDeserializeMap2>,
-{
-    fn memory(name: impl Into<String>) -> anyhow::Result<Self> {
-        RadixDb::load(Arc::new(MemStorage::default()), name)
-    }
-
-    fn open(base: impl AsRef<std::path::Path>, name: impl Into<String>) -> anyhow::Result<Self> {
-        RadixDb::load(Arc::new(FileStorage::new(base)), name)
-    }
-}
-
 impl<K: TKey, V: TValue> RadixDb<K, V> {
-    pub fn storage(&self) -> &Arc<dyn Storage> {
-        &self.storage
-    }
-
     pub fn load(storage: Arc<dyn Storage>, name: impl Into<String>) -> anyhow::Result<Self>
     where
         Archived<K>: Deserialize<K, SharedDeserializeMap2>,
@@ -424,6 +409,7 @@ where
     }
 }
 
+/// A set of blobs, backed by a radix tree
 #[derive(Clone)]
 pub struct BlobSet(Arc<Mutex<RadixDb<u8, ()>>>);
 
@@ -476,6 +462,7 @@ impl BlobSet {
     }
 }
 
+/// A map with blob keys and values, backed by a radix tree
 #[derive(Clone)]
 pub struct BlobMap(Arc<Mutex<RadixDb<u8, Arc<[u8]>>>>);
 

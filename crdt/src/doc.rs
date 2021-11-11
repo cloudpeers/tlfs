@@ -5,7 +5,7 @@ use crate::cursor::Cursor;
 use crate::id::{DocId, PeerId};
 use crate::lens::LensesRef;
 use crate::path::Path;
-use crate::radixdb::{BlobMap, BlobSet, MemStorage, Storage};
+use crate::radixdb::{BlobMap, BlobSet, Storage};
 use crate::registry::{Expanded, Hash, Registry};
 use crate::util::Ref;
 use anyhow::{anyhow, Result};
@@ -108,7 +108,7 @@ impl Docs {
         key[..32].copy_from_slice(id.as_ref());
         key[32] = 0;
         let schema = self.0.get(key)?.unwrap();
-        Ok(Ref::new(schema.clone()))
+        Ok(Ref::new(schema))
     }
 
     pub fn set_schema(&self, id: &DocId, schema: &SchemaInfo) -> Result<()> {
@@ -288,6 +288,8 @@ impl Backend {
     pub fn memory(packages: &Vec<crate::registry::Package>) -> Result<Self> {
         use tracing_subscriber::fmt::format::FmtSpan;
         use tracing_subscriber::EnvFilter;
+
+        use crate::MemStorage;
         tracing_log::LogTracer::init().ok();
         let env = std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or_else(|_| "info".to_owned());
         let subscriber = tracing_subscriber::FmtSubscriber::builder()

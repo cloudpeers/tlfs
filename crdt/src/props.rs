@@ -5,7 +5,7 @@ use crate::crdt::{Causal, CausalContext, Crdt, DotStore};
 use crate::id::{DocId, PeerId};
 use crate::lens::{Kind, Lens};
 use crate::path::PathBuf;
-use crate::radixdb::{BlobMap, BlobSet, MemStorage, Storage};
+use crate::radixdb::{BlobMap, BlobSet, MemStorage};
 use crate::schema::{PrimitiveKind, Schema};
 use crate::util::Ref;
 use proptest::collection::SizeRange;

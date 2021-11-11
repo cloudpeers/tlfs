@@ -310,7 +310,7 @@ impl Crdt {
                 .policy()
                 .is_some()
             {
-                self.store.insert(path.to_owned());
+                self.store.insert(path);
             }
         }
         Ok(())

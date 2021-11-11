@@ -56,7 +56,7 @@ impl<'a> Cursor<'a> {
             Ok(self
                 .crdt
                 .scan_path(self.path.as_path())
-                .find_map(|k| Some(Path::new(&k).parent()?.parent()?.last()?.nonce()?))
+                .find_map(|k| Path::new(&k).parent()?.parent()?.last()?.nonce())
                 .is_some())
         } else {
             Err(anyhow!("not a flag"))
@@ -215,7 +215,7 @@ impl<'a> Cursor<'a> {
 
     fn count_path(&self, path: Path) -> Result<u32> {
         let mut i = 0;
-        for res in self.crdt.scan_path(path) {
+        for _ in self.crdt.scan_path(path) {
             i += 1;
         }
         Ok(i)
