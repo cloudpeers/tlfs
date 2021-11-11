@@ -319,10 +319,8 @@ impl Acl {
         prefix.doc(&path.first().unwrap().doc().unwrap());
         prefix.peer(&peer);
         prefix.extend(path.child().unwrap());
-        self.0.insert(
-            prefix.as_path(),
-            Ref::archive(&Rule::new(id, perm)).as_bytes(),
-        )?;
+        self.0
+            .insert_archived(prefix.as_path(), &Rule::new(id, perm))?;
         Ok(())
     }
 

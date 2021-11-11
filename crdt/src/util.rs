@@ -61,6 +61,11 @@ impl<T: Archive> Ref<T> {
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes
     }
+
+    /// Returns the serialized byte slice.
+    pub fn as_arc(&self) -> &Arc<[u8]> {
+        &self.bytes
+    }
 }
 
 impl<T: Archive> AsRef<Archived<T>> for Ref<T> {

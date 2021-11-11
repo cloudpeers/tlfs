@@ -108,7 +108,6 @@ impl Docs {
         key[..32].copy_from_slice(id.as_ref());
         key[32] = 0;
         let schema = self.0.get(key)?.unwrap();
-        // TODO: get rid of creation of IVec
         Ok(Ref::new(schema.clone()))
     }
 
@@ -116,7 +115,7 @@ impl Docs {
         let mut key = [0; 33];
         key[..32].copy_from_slice(id.as_ref());
         key[32] = 0;
-        self.0.insert(key, Ref::archive(schema).as_bytes())?;
+        self.0.insert_archived(key, schema)?;
         Ok(())
     }
 

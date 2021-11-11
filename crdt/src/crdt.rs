@@ -286,11 +286,11 @@ impl Crdt {
         let mut ctx = CausalContext::new();
         let mut path = PathBuf::new();
         path.doc(doc);
-        for (k, _) in self.store.scan_prefix(path.as_path()) {
+        for k in self.store.scan_prefix_keys(&path) {
             let dot = Path::new(&k).dot();
             ctx.store.insert(dot);
         }
-        for (k, v) in self.expired.scan_prefix(path.as_path()) {
+        for k in self.expired.scan_prefix_keys(&path) {
             let dot = Path::new(&k).parent().unwrap().parent().unwrap().dot();
             ctx.expired.insert(dot);
         }
@@ -310,7 +310,7 @@ impl Crdt {
                 .policy()
                 .is_some()
             {
-                self.store.insert(path.to_owned(), &[])?;
+                self.store.insert_empty(path.to_owned())?;
             }
         }
         Ok(())
@@ -323,13 +323,17 @@ impl Crdt {
     pub fn join(&self, peer: &PeerId, causal: &Causal) -> Result<()> {
         for buf in causal.store.iter() {
             let path = buf.as_path();
-            let is_expired = self.expired.scan_prefix(path.as_ref()).next().is_some();
+            let is_expired = self
+                .expired
+                .scan_prefix_keys(path.as_ref())
+                .next()
+                .is_some();
             if !is_expired && !causal.expired.contains_prefix(path) {
                 if !self.can(peer, Permission::Write, path)? {
                     tracing::info!("join: peer is unauthorized to insert {}", path);
                     continue;
                 }
-                self.store.insert(&path, &[])?;
+                self.store.insert_empty(&path)?;
             }
         }
         for buf in causal.expired.iter() {
@@ -342,7 +346,7 @@ impl Crdt {
             if self.store.contains_key(store_path)? {
                 self.store.remove(store_path)?;
             }
-            self.expired.insert(&path, &[])?;
+            self.expired.insert_empty(&path)?;
         }
         Ok(())
     }
@@ -364,7 +368,7 @@ impl Crdt {
             .difference(&other.expired);
 
         let mut store = DotStore::new();
-        for (k, _) in self.store.scan_prefix(path.as_ref()) {
+        for k in self.store.scan_prefix_keys(&path) {
             let path = Path::new(&k[..]);
             let dot = path.dot();
             if !store_dots.contains(&dot) {
@@ -379,7 +383,7 @@ impl Crdt {
             }
         }
         let mut expired = DotStore::new();
-        for (k, v) in self.expired.scan_prefix(path.as_ref()) {
+        for k in self.expired.scan_prefix_keys(&path) {
             let path = Path::new(&k);
             let dot = path.parent().unwrap().parent().unwrap().dot();
             if !expired_dots.contains(&dot) {
@@ -399,10 +403,10 @@ impl Crdt {
     pub fn remove(&self, doc: &DocId) -> Result<()> {
         let mut path = PathBuf::new();
         path.doc(doc);
-        for (k, _) in self.store.scan_prefix(&path) {
+        for k in self.store.scan_prefix_keys(&path) {
             self.store.remove(k)?;
         }
-        for (k, v) in self.expired.scan_prefix(&path) {
+        for k in self.expired.scan_prefix_keys(&path) {
             self.expired.remove(k)?;
         }
         Ok(())
@@ -414,14 +418,14 @@ impl Crdt {
         for k in self.scan_path(path.as_path()) {
             let path = Path::new(&k);
             if let Some(path) = from.transform_path(path, to) {
-                self.store.insert(path, &[])?;
+                self.store.insert_empty(path)?;
             }
             self.store.remove(k)?;
         }
         for k in self.scan_path(path.as_path()) {
             let path = Path::new(&k);
             if let Some(path) = from.transform_path(path, to) {
-                self.expired.insert(path, &[])?;
+                self.expired.insert_empty(path)?;
             }
             self.expired.remove(k)?;
         }
