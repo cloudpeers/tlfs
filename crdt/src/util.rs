@@ -5,6 +5,7 @@ use rkyv::ser::Serializer;
 use rkyv::validation::validators::DefaultValidator;
 use rkyv::{archived_root, check_archived_root, Archive, Archived, Deserialize, Serialize};
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 fn archive<T>(t: &T) -> Vec<u8>
 where
@@ -19,12 +20,12 @@ where
 #[derive(Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Ref<T> {
     marker: PhantomData<T>,
-    bytes: sled::IVec,
+    bytes: Arc<[u8]>,
 }
 
 impl<T: Archive> Ref<T> {
-    /// Creates a new [`Ref`] from a [`sled::IVec`]
-    pub fn new(bytes: sled::IVec) -> Self {
+    /// Creates a new [`Ref`] from a [`Arc`]
+    pub fn new(bytes: Arc<[u8]>) -> Self {
         Self {
             marker: PhantomData,
             bytes,
@@ -68,7 +69,7 @@ impl<T: Archive> AsRef<Archived<T>> for Ref<T> {
     }
 }
 
-impl<T> From<Ref<T>> for sled::IVec {
+impl<T> From<Ref<T>> for Arc<[u8]> {
     fn from(r: Ref<T>) -> Self {
         r.bytes
     }

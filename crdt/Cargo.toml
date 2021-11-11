@@ -15,7 +15,6 @@ getrandom = "0.2.3"
 hex = "0.4.3"
 parking_lot = "0.11.2"
 rkyv = { version = "0.7.19", features = ["validation"] }
-sled = { git = "https://github.com/spacejam/sled" }
 smallvec = "1.7.0"
 tracing = "0.1.29"
 vec-collections = { git = "https://github.com/rklaehn/vec-collections", branch = "radixdb" }

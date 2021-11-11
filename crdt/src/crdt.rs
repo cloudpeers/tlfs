@@ -3,7 +3,7 @@ use crate::dotset::DotSet;
 use crate::id::{DocId, PeerId};
 use crate::lens::LensesRef;
 use crate::path::{Path, PathBuf};
-use crate::radixdb::{BlobMap, BlobSet};
+use crate::radixdb::BlobMap;
 use crate::subscriber::Subscriber;
 use anyhow::Result;
 use bytecheck::CheckBytes;
@@ -246,7 +246,7 @@ struct ExpiredDebug<'a>(&'a BlobMap);
 impl<'a> std::fmt::Debug for ExpiredDebug<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut m = f.debug_map();
-        for (k, v) in self.0.iter() {
+        for (k, _) in self.0.iter() {
             let path = Path::new(&k);
             m.entry(&path.parent().unwrap().parent().unwrap().dot(), &path);
         }

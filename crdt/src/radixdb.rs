@@ -180,7 +180,7 @@ pub trait Storage: Send + Sync + 'static {
 }
 
 #[derive(Default, Clone)]
-struct MemStorage {
+pub struct MemStorage {
     data: Arc<Mutex<BTreeMap<String, AlignedVec>>>,
 }
 
@@ -312,9 +312,8 @@ impl<K: TKey, V: TValue> RadixDb<K, V> {
         Archived<V>: Deserialize<V, SharedDeserializeMap2>,
     {
         let name = name.into();
-        let mut tree: ArcRadixTree<K, V> = Default::default();
+        let mut tree: anyhow::Result<ArcRadixTree<K, V>> = Ok(Default::default());
         let mut map = Default::default();
-        let mut arcs = Default::default();
         let mut pos = Default::default();
         storage.load(
             &name,
@@ -325,14 +324,15 @@ impl<K: TKey, V: TValue> RadixDb<K, V> {
                         unsafe { archived_root::<ArcRadixTree<K, V>>(data) };
                     tree = archived
                         .deserialize(&mut deserializer)
-                        .map_err(|e| anyhow::anyhow!("Error while deserializing: {}", e))
-                        .unwrap();
+                        .map_err(|e| anyhow::anyhow!("Error while deserializing: {}", e));
                     map = deserializer.to_shared_serializer_map(&data[0] as *const u8);
-                    tree.all_arcs(&mut arcs);
                     pos = data.len();
                 }
             }),
         )?;
+        let tree = tree?;
+        let mut arcs = Default::default();
+        tree.all_arcs(&mut arcs);
         Ok(Self {
             tree,
             name,
@@ -438,8 +438,8 @@ impl std::fmt::Debug for BlobMap {
 }
 
 impl BlobMap {
-    pub fn memory(name: &str) -> anyhow::Result<Self> {
-        Ok(Self(Arc::new(Mutex::new(RadixDb::memory(name)?))))
+    pub fn load(storage: Arc<dyn Storage>, name: &str) -> anyhow::Result<Self> {
+        Ok(Self(Arc::new(Mutex::new(RadixDb::load(storage, name)?))))
     }
 
     pub fn insert(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> anyhow::Result<()> {

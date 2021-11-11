@@ -5,7 +5,7 @@ use crate::cursor::Cursor;
 use crate::id::{DocId, PeerId};
 use crate::lens::LensesRef;
 use crate::path::Path;
-use crate::radixdb::BlobMap;
+use crate::radixdb::{BlobMap, MemStorage, Storage};
 use crate::registry::{Expanded, Hash, Registry};
 use crate::util::Ref;
 use anyhow::{anyhow, Result};
@@ -109,7 +109,7 @@ impl Docs {
         key[32] = 0;
         let schema = self.0.get(key)?.unwrap();
         // TODO: get rid of creation of IVec
-        Ok(Ref::new(schema.as_ref().into()))
+        Ok(Ref::new(schema.clone()))
     }
 
     pub fn set_schema(&self, id: &DocId, schema: &SchemaInfo) -> Result<()> {
@@ -243,14 +243,14 @@ pub struct Backend {
 }
 
 impl Backend {
-    /// Creates a new [`Backend`] from a [`sled::Db`].
-    pub fn new(db: sled::Db, package: &[u8]) -> Result<Self> {
+    /// Creates a new [`Backend`] from a radixdb storage.
+    pub fn new(storage: Arc<dyn Storage>, package: &[u8]) -> Result<Self> {
         let registry = Registry::new(package)?;
-        let docs = Docs::new(BlobMap::memory("docs")?);
-        let acl = Acl::new(BlobMap::memory("acl")?);
+        let docs = Docs::new(BlobMap::load(storage.clone(), "docs")?);
+        let acl = Acl::new(BlobMap::load(storage.clone(), "acl")?);
         let crdt = Crdt::new(
-            BlobMap::memory("store")?,
-            BlobMap::memory("expired")?,
+            BlobMap::load(storage.clone(), "store")?,
+            BlobMap::load(storage, "expired")?,
             acl.clone(),
         );
         let engine = Engine::new(acl)?;
@@ -299,10 +299,7 @@ impl Backend {
         tracing::subscriber::set_global_default(subscriber).ok();
         log_panics::init();
         let package = Ref::archive(packages);
-        Self::new(
-            sled::Config::new().temporary(true).open()?,
-            package.as_bytes(),
-        )
+        Self::new(Arc::new(MemStorage::default()), package.as_bytes())
     }
 
     /// Returns a reference to the lens registry.

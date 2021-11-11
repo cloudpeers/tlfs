@@ -156,6 +156,7 @@ pub use crate::dotset::{ArchivedDotSet, Dot, DotSet};
 pub use crate::id::{DocId, PeerId};
 pub use crate::lens::{ArchivedKind, ArchivedLens, ArchivedLenses, Kind, Lens, LensRef, Lenses};
 pub use crate::path::{Path, PathBuf, Segment};
+pub use crate::radixdb::{FileStorage, MemStorage, Storage};
 pub use crate::registry::{Expanded, Hash, Package, Registry};
 pub use crate::schema::{ArchivedSchema, PrimitiveKind, Schema};
 pub use crate::subscriber::{Batch, Event, Iter, Subscriber};

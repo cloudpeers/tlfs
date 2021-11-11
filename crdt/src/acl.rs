@@ -1,7 +1,7 @@
 use crate::dotset::Dot;
 use crate::id::{DocId, PeerId};
 use crate::path::{Path, PathBuf};
-use crate::radixdb::{Batch, BlobMap};
+use crate::radixdb::{Batch, BlobMap, Storage};
 use crate::util::Ref;
 use anyhow::Result;
 use bytecheck::CheckBytes;
@@ -300,9 +300,8 @@ impl Acl {
         Self(tree)
     }
 
-    pub fn memory(name: &str) -> Result<Self> {
-        let db = sled::Config::new().temporary(true).open()?;
-        Ok(Self(BlobMap::memory(name)?))
+    pub fn load(storage: Arc<dyn Storage>, name: &str) -> Result<Self> {
+        Ok(Self(BlobMap::load(storage, name)?))
     }
 
     pub fn subscribe(&self, doc: &DocId) -> BoxStream<'static, Batch<u8, Arc<[u8]>>> {
@@ -329,7 +328,7 @@ impl Acl {
 
     fn revoke_rules(&self, revoked: BTreeSet<Dot>) -> Result<()> {
         for (k, v) in self.0.iter() {
-            if revoked.contains(&Ref::<Rule>::new(v.as_ref().into()).as_ref().id) {
+            if revoked.contains(&Ref::<Rule>::new(v.clone()).as_ref().id) {
                 self.0.remove(k)?;
             }
         }
@@ -342,7 +341,7 @@ impl Acl {
         prefix.peer(peer);
         for (k, v) in self.0.scan_prefix(prefix) {
             let p = Path::new(&k);
-            let rule = Ref::<Rule>::new(v.as_ref().into());
+            let rule = Ref::<Rule>::new(v.clone());
             if p.child().unwrap().child().unwrap().is_ancestor(path) && rule.as_ref().perm >= perm {
                 return Ok(true);
             }
@@ -373,7 +372,7 @@ impl<'a> std::fmt::Debug for AclDebug<'a> {
         let mut m = f.debug_map();
         for (k, v) in self.0.iter() {
             let path = Path::new(&k);
-            let rule = Ref::<Rule>::new(v.as_ref().into());
+            let rule = Ref::<Rule>::new(v.clone());
             m.entry(&path, rule.as_ref());
         }
         m.finish()
