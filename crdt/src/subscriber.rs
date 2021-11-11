@@ -24,7 +24,7 @@ pub enum Event {
 }
 
 enum InnerIter<'a> {
-    State(Box<dyn Iterator<Item = (IterKey<u8>, Option<&'a Arc<[u8]>>)> + 'a>),
+    State(Box<dyn Iterator<Item = (IterKey<u8>, Option<&'a ()>)> + 'a>),
     Acl(Box<dyn Iterator<Item = (IterKey<u8>, Option<&'a Arc<[u8]>>)> + 'a>),
 }
 
@@ -70,7 +70,7 @@ impl<'a> Iterator for Iter<'a> {
 }
 
 enum InnerBatch {
-    State(crate::radixdb::Batch<u8, Arc<[u8]>>),
+    State(crate::radixdb::Batch<u8, ()>),
     Acl(crate::radixdb::Batch<u8, Arc<[u8]>>),
 }
 
@@ -91,13 +91,13 @@ impl<'a> IntoIterator for &'a Batch {
 
 /// [`Event`] [`Stream`] subscription.
 pub struct Subscriber {
-    state: BoxStream<'static, crate::radixdb::Batch<u8, Arc<[u8]>>>,
+    state: BoxStream<'static, crate::radixdb::Batch<u8, ()>>,
     acl: BoxStream<'static, crate::radixdb::Batch<u8, Arc<[u8]>>>,
 }
 
 impl Subscriber {
     pub(crate) fn new(
-        state: BoxStream<'static, crate::radixdb::Batch<u8, Arc<[u8]>>>,
+        state: BoxStream<'static, crate::radixdb::Batch<u8, ()>>,
         acl: BoxStream<'static, crate::radixdb::Batch<u8, Arc<[u8]>>>,
     ) -> Self {
         Self { state, acl }

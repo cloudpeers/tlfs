@@ -5,7 +5,7 @@ use crate::cursor::Cursor;
 use crate::id::{DocId, PeerId};
 use crate::lens::LensesRef;
 use crate::path::Path;
-use crate::radixdb::{BlobMap, MemStorage, Storage};
+use crate::radixdb::{BlobMap, BlobSet, MemStorage, Storage};
 use crate::registry::{Expanded, Hash, Registry};
 use crate::util::Ref;
 use anyhow::{anyhow, Result};
@@ -248,8 +248,8 @@ impl Backend {
         let docs = Docs::new(BlobMap::load(storage.clone(), "docs")?);
         let acl = Acl::new(BlobMap::load(storage.clone(), "acl")?);
         let crdt = Crdt::new(
-            BlobMap::load(storage.clone(), "store")?,
-            BlobMap::load(storage, "expired")?,
+            BlobSet::load(storage.clone(), "store")?,
+            BlobSet::load(storage, "expired")?,
             acl.clone(),
         );
         let engine = Engine::new(acl)?;

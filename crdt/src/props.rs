@@ -5,7 +5,7 @@ use crate::crdt::{Causal, CausalContext, Crdt, DotStore};
 use crate::id::{DocId, PeerId};
 use crate::lens::{Kind, Lens};
 use crate::path::PathBuf;
-use crate::radixdb::{BlobMap, MemStorage, Storage};
+use crate::radixdb::{BlobMap, BlobSet, MemStorage, Storage};
 use crate::schema::{PrimitiveKind, Schema};
 use crate::util::Ref;
 use proptest::collection::SizeRange;
@@ -329,8 +329,8 @@ pub fn join(c: &Causal, o: &Causal) -> Causal {
 
 pub fn causal_to_crdt(doc: &DocId, causal: &Causal) -> Crdt {
     let storage = Arc::new(MemStorage::default());
-    let store = BlobMap::load(storage.clone(), "store").unwrap();
-    let expired = BlobMap::load(storage.clone(), "expired").unwrap();
+    let store = BlobSet::load(storage.clone(), "store").unwrap();
+    let expired = BlobSet::load(storage.clone(), "expired").unwrap();
     let acl = Acl::new(BlobMap::load(storage, "acl").unwrap());
     let crdt = Crdt::new(store, expired, acl);
     crdt.join(&(*doc).into(), causal).unwrap();

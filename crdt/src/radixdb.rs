@@ -442,30 +442,28 @@ impl BlobSet {
         Ok(Self(Arc::new(Mutex::new(RadixDb::load(storage, name)?))))
     }
 
-    pub fn insert_empty(&self, key: impl AsRef<[u8]>) -> anyhow::Result<()> {
+    pub fn insert(&self, key: impl AsRef<[u8]>) {
         let t: ArcRadixTree<u8, ()> = ArcRadixTree::single(key.as_ref(), ());
         // right biased union
         self.0.lock().tree_mut().union_with(&t);
-        Ok(())
     }
 
-    pub fn remove(&self, key: impl AsRef<[u8]>) -> anyhow::Result<()> {
+    pub fn remove(&self, key: impl AsRef<[u8]>) {
         let t = ArcRadixTree::single(key.as_ref(), ());
         self.0.lock().tree_mut().difference_with(&t);
-        Ok(())
     }
 
-    pub fn contains_key(&self, key: impl AsRef<[u8]>) -> anyhow::Result<bool> {
+    pub fn contains(&self, key: impl AsRef<[u8]>) -> bool {
         let lock = self.0.lock();
-        Ok(lock.tree().contains_key(key.as_ref()))
+        lock.tree().contains_key(key.as_ref())
     }
 
     pub fn keys(&self) -> impl Iterator<Item = IterKey<u8>> {
         let tree = self.0.lock().tree().clone();
-        tree.into_iter().map(|(k, v)| k)
+        tree.into_iter().map(|(k, _)| k)
     }
 
-    pub fn scan_prefix_keys(&self, prefix: impl AsRef<[u8]>) -> impl Iterator<Item = IterKey<u8>> {
+    pub fn scan_prefix(&self, prefix: impl AsRef<[u8]>) -> impl Iterator<Item = IterKey<u8>> {
         let tree = self.0.lock().tree().filter_prefix(prefix.as_ref());
         tree.into_iter().map(|(k, _)| k)
     }
@@ -494,16 +492,6 @@ impl std::fmt::Debug for BlobMap {
 impl BlobMap {
     pub fn load(storage: Arc<dyn Storage>, name: &str) -> anyhow::Result<Self> {
         Ok(Self(Arc::new(Mutex::new(RadixDb::load(storage, name)?))))
-    }
-
-    pub fn insert_empty(&self, key: impl AsRef<[u8]>) -> anyhow::Result<()> {
-        let t: ArcRadixTree<u8, Arc<[u8]>> = ArcRadixTree::single(key.as_ref(), Arc::new([]));
-        // right biased union
-        self.0.lock().tree_mut().outer_combine_with(&t, |a, b| {
-            *a = b.clone();
-            true
-        });
-        Ok(())
     }
 
     pub fn insert(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> anyhow::Result<()> {
@@ -542,19 +530,9 @@ impl BlobMap {
         Ok(lock.tree().get(key.as_ref()).cloned())
     }
 
-    pub fn contains_key(&self, key: impl AsRef<[u8]>) -> anyhow::Result<bool> {
-        let lock = self.0.lock();
-        Ok(lock.tree().contains_key(key.as_ref()))
-    }
-
     pub fn iter<'a>(&self) -> impl Iterator<Item = (IterKey<u8>, &'a Arc<[u8]>)> + 'a {
         let tree = self.0.lock().tree().clone();
         tree.into_iter()
-    }
-
-    pub fn keys(&self) -> impl Iterator<Item = IterKey<u8>> {
-        let tree = self.0.lock().tree().clone();
-        tree.into_iter().map(|(k, v)| k)
     }
 
     pub fn scan_prefix<'a>(
@@ -563,11 +541,6 @@ impl BlobMap {
     ) -> impl Iterator<Item = (IterKey<u8>, &'a Arc<[u8]>)> + 'a {
         let tree = self.0.lock().tree().filter_prefix(prefix.as_ref());
         tree.into_iter()
-    }
-
-    pub fn scan_prefix_keys(&self, prefix: impl AsRef<[u8]>) -> impl Iterator<Item = IterKey<u8>> {
-        let tree = self.0.lock().tree().filter_prefix(prefix.as_ref());
-        tree.into_iter().map(|(k, _)| k)
     }
 
     pub fn watch_prefix<'a>(

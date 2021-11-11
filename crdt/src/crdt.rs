@@ -3,7 +3,7 @@ use crate::dotset::DotSet;
 use crate::id::{DocId, PeerId};
 use crate::lens::LensesRef;
 use crate::path::{Path, PathBuf};
-use crate::radixdb::BlobMap;
+use crate::radixdb::BlobSet;
 use crate::subscriber::Subscriber;
 use anyhow::Result;
 use bytecheck::CheckBytes;
@@ -213,8 +213,8 @@ impl Causal {
 
 #[derive(Clone)]
 pub struct Crdt {
-    store: BlobMap,
-    expired: BlobMap,
+    store: BlobSet,
+    expired: BlobSet,
     acl: Acl,
 }
 
@@ -228,12 +228,12 @@ impl std::fmt::Debug for Crdt {
     }
 }
 
-struct StoreDebug<'a>(&'a BlobMap);
+struct StoreDebug<'a>(&'a BlobSet);
 
 impl<'a> std::fmt::Debug for StoreDebug<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut m = f.debug_map();
-        for (k, _) in self.0.iter() {
+        for k in self.0.keys() {
             let path = Path::new(&k);
             m.entry(&path.dot(), &path);
         }
@@ -241,12 +241,12 @@ impl<'a> std::fmt::Debug for StoreDebug<'a> {
     }
 }
 
-struct ExpiredDebug<'a>(&'a BlobMap);
+struct ExpiredDebug<'a>(&'a BlobSet);
 
 impl<'a> std::fmt::Debug for ExpiredDebug<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut m = f.debug_map();
-        for (k, _) in self.0.iter() {
+        for k in self.0.keys() {
             let path = Path::new(&k);
             m.entry(&path.parent().unwrap().parent().unwrap().dot(), &path);
         }
@@ -255,7 +255,7 @@ impl<'a> std::fmt::Debug for ExpiredDebug<'a> {
 }
 
 impl Crdt {
-    pub fn new(store: BlobMap, expired: BlobMap, acl: Acl) -> Self {
+    pub fn new(store: BlobSet, expired: BlobSet, acl: Acl) -> Self {
         Self {
             store,
             expired,
@@ -268,7 +268,7 @@ impl Crdt {
     }
 
     pub fn scan_path(&self, path: Path) -> impl Iterator<Item = IterKey<u8>> {
-        self.store.scan_prefix_keys(path.as_ref().to_vec())
+        self.store.scan_prefix(path.as_ref().to_vec())
     }
 
     pub fn watch_path(&self, path: Path) -> Subscriber {
@@ -286,11 +286,11 @@ impl Crdt {
         let mut ctx = CausalContext::new();
         let mut path = PathBuf::new();
         path.doc(doc);
-        for k in self.store.scan_prefix_keys(&path) {
+        for k in self.store.scan_prefix(&path) {
             let dot = Path::new(&k).dot();
             ctx.store.insert(dot);
         }
-        for k in self.expired.scan_prefix_keys(&path) {
+        for k in self.expired.scan_prefix(&path) {
             let dot = Path::new(&k).parent().unwrap().parent().unwrap().dot();
             ctx.expired.insert(dot);
         }
@@ -310,7 +310,7 @@ impl Crdt {
                 .policy()
                 .is_some()
             {
-                self.store.insert_empty(path.to_owned())?;
+                self.store.insert(path.to_owned());
             }
         }
         Ok(())
@@ -323,17 +323,13 @@ impl Crdt {
     pub fn join(&self, peer: &PeerId, causal: &Causal) -> Result<()> {
         for buf in causal.store.iter() {
             let path = buf.as_path();
-            let is_expired = self
-                .expired
-                .scan_prefix_keys(path.as_ref())
-                .next()
-                .is_some();
+            let is_expired = self.expired.scan_prefix(path.as_ref()).next().is_some();
             if !is_expired && !causal.expired.contains_prefix(path) {
                 if !self.can(peer, Permission::Write, path)? {
                     tracing::info!("join: peer is unauthorized to insert {}", path);
                     continue;
                 }
-                self.store.insert_empty(&path)?;
+                self.store.insert(&path);
             }
         }
         for buf in causal.expired.iter() {
@@ -343,10 +339,10 @@ impl Crdt {
                 tracing::info!("join: peer is unauthorized to remove {}", store_path);
                 continue;
             }
-            if self.store.contains_key(store_path)? {
-                self.store.remove(store_path)?;
+            if self.store.contains(store_path) {
+                self.store.remove(store_path);
             }
-            self.expired.insert_empty(&path)?;
+            self.expired.insert(&path);
         }
         Ok(())
     }
@@ -368,7 +364,7 @@ impl Crdt {
             .difference(&other.expired);
 
         let mut store = DotStore::new();
-        for k in self.store.scan_prefix_keys(&path) {
+        for k in self.store.scan_prefix(&path) {
             let path = Path::new(&k[..]);
             let dot = path.dot();
             if !store_dots.contains(&dot) {
@@ -383,7 +379,7 @@ impl Crdt {
             }
         }
         let mut expired = DotStore::new();
-        for k in self.expired.scan_prefix_keys(&path) {
+        for k in self.expired.scan_prefix(&path) {
             let path = Path::new(&k);
             let dot = path.parent().unwrap().parent().unwrap().dot();
             if !expired_dots.contains(&dot) {
@@ -403,11 +399,11 @@ impl Crdt {
     pub fn remove(&self, doc: &DocId) -> Result<()> {
         let mut path = PathBuf::new();
         path.doc(doc);
-        for k in self.store.scan_prefix_keys(&path) {
-            self.store.remove(k)?;
+        for k in self.store.scan_prefix(&path) {
+            self.store.remove(k);
         }
-        for k in self.expired.scan_prefix_keys(&path) {
-            self.expired.remove(k)?;
+        for k in self.expired.scan_prefix(&path) {
+            self.expired.remove(k);
         }
         Ok(())
     }
@@ -418,16 +414,16 @@ impl Crdt {
         for k in self.scan_path(path.as_path()) {
             let path = Path::new(&k);
             if let Some(path) = from.transform_path(path, to) {
-                self.store.insert_empty(path)?;
+                self.store.insert(path);
             }
-            self.store.remove(k)?;
+            self.store.remove(k);
         }
         for k in self.scan_path(path.as_path()) {
             let path = Path::new(&k);
             if let Some(path) = from.transform_path(path, to) {
-                self.expired.insert_empty(path)?;
+                self.expired.insert(path);
             }
-            self.expired.remove(k)?;
+            self.expired.remove(k);
         }
         Ok(())
     }
