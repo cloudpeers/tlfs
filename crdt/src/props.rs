@@ -327,7 +327,7 @@ pub fn join(c: &Causal, o: &Causal) -> Causal {
 
 pub fn causal_to_crdt(doc: &DocId, causal: &Causal) -> Crdt {
     let db = sled::Config::new().temporary(true).open().unwrap();
-    let store = db.open_tree("store").unwrap();
+    let store = BlobMap::memory("store").unwrap();
     let expired = BlobMap::memory("expired").unwrap();
     let acl = Acl::new(BlobMap::memory("acl").unwrap());
     let crdt = Crdt::new(store, expired, acl);

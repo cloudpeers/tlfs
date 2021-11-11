@@ -24,7 +24,7 @@ pub enum Event {
 }
 
 enum InnerIter<'a> {
-    State(Box<dyn Iterator<Item = (&'a sled::Tree, &'a sled::IVec, &'a Option<sled::IVec>)> + 'a>),
+    State(Box<dyn Iterator<Item = (IterKey<u8>, Option<&'a Arc<[u8]>>)> + 'a>),
     Acl(Box<dyn Iterator<Item = (IterKey<u8>, Option<&'a Arc<[u8]>>)> + 'a>),
 }
 
@@ -37,8 +37,8 @@ impl<'a> Iterator for Iter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         match &mut self.0 {
             InnerIter::State(state) => match state.next() {
-                Some((_, k, Some(_))) => Some(Event::Insert(Path::new(k).to_owned())),
-                Some((_, k, None)) => Some(Event::Remove(Path::new(k).to_owned())),
+                Some((k, Some(_))) => Some(Event::Insert(Path::new(&k).to_owned())),
+                Some((k, None)) => Some(Event::Remove(Path::new(&k).to_owned())),
                 None => None,
             },
             InnerIter::Acl(acl) => match acl.next() {
@@ -70,7 +70,7 @@ impl<'a> Iterator for Iter<'a> {
 }
 
 enum InnerBatch {
-    State(sled::Event),
+    State(crate::radixdb::Batch<u8, Arc<[u8]>>),
     Acl(crate::radixdb::Batch<u8, Arc<[u8]>>),
 }
 
@@ -83,7 +83,7 @@ impl<'a> IntoIterator for &'a Batch {
 
     fn into_iter(self) -> Self::IntoIter {
         match &self.0 {
-            InnerBatch::State(ev) => Iter(InnerIter::State(ev.into_iter())),
+            InnerBatch::State(ev) => Iter(InnerIter::State(Box::new(ev.iter()))),
             InnerBatch::Acl(ev) => Iter(InnerIter::Acl(Box::new(ev.iter()))),
         }
     }
@@ -91,13 +91,13 @@ impl<'a> IntoIterator for &'a Batch {
 
 /// [`Event`] [`Stream`] subscription.
 pub struct Subscriber {
-    state: sled::Subscriber,
+    state: BoxStream<'static, crate::radixdb::Batch<u8, Arc<[u8]>>>,
     acl: BoxStream<'static, crate::radixdb::Batch<u8, Arc<[u8]>>>,
 }
 
 impl Subscriber {
     pub(crate) fn new(
-        state: sled::Subscriber,
+        state: BoxStream<'static, crate::radixdb::Batch<u8, Arc<[u8]>>>,
         acl: BoxStream<'static, crate::radixdb::Batch<u8, Arc<[u8]>>>,
     ) -> Self {
         Self { state, acl }
@@ -108,7 +108,7 @@ impl Stream for Subscriber {
     type Item = Batch;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        if let Poll::Ready(Some(ev)) = Pin::new(&mut self.state).poll(cx) {
+        if let Poll::Ready(Some(ev)) = Pin::new(&mut self.state).poll_next(cx) {
             return Poll::Ready(Some(Batch(InnerBatch::State(ev))));
         }
         if let Poll::Ready(Some(ev)) = Pin::new(&mut self.acl).poll_next(cx) {

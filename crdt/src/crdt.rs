@@ -9,7 +9,7 @@ use anyhow::Result;
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Archived, Deserialize, Serialize};
 use std::iter::FromIterator;
-use vec_collections::{AbstractRadixTree, AbstractRadixTreeMut, RadixTree};
+use vec_collections::{AbstractRadixTree, AbstractRadixTreeMut, IterKey, RadixTree};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
@@ -213,7 +213,7 @@ impl Causal {
 
 #[derive(Clone)]
 pub struct Crdt {
-    store: sled::Tree,
+    store: BlobMap,
     expired: BlobMap,
     acl: Acl,
 }
@@ -228,13 +228,12 @@ impl std::fmt::Debug for Crdt {
     }
 }
 
-struct StoreDebug<'a>(&'a sled::Tree);
+struct StoreDebug<'a>(&'a BlobMap);
 
 impl<'a> std::fmt::Debug for StoreDebug<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut m = f.debug_map();
-        for e in self.0.iter().keys() {
-            let k = e.map_err(|_| std::fmt::Error::default())?;
+        for (k, _) in self.0.iter() {
             let path = Path::new(&k);
             m.entry(&path.dot(), &path);
         }
@@ -256,7 +255,7 @@ impl<'a> std::fmt::Debug for ExpiredDebug<'a> {
 }
 
 impl Crdt {
-    pub fn new(store: sled::Tree, expired: BlobMap, acl: Acl) -> Self {
+    pub fn new(store: BlobMap, expired: BlobMap, acl: Acl) -> Self {
         Self {
             store,
             expired,
@@ -264,15 +263,12 @@ impl Crdt {
         }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = sled::Result<sled::IVec>> {
-        self.store.iter().keys()
+    pub fn iter(&self) -> impl Iterator<Item = IterKey<u8>> {
+        self.store.keys()
     }
 
-    pub fn scan_path(&self, path: Path) -> impl Iterator<Item = Result<sled::IVec>> {
-        self.store
-            .scan_prefix(path)
-            .keys()
-            .map(|k| k.map_err(Into::into))
+    pub fn scan_path(&self, path: Path) -> impl Iterator<Item = IterKey<u8>> {
+        self.store.scan_prefix_keys(path.as_ref().to_vec())
     }
 
     pub fn watch_path(&self, path: Path) -> Subscriber {
@@ -290,8 +286,7 @@ impl Crdt {
         let mut ctx = CausalContext::new();
         let mut path = PathBuf::new();
         path.doc(doc);
-        for r in self.store.scan_prefix(path.as_path()).keys() {
-            let k = r?;
+        for (k, _) in self.store.scan_prefix(path.as_path()) {
             let dot = Path::new(&k).dot();
             ctx.store.insert(dot);
         }
@@ -369,8 +364,7 @@ impl Crdt {
             .difference(&other.expired);
 
         let mut store = DotStore::new();
-        for r in self.store.scan_prefix(path.as_ref()).keys() {
-            let k = r?;
+        for (k, _) in self.store.scan_prefix(path.as_ref()) {
             let path = Path::new(&k[..]);
             let dot = path.dot();
             if !store_dots.contains(&dot) {
@@ -405,8 +399,7 @@ impl Crdt {
     pub fn remove(&self, doc: &DocId) -> Result<()> {
         let mut path = PathBuf::new();
         path.doc(doc);
-        for r in self.store.scan_prefix(&path).keys() {
-            let k = r?;
+        for (k, _) in self.store.scan_prefix(&path) {
             self.store.remove(k)?;
         }
         for (k, v) in self.expired.scan_prefix(&path) {
@@ -418,16 +411,14 @@ impl Crdt {
     pub fn transform(&self, doc: &DocId, from: LensesRef, to: LensesRef) -> Result<()> {
         let mut path = PathBuf::new();
         path.doc(doc);
-        for r in self.scan_path(path.as_path()) {
-            let k = r?;
+        for k in self.scan_path(path.as_path()) {
             let path = Path::new(&k);
             if let Some(path) = from.transform_path(path, to) {
                 self.store.insert(path, &[])?;
             }
             self.store.remove(k)?;
         }
-        for r in self.scan_path(path.as_path()) {
-            let k = r?;
+        for k in self.scan_path(path.as_path()) {
             let path = Path::new(&k);
             if let Some(path) = from.transform_path(path, to) {
                 self.expired.insert(path, &[])?;

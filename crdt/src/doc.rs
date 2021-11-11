@@ -249,7 +249,7 @@ impl Backend {
         let docs = Docs::new(BlobMap::memory("docs")?);
         let acl = Acl::new(BlobMap::memory("acl")?);
         let crdt = Crdt::new(
-            db.open_tree("store")?,
+            BlobMap::memory("store")?,
             BlobMap::memory("expired")?,
             acl.clone(),
         );
@@ -311,8 +311,7 @@ impl Backend {
     }
 
     fn update_acl(&mut self) -> Result<()> {
-        for res in self.crdt.iter() {
-            let key = res?;
+        for key in self.crdt.iter() {
             let path = Path::new(&key[..]);
             self.engine.add_policy(path);
         }

@@ -70,6 +70,12 @@ pub struct SharedSerializeMap2 {
     shared_resolvers: hash_map::HashMap<*const u8, usize>,
 }
 
+/// these are safe, because a *const u8 is safe to send and sync
+///
+/// see discussion in https://internals.rust-lang.org/t/shouldnt-pointers-be-send-sync-or/8818
+unsafe impl Send for SharedSerializeMap2 {}
+unsafe impl Sync for SharedSerializeMap2 {}
+
 impl Fallible for SharedSerializeMap2 {
     type Error = SharedSerializeMapError;
 }
@@ -454,21 +460,35 @@ impl BlobMap {
 
     pub fn get(&self, key: impl AsRef<[u8]>) -> anyhow::Result<Option<Arc<[u8]>>> {
         let lock = self.0.lock();
-        let res = lock.tree().get(key.as_ref()).cloned();
-        Ok(res)
+        Ok(lock.tree().get(key.as_ref()).cloned())
     }
 
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item = (IterKey<u8>, &'a Arc<[u8]>)> + '_ {
+    pub fn contains_key(&self, key: impl AsRef<[u8]>) -> anyhow::Result<bool> {
+        let lock = self.0.lock();
+        Ok(lock.tree().contains_key(key.as_ref()))
+    }
+
+    pub fn iter<'a>(&self) -> impl Iterator<Item = (IterKey<u8>, &'a Arc<[u8]>)> + 'a {
         let tree = self.0.lock().tree().clone();
         tree.into_iter()
     }
 
+    pub fn keys(&self) -> impl Iterator<Item = IterKey<u8>> {
+        let tree = self.0.lock().tree().clone();
+        tree.into_iter().map(|(k, v)| k)
+    }
+
     pub fn scan_prefix<'a>(
-        &'a self,
+        &self,
         prefix: impl AsRef<[u8]>,
-    ) -> impl Iterator<Item = (IterKey<u8>, &'a Arc<[u8]>)> + '_ {
+    ) -> impl Iterator<Item = (IterKey<u8>, &'a Arc<[u8]>)> + 'a {
         let tree = self.0.lock().tree().filter_prefix(prefix.as_ref());
         tree.into_iter()
+    }
+
+    pub fn scan_prefix_keys(&self, prefix: Vec<u8>) -> impl Iterator<Item = IterKey<u8>> {
+        let tree = self.0.lock().tree().filter_prefix(prefix.as_ref());
+        tree.into_iter().map(|(k, v)| k)
     }
 
     pub fn watch_prefix<'a>(
