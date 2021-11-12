@@ -34,7 +34,7 @@ tracing-log = "0.1.2"
 tracing-subscriber = "0.2.25"
 
 [dependencies.libp2p]
-version = "0.40.0-rc.2"
+version = "0.41"
 default-features = false
 features = [
     "dns-async-std",
@@ -51,6 +51,5 @@ features = [
 async-std = { version = "1.10.0", features = ["attributes"] }
 
 [patch.crates-io]
-#libp2p = { git = "https://github.com/wngr/rust-libp2p", branch = "wasm-support" }
-libp2p = { git = "https://github.com/wngr/rust-libp2p", branch = "ow/usize-partialeq" }
-libp2p-broadcast= { git = "https://github.com/wngr/libp2p-broadcast" }
+libp2p = { git = "https://github.com/libp2p/rust-libp2p", rev = "8b68026bb04a469654020a8dcfe68308404e2510" }
+libp2p-broadcast= { git = "https://github.com/wngr/libp2p-broadcast", branch = "libp2p-v41" }
