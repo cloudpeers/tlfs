@@ -22,7 +22,9 @@ use futures::stream::Stream;
 use libp2p::Swarm;
 use std::path::Path;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::Poll;
+use tlfs_crdt::{ FileStorage,  MemStorage, Storage};
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::EnvFilter;
 
@@ -37,7 +39,7 @@ impl Sdk {
     /// Creates a new persistent [`Sdk`] instance.
     #[cfg(not(target_arch = "wasm32"))]
     pub async fn persistent(db: &Path, package: &[u8]) -> Result<Self> {
-        let (sdk, driver) = Self::new(sled::Config::new().path(db).open()?, package).await?;
+        let (sdk, driver) = Self::new(Arc::new(FileStorage::new(db)), package).await?;
         async_global_executor::spawn::<_, ()>(driver).detach();
 
         Ok(sdk)
@@ -46,14 +48,17 @@ impl Sdk {
     /// Create a new in-memory [`Sdk`] instance.
     #[cfg(not(target_arch = "wasm32"))]
     pub async fn in_memory(package: &[u8]) -> Result<Self> {
-        let (sdk, driver) = Self::new(sled::Config::new().temporary(true).open()?, package).await?;
+        let (sdk, driver) = Self::new(Arc::new(MemStorage::default()), package).await?;
         async_global_executor::spawn::<_, ()>(driver).detach();
 
         Ok(sdk)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    async fn new(db: sled::Db, package: &[u8]) -> Result<(Self, impl Future<Output = ()>)> {
+    async fn new(
+        storage: Arc<dyn Storage>,
+        package: &[u8],
+    ) -> Result<(Self, impl Future<Output = ()>)> {
         tracing_log::LogTracer::init().ok();
         let env = std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or_else(|_| "info".to_owned());
         let subscriber = tracing_subscriber::FmtSubscriber::builder()
@@ -64,7 +69,7 @@ impl Sdk {
         tracing::subscriber::set_global_default(subscriber).ok();
         log_panics::init();
 
-        let backend = Backend::new(db, package)?;
+        let backend = Backend::new(storage, package)?;
         let frontend = backend.frontend();
 
         let keypair = frontend.default_keypair()?;
@@ -169,7 +174,7 @@ impl Sdk {
     }
 
     /// Returns an iterator of [`DocId`].
-    pub fn docs(&self, schema: String) -> impl Iterator<Item = Result<DocId>> {
+    pub fn docs(&self, schema: String) -> impl Iterator<Item = Result<DocId>> + '_ {
         self.frontend.docs_by_schema(schema)
     }
 

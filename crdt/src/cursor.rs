@@ -56,11 +56,7 @@ impl<'a> Cursor<'a> {
             Ok(self
                 .crdt
                 .scan_path(self.path.as_path())
-                .find_map(|r| match r {
-                    Ok(path) => Some(Ok(Path::new(&path).parent()?.parent()?.last()?.nonce()?)),
-                    Err(err) => Some(Err(err)),
-                })
-                .transpose()?
+                .find_map(|k| Path::new(&k).parent()?.parent()?.last()?.nonce())
                 .is_some())
         } else {
             Err(anyhow!("not a flag"))
@@ -70,17 +66,13 @@ impl<'a> Cursor<'a> {
     /// Returns an iterator of bools.
     pub fn bools(&self) -> Result<impl Iterator<Item = Result<bool>>> {
         if let ArchivedSchema::Reg(PrimitiveKind::Bool) = &self.schema {
-            Ok(self
-                .crdt
-                .scan_path(self.path.as_path())
-                .filter_map(|r| match r {
-                    Ok(path) => Some(Ok(Path::new(&path)
-                        .parent()?
-                        .parent()?
-                        .last()?
-                        .prim_bool()?)),
-                    Err(err) => Some(Err(err)),
-                }))
+            Ok(self.crdt.scan_path(self.path.as_path()).filter_map(|path| {
+                Some(Ok(Path::new(&path)
+                    .parent()?
+                    .parent()?
+                    .last()?
+                    .prim_bool()?))
+            }))
         } else {
             Err(anyhow!("not a Reg<bool>"))
         }
@@ -89,17 +81,13 @@ impl<'a> Cursor<'a> {
     /// Returns an iterator of u64s.
     pub fn u64s(&self) -> Result<impl Iterator<Item = Result<u64>>> {
         if let ArchivedSchema::Reg(PrimitiveKind::U64) = &self.schema {
-            Ok(self
-                .crdt
-                .scan_path(self.path.as_path())
-                .filter_map(|r| match r {
-                    Ok(path) => Some(Ok(Path::new(&path)
-                        .parent()?
-                        .parent()?
-                        .last()?
-                        .prim_u64()?)),
-                    Err(err) => Some(Err(err)),
-                }))
+            Ok(self.crdt.scan_path(self.path.as_path()).filter_map(|path| {
+                Some(Ok(Path::new(&path)
+                    .parent()?
+                    .parent()?
+                    .last()?
+                    .prim_u64()?))
+            }))
         } else {
             Err(anyhow!("not a Reg<u64>"))
         }
@@ -108,17 +96,13 @@ impl<'a> Cursor<'a> {
     /// Returns an iterator of i64s.
     pub fn i64s(&self) -> Result<impl Iterator<Item = Result<i64>>> {
         if let ArchivedSchema::Reg(PrimitiveKind::I64) = &self.schema {
-            Ok(self
-                .crdt
-                .scan_path(self.path.as_path())
-                .filter_map(|r| match r {
-                    Ok(path) => Some(Ok(Path::new(&path)
-                        .parent()?
-                        .parent()?
-                        .last()?
-                        .prim_i64()?)),
-                    Err(err) => Some(Err(err)),
-                }))
+            Ok(self.crdt.scan_path(self.path.as_path()).filter_map(|path| {
+                Some(Ok(Path::new(&path)
+                    .parent()?
+                    .parent()?
+                    .last()?
+                    .prim_i64()?))
+            }))
         } else {
             Err(anyhow!("not a Reg<i64>"))
         }
@@ -127,18 +111,14 @@ impl<'a> Cursor<'a> {
     /// Returns an iterator of strs.
     pub fn strs(&self) -> Result<impl Iterator<Item = Result<String>>> {
         if let ArchivedSchema::Reg(PrimitiveKind::Str) = &self.schema {
-            Ok(self
-                .crdt
-                .scan_path(self.path.as_path())
-                .filter_map(|r| match r {
-                    Ok(path) => Some(Ok(Path::new(&path)
-                        .parent()?
-                        .parent()?
-                        .last()?
-                        .prim_str()?
-                        .to_owned())),
-                    Err(err) => Some(Err(err)),
-                }))
+            Ok(self.crdt.scan_path(self.path.as_path()).filter_map(|path| {
+                Some(Ok(Path::new(&path)
+                    .parent()?
+                    .parent()?
+                    .last()?
+                    .prim_str()?
+                    .to_owned()))
+            }))
         } else {
             Err(anyhow!("not a Reg<String>"))
         }
@@ -237,8 +217,7 @@ impl<'a> Cursor<'a> {
 
     fn count_path(&self, path: Path) -> Result<u32> {
         let mut i = 0;
-        for res in self.crdt.scan_path(path) {
-            res?;
+        for _ in self.crdt.scan_path(path) {
             i += 1;
         }
         Ok(i)
@@ -257,8 +236,7 @@ impl<'a> Cursor<'a> {
 
     fn tombstone(&self) -> Result<DotStore> {
         let mut expired = DotStore::new();
-        for r in self.crdt.scan_path(self.path.as_path()) {
-            let k = r?;
+        for k in self.crdt.scan_path(self.path.as_path()) {
             let path = Path::new(&k);
             if path
                 .parent()
@@ -498,7 +476,6 @@ impl ArrayWrapper {
             .crdt
             .scan_path(self.value_path.as_path())
             .next()
-            .transpose()?
             .is_some()
         {
             self.update(cursor, inner)
@@ -521,7 +498,6 @@ impl ArrayWrapper {
         ix = ix.min(len);
         let (pos, uid) = if let Some(entry) = iter.nth(ix) {
             // Existing entry
-            let entry = entry?;
             let p_c = cursor.path.clone();
             let data = array_util::ArrayValue::from_path(
                 Path::new(&entry).strip_prefix(p_c.as_path())?.as_path(),
@@ -537,13 +513,11 @@ impl ArrayWrapper {
                         .crdt
                         .scan_path(array_value_root.as_path())
                         .skip(s)
-                        .map(move |p| {
-                            p.and_then(|iv| {
-                                let meta = array_util::ArrayValue::from_path(
-                                    Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
-                                )?;
-                                Ok(meta.pos)
-                            })
+                        .map(move |iv| -> anyhow::Result<_> {
+                            let meta = array_util::ArrayValue::from_path(
+                                Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
+                            )?;
+                            Ok(meta.pos)
                         });
                     (iter.next(), iter.next())
                 }
@@ -553,13 +527,11 @@ impl ArrayWrapper {
                         cursor
                             .crdt
                             .scan_path(array_value_root.as_path())
-                            .map(move |p| {
-                                p.and_then(|iv| {
-                                    let meta = array_util::ArrayValue::from_path(
-                                        Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
-                                    )?;
-                                    Ok(meta.pos)
-                                })
+                            .map(move |iv| {
+                                let meta = array_util::ArrayValue::from_path(
+                                    Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
+                                )?;
+                                Ok(meta.pos)
                             });
 
                     (None, iter.next())
@@ -618,29 +590,26 @@ impl ArrayWrapper {
                         .crdt
                         .scan_path(self.value_path.as_path())
                         .skip(s)
-                        .map(move |p| {
-                            p.and_then(|iv| {
-                                let meta = array_util::ArrayValue::from_path(
-                                    Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
-                                )?;
-                                Ok(meta.pos)
-                            })
+                        .map(move |iv| -> anyhow::Result<_> {
+                            let meta = array_util::ArrayValue::from_path(
+                                Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
+                            )?;
+                            Ok(meta.pos)
                         });
                     (iter.next(), iter.next())
                 }
                 None => {
                     let p_c = self.array_path.clone();
-                    let mut iter = cursor
-                        .crdt
-                        .scan_path(self.value_path.as_path())
-                        .map(move |p| {
-                            p.and_then(|iv| {
+                    let mut iter =
+                        cursor
+                            .crdt
+                            .scan_path(self.value_path.as_path())
+                            .map(move |iv| {
                                 let meta = array_util::ArrayValue::from_path(
                                     Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
                                 )?;
                                 Ok(meta.pos)
-                            })
-                        });
+                            });
 
                     (None, iter.next())
                 }
@@ -657,7 +626,7 @@ impl ArrayWrapper {
         let existing_meta = cursor
             .crdt
             .scan_path(self.meta_path.as_path())
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<Vec<_>>();
         anyhow::ensure!(!existing_meta.is_empty(), "Value does not exist!");
 
         let mut store = DotStore::new();
@@ -688,7 +657,7 @@ impl ArrayWrapper {
             .crdt
             .scan_path(self.value_path.as_path())
             .next()
-            .context("Concurrent access")??;
+            .context("Concurrent access")?;
         let p = Path::new(&old);
         expired.insert(p.to_owned());
         let v = self.get_value(p)?;
@@ -715,7 +684,6 @@ impl ArrayWrapper {
             .scan_path(self.value_path.as_path())
             .chain(cursor.crdt.scan_path(self.meta_path.as_path()))
         {
-            let e = e?;
             let mut p = Path::new(&e).to_owned();
             cursor.sign(&mut p);
             expired.insert(p);

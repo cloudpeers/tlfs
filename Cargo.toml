@@ -26,7 +26,6 @@ futures = "0.3.17"
 libp2p-broadcast = "0.6.0"
 log-panics = "2.0.0"
 rkyv = "0.7.19"
-sled = { git = "https://github.com/spacejam/sled" }
 tlfs-crdt = { version = "0.1.0", path = "crdt" }
 tracing = "0.1.29"
 tracing-log = "0.1.2"
