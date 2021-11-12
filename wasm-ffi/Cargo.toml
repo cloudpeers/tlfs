@@ -17,7 +17,7 @@ js-sys = "0.3.55"
 parking_lot = { version = "0.11.2", features = ["wasm-bindgen"] }
 wee_alloc = "0.4.5"
 web-sys = "0.3.55"
-libp2p = { version = "0.40.0-rc.2", features = [
+libp2p = { version = "0.41.0", features = [
   "ping",
   "gossipsub",
   "noise",
