@@ -43,6 +43,7 @@ features = [
     "tcp-async-io",
     "yamux",
     "websocket",
+    "wasm-bindgen"
 ]
 
 [dev-dependencies]

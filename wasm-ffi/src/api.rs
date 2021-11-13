@@ -2,7 +2,7 @@ use js_sys::{Array, Object, Proxy, Reflect};
 use libp2p::Multiaddr;
 use log::*;
 use std::{cell::RefCell, rc::Rc};
-use tlfs::{Backend, Causal, Doc, Sdk, ToLibp2pKeypair};
+use tlfs::{Backend, Causal, Doc, Package, Sdk, ToLibp2pKeypair};
 use wasm_bindgen::prelude::*;
 
 use crate::p2p::mk_transport;
@@ -31,7 +31,7 @@ impl LocalFirst {
             .unwrap();
         let cloud_relay =
             vec!["/dns4/local1st.net/tcp/4002/wss/p2p/12D3KooWCL3666CJUm6euzw34jMure6rgkQmW21qK4m4DEd9iWGy".parse().unwrap()];
-        Self::spawn(signaling_server, cloud_relay, "demo".into(), &[])
+        Self::spawn(signaling_server, cloud_relay, "demo".into(), &[0u8; 8])
             .await
             .map_err(map_err)
     }
@@ -268,11 +268,11 @@ impl DocWrapper {
         Ok(())
     }
 
-    /// Applies a transaction to the document.
-    pub fn apply(&self, causal: &JsValue) -> Result<(), JsValue> {
-        let causal: Causal = causal.into_serde().map_err(map_err)?;
-        self.inner.apply(causal).map_err(map_err)
-    }
+    //    /// Applies a transaction to the document.
+    //    pub fn apply(&self, causal: &JsValue) -> Result<(), JsValue> {
+    //        let causal: Causal = causal.into_serde().map_err(map_err)?;
+    //        self.inner.apply(causal).map_err(map_err)
+    //    }
 }
 
 fn map_err(err: impl std::fmt::Display) -> JsValue {

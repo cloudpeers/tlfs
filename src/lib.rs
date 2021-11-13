@@ -5,9 +5,6 @@
 mod sync;
 
 pub use crate::sync::ToLibp2pKeypair;
-use futures::Future;
-use libp2p::core::muxing::StreamMuxerBox;
-use libp2p::core::transport::Boxed;
 pub use libp2p::Multiaddr;
 pub use tlfs_crdt::{
     Backend, Causal, Cursor, DocId, Event, Frontend, Keypair, Kind, Lens, Lenses, Package, PeerId,
@@ -16,17 +13,17 @@ pub use tlfs_crdt::{
 
 use crate::sync::{Behaviour, ToLibp2pPublic};
 use anyhow::Result;
-use futures::channel::{mpsc, oneshot};
-use futures::future::poll_fn;
-use futures::stream::Stream;
-use libp2p::Swarm;
-use std::path::Path;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::Poll;
-use tlfs_crdt::{ FileStorage,  MemStorage, Storage};
-use tracing_subscriber::fmt::format::FmtSpan;
-use tracing_subscriber::EnvFilter;
+use futures::{
+    channel::{mpsc, oneshot},
+    future::poll_fn,
+    stream::Stream,
+    Future,
+};
+use libp2p::{
+    core::{muxing::StreamMuxerBox, transport::Boxed},
+    Swarm,
+};
+use std::{path::Path, pin::Pin, sync::Arc, task::Poll};
 
 /// Main entry point for `tlfs`.
 pub struct Sdk {
@@ -39,7 +36,7 @@ impl Sdk {
     /// Creates a new persistent [`Sdk`] instance.
     #[cfg(not(target_arch = "wasm32"))]
     pub async fn persistent(db: &Path, package: &[u8]) -> Result<Self> {
-        let (sdk, driver) = Self::new(Arc::new(FileStorage::new(db)), package).await?;
+        let (sdk, driver) = Self::new(Arc::new(tlfs_crdt::FileStorage::new(db)), package).await?;
         async_global_executor::spawn::<_, ()>(driver).detach();
 
         Ok(sdk)
@@ -48,7 +45,7 @@ impl Sdk {
     /// Create a new in-memory [`Sdk`] instance.
     #[cfg(not(target_arch = "wasm32"))]
     pub async fn in_memory(package: &[u8]) -> Result<Self> {
-        let (sdk, driver) = Self::new(Arc::new(MemStorage::default()), package).await?;
+        let (sdk, driver) = Self::new(Arc::new(tlfs_crdit::MemStorage::default()), package).await?;
         async_global_executor::spawn::<_, ()>(driver).detach();
 
         Ok(sdk)
@@ -56,9 +53,10 @@ impl Sdk {
 
     #[cfg(not(target_arch = "wasm32"))]
     async fn new(
-        storage: Arc<dyn Storage>,
+        storage: Arc<dyn tlfs_crdt::Storage>,
         package: &[u8],
     ) -> Result<(Self, impl Future<Output = ()>)> {
+        use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
         tracing_log::LogTracer::init().ok();
         let env = std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or_else(|_| "info".to_owned());
         let subscriber = tracing_subscriber::FmtSubscriber::builder()
