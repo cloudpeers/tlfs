@@ -2,7 +2,9 @@ use js_sys::{Array, Object, Proxy, Reflect};
 use libp2p::Multiaddr;
 use log::*;
 use std::{cell::RefCell, rc::Rc};
-use tlfs::{Backend, Causal, Doc, Package, Sdk, ToLibp2pKeypair};
+use tlfs::{
+    Backend, Causal, Doc, Kind, Lens, Lenses, Package, PrimitiveKind, Ref, Sdk, ToLibp2pKeypair,
+};
 use wasm_bindgen::prelude::*;
 
 use crate::p2p::mk_transport;
@@ -31,9 +33,40 @@ impl LocalFirst {
             .unwrap();
         let cloud_relay =
             vec!["/dns4/local1st.net/tcp/4002/wss/p2p/12D3KooWCL3666CJUm6euzw34jMure6rgkQmW21qK4m4DEd9iWGy".parse().unwrap()];
-        Self::spawn(signaling_server, cloud_relay, "demo".into(), &[0u8; 8])
-            .await
-            .map_err(map_err)
+        let mut lenses = vec![
+            Lens::Make(Kind::Struct),
+            Lens::AddProperty("todos".into()),
+            Lens::Make(Kind::Table(PrimitiveKind::U64)).lens_in("todos"),
+            Lens::Make(Kind::Struct).lens_map_value().lens_in("todos"),
+            Lens::AddProperty("title".into())
+                .lens_map_value()
+                .lens_in("todos"),
+            Lens::Make(Kind::Reg(PrimitiveKind::Str))
+                .lens_in("title")
+                .lens_map_value()
+                .lens_in("todos"),
+            Lens::AddProperty("complete".into())
+                .lens_map_value()
+                .lens_in("todos"),
+            Lens::Make(Kind::Flag)
+                .lens_in("complete")
+                .lens_map_value()
+                .lens_in("todos"),
+        ];
+        let packages = vec![Package::new(
+            "todoapp".into(),
+            8,
+            &Lenses::new(lenses.clone()),
+        )];
+
+        Self::spawn(
+            signaling_server,
+            cloud_relay,
+            "demo".into(),
+            Ref::archive(&packages).as_bytes(),
+        )
+        .await
+        .map_err(map_err)
     }
 
     async fn spawn(

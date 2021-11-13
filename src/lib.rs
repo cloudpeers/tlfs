@@ -8,7 +8,7 @@ pub use crate::sync::ToLibp2pKeypair;
 pub use libp2p::Multiaddr;
 pub use tlfs_crdt::{
     Backend, Causal, Cursor, DocId, Event, Frontend, Keypair, Kind, Lens, Lenses, Package, PeerId,
-    Permission, PrimitiveKind, Schema, Subscriber,
+    Permission, PrimitiveKind, Ref, Schema, Subscriber,
 };
 
 use crate::sync::{Behaviour, ToLibp2pPublic};
@@ -256,7 +256,6 @@ mod tests {
     use super::*;
     use futures::StreamExt;
     use std::time::Duration;
-    use tlfs_crdt::Ref;
 
     #[async_std::test]
     async fn test_api() -> Result<()> {
