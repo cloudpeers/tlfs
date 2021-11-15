@@ -443,19 +443,17 @@ impl BlobSet {
         self.0.lock().flush()
     }
 
-    pub fn insert(&self, key: impl AsRef<[u8]>) -> anyhow::Result<()> {
+    pub fn insert(&self, key: impl AsRef<[u8]>) {
         let t: ArcRadixTree<u8, ()> = ArcRadixTree::single(key.as_ref(), ());
         // right biased union
         let mut db = self.0.lock();
         db.tree_mut().union_with(&t);
-        db.flush()
     }
 
-    pub fn remove(&self, key: impl AsRef<[u8]>) -> anyhow::Result<()> {
+    pub fn remove(&self, key: impl AsRef<[u8]>) {
         let t = ArcRadixTree::single(key.as_ref(), ());
         let mut db = self.0.lock();
         db.tree_mut().difference_with(&t);
-        db.flush()
     }
 
     pub fn contains(&self, key: impl AsRef<[u8]>) -> bool {
