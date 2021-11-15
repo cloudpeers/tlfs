@@ -439,15 +439,23 @@ impl BlobSet {
         Ok(Self(Arc::new(Mutex::new(RadixDb::load(storage, name)?))))
     }
 
-    pub fn insert(&self, key: impl AsRef<[u8]>) {
-        let t: ArcRadixTree<u8, ()> = ArcRadixTree::single(key.as_ref(), ());
-        // right biased union
-        self.0.lock().tree_mut().union_with(&t);
+    pub fn flush(&self) -> anyhow::Result<()> {
+        self.0.lock().flush()
     }
 
-    pub fn remove(&self, key: impl AsRef<[u8]>) {
+    pub fn insert(&self, key: impl AsRef<[u8]>) -> anyhow::Result<()> {
+        let t: ArcRadixTree<u8, ()> = ArcRadixTree::single(key.as_ref(), ());
+        // right biased union
+        let mut db = self.0.lock();
+        db.tree_mut().union_with(&t);
+        db.flush()
+    }
+
+    pub fn remove(&self, key: impl AsRef<[u8]>) -> anyhow::Result<()> {
         let t = ArcRadixTree::single(key.as_ref(), ());
-        self.0.lock().tree_mut().difference_with(&t);
+        let mut db = self.0.lock();
+        db.tree_mut().difference_with(&t);
+        db.flush()
     }
 
     pub fn contains(&self, key: impl AsRef<[u8]>) -> bool {
@@ -495,10 +503,12 @@ impl BlobMap {
     pub fn insert(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> anyhow::Result<()> {
         let t = ArcRadixTree::single(key.as_ref(), value.as_ref().into());
         // right biased union
-        self.0.lock().tree_mut().outer_combine_with(&t, |a, b| {
+        let mut db = self.0.lock();
+        db.tree_mut().outer_combine_with(&t, |a, b| {
             *a = b.clone();
             true
         });
+        db.flush()?;
         Ok(())
     }
 
@@ -510,16 +520,20 @@ impl BlobMap {
         let value = Ref::archive(value);
         let t = ArcRadixTree::single(key.as_ref(), value.as_arc().clone());
         // right biased union
-        self.0.lock().tree_mut().outer_combine_with(&t, |a, b| {
+        let mut db = self.0.lock();
+        db.tree_mut().outer_combine_with(&t, |a, b| {
             *a = b.clone();
             true
         });
+        db.flush()?;
         Ok(())
     }
 
     pub fn remove(&self, key: impl AsRef<[u8]>) -> anyhow::Result<()> {
         let t = ArcRadixTree::single(key.as_ref(), ());
-        self.0.lock().tree_mut().difference_with(&t);
+        let mut db = self.0.lock();
+        db.tree_mut().difference_with(&t);
+        db.flush()?;
         Ok(())
     }
 

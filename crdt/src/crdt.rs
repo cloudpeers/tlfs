@@ -310,9 +310,10 @@ impl Crdt {
                 .policy()
                 .is_some()
             {
-                self.store.insert(path);
+                self.store.insert(path)?;
             }
         }
+        self.store.flush()?;
         Ok(())
     }
 
@@ -329,7 +330,7 @@ impl Crdt {
                     tracing::info!("join: peer is unauthorized to insert {}", path);
                     continue;
                 }
-                self.store.insert(&path);
+                self.store.insert(&path)?;
             }
         }
         for buf in causal.expired.iter() {
@@ -340,10 +341,12 @@ impl Crdt {
                 continue;
             }
             if self.store.contains(store_path) {
-                self.store.remove(store_path);
+                self.store.remove(store_path)?;
             }
-            self.expired.insert(&path);
+            self.expired.insert(&path)?;
         }
+        self.store.flush()?;
+        self.expired.flush()?;
         Ok(())
     }
 
@@ -400,11 +403,13 @@ impl Crdt {
         let mut path = PathBuf::new();
         path.doc(doc);
         for k in self.store.scan_prefix(&path) {
-            self.store.remove(k);
+            self.store.remove(k)?;
         }
         for k in self.expired.scan_prefix(&path) {
-            self.expired.remove(k);
+            self.expired.remove(k)?;
         }
+        self.store.flush()?;
+        self.expired.flush()?;
         Ok(())
     }
 
@@ -414,17 +419,19 @@ impl Crdt {
         for k in self.scan_path(path.as_path()) {
             let path = Path::new(&k);
             if let Some(path) = from.transform_path(path, to) {
-                self.store.insert(path);
+                self.store.insert(path)?;
             }
-            self.store.remove(k);
+            self.store.remove(k)?;
         }
         for k in self.scan_path(path.as_path()) {
             let path = Path::new(&k);
             if let Some(path) = from.transform_path(path, to) {
-                self.expired.insert(path);
+                self.expired.insert(path)?;
             }
-            self.expired.remove(k);
+            self.expired.remove(k)?;
         }
+        self.store.flush()?;
+        self.expired.flush()?;
         Ok(())
     }
 }
