@@ -17,14 +17,11 @@ use rkyv::{
     archived_root,
     de::{deserializers::SharedDeserializeMapError, SharedDeserializeRegistry, SharedPointer},
     ser::{
-        serializers::{AllocScratch, FallbackScratch, HeapScratch},
-        Serializer,
-    },
-    ser::{
         serializers::{
-            AllocSerializer, CompositeSerializer, SharedSerializeMapError, WriteSerializer,
+            AllocScratch, AllocSerializer, CompositeSerializer, FallbackScratch, HeapScratch,
+            SharedSerializeMapError, WriteSerializer,
         },
-        SharedSerializeRegistry,
+        Serializer, SharedSerializeRegistry,
     },
     AlignedVec, Archive, Archived, Deserialize, Fallible, Serialize,
 };
@@ -34,28 +31,38 @@ use vec_collections::{
 
 use crate::Ref;
 
-pub struct Batch<K: TKey, V: TValue> {
+/// The difference between a tree at one point in time `v0` and at a later point in time `v1`.
+///
+/// This can be used to compute all values that have been added and removed.
+pub struct Diff<K: TKey, V: TValue> {
     v0: ArcRadixTree<K, V>,
     v1: ArcRadixTree<K, V>,
 }
 
-impl<K: TKey, V: TValue> Batch<K, V> {
+impl<K: TKey, V: TValue> Diff<K, V> {
+    /// the previous state as a tree
     pub fn prev(&self) -> &ArcRadixTree<K, V> {
         &self.v0
     }
+    /// the current state as a tree
     pub fn curr(&self) -> &ArcRadixTree<K, V> {
         &self.v1
     }
+    /// All added items as a tree
     pub fn added(&self) -> ArcRadixTree<K, V> {
         let mut res = self.v1.clone();
         res.difference_with(&self.v0);
         res
     }
+    /// All removed items as a tree
     pub fn removed(&self) -> ArcRadixTree<K, V> {
         let mut res = self.v0.clone();
         res.difference_with(&self.v1);
         res
     }
+    /// Iterate over all changes from the previous to the current tree.
+    ///
+    /// The format is `(k, Some(v))` for added entries and `(k, None)` for removed entries.
     pub fn iter<'a>(&self) -> impl Iterator<Item = (IterKey<K>, Option<&'a V>)> + 'a {
         let added = self.added().into_iter().map(|(k, v)| (k, Some(v)));
         let removed = self.removed().into_iter().map(|(k, _)| (k, None));
@@ -150,13 +157,13 @@ pub trait AbstractRadixDb<K: TKey, V: TValue> {
     fn flush(&mut self) -> anyhow::Result<()>;
     fn vacuum(&mut self) -> anyhow::Result<()>;
     fn watch(&mut self) -> futures::channel::mpsc::UnboundedReceiver<ArcRadixTree<K, V>>;
-    fn watch_prefix(&mut self, prefix: Vec<K>) -> BoxStream<'static, Batch<K, V>> {
+    fn watch_prefix(&mut self, prefix: Vec<K>) -> BoxStream<'static, Diff<K, V>> {
         let tree = self.tree().clone();
         self.watch()
             .scan(tree, move |prev, curr| {
                 let v0 = prev.filter_prefix(&prefix);
                 let v1 = curr.filter_prefix(&prefix);
-                future::ready(Some(Batch { v0, v1 }))
+                future::ready(Some(Diff { v0, v1 }))
             })
             .boxed()
     }
@@ -370,6 +377,8 @@ where
             .map_err(|e| anyhow::anyhow!("Error while serializing: {}", e))?;
         let (_, _, map) = serializer.into_components();
         // compute just the current arcs of the current tree
+        // this increases the strong count for all the arcs in the current tree and therefore
+        // disables copy on write for these nodes.
         let mut arcs = BTreeMap::default();
         self.tree.all_arcs(&mut arcs);
         // store the new file and the new arcs
@@ -393,6 +402,8 @@ where
         serializer
             .serialize_value(&self.tree)
             .map_err(|e| anyhow::anyhow!("Error while serializing: {}", e))?;
+        // this increases the strong count for all the arcs in the current tree and therefore
+        // disables copy on write for these nodes.
         self.tree.all_arcs(&mut arcs);
         let (_, _, map) = serializer.into_components();
         self.storage.append(&self.name, &t)?;
@@ -457,7 +468,7 @@ impl BlobSet {
     pub fn watch_prefix<'a>(
         &'a self,
         prefix: impl AsRef<[u8]>,
-    ) -> BoxStream<'static, Batch<u8, ()>> {
+    ) -> BoxStream<'static, Diff<u8, ()>> {
         self.0.lock().watch_prefix(prefix.as_ref().into())
     }
 }
@@ -533,7 +544,7 @@ impl BlobMap {
     pub fn watch_prefix<'a>(
         &'a self,
         prefix: impl AsRef<[u8]>,
-    ) -> BoxStream<'static, Batch<u8, Arc<[u8]>>> {
+    ) -> BoxStream<'static, Diff<u8, Arc<[u8]>>> {
         self.0.lock().watch_prefix(prefix.as_ref().into())
     }
 }
