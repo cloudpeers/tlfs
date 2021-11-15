@@ -5,6 +5,7 @@ use crate::cursor::Cursor;
 use crate::id::{DocId, PeerId};
 use crate::lens::LensesRef;
 use crate::path::Path;
+use crate::radixdb::{BlobMap, BlobSet, Storage};
 use crate::registry::{Expanded, Hash, Registry};
 use crate::util::Ref;
 use anyhow::{anyhow, Result};
@@ -50,26 +51,30 @@ impl ArchivedSchemaInfo {
 }
 
 #[derive(Clone)]
-struct Docs(sled::Tree);
+struct Docs(BlobMap);
 
 impl Docs {
-    pub fn new(tree: sled::Tree) -> Self {
+    pub fn new(tree: BlobMap) -> Self {
         Self(tree)
     }
 
-    pub fn docs(&self) -> impl Iterator<Item = Result<DocId>> {
-        self.0.iter().keys().filter_map(|r| match r {
-            Ok(k) if k[32] == 1 => Some(Ok(DocId::new((&k[..32]).try_into().unwrap()))),
-            Ok(_) => None,
-            Err(err) => Some(Err(err.into())),
+    pub fn docs(&self) -> impl Iterator<Item = Result<DocId>> + '_ {
+        self.0.iter().filter_map(|(k, _)| {
+            if k[32] == 1 {
+                Some(Ok(DocId::new((&k[..32]).try_into().unwrap())))
+            } else {
+                None
+            }
         })
     }
 
-    pub fn keys(&self) -> impl Iterator<Item = Result<PeerId>> {
-        self.0.iter().keys().filter_map(|r| match r {
-            Ok(k) if k[32] == 2 => Some(Ok(PeerId::new((&k[..32]).try_into().unwrap()))),
-            Ok(_) => None,
-            Err(err) => Some(Err(err.into())),
+    pub fn keys(&self) -> impl Iterator<Item = Result<PeerId>> + '_ {
+        self.0.iter().filter_map(|(k, _)| {
+            if k[32] == 2 {
+                Some(Ok(PeerId::new((&k[..32]).try_into().unwrap())))
+            } else {
+                None
+            }
         })
     }
 
@@ -83,7 +88,7 @@ impl Docs {
         Ok(())
     }
 
-    pub fn docs_by_schema(&self, schema: String) -> impl Iterator<Item = Result<DocId>> {
+    pub fn docs_by_schema(&self, schema: String) -> impl Iterator<Item = Result<DocId>> + '_ {
         let docs = self.clone();
         self.docs()
             .map(move |res| {
@@ -110,7 +115,7 @@ impl Docs {
         let mut key = [0; 33];
         key[..32].copy_from_slice(id.as_ref());
         key[32] = 0;
-        self.0.insert(key, Ref::archive(schema).as_bytes())?;
+        self.0.insert_archived(key, schema)?;
         Ok(())
     }
 
@@ -237,14 +242,14 @@ pub struct Backend {
 }
 
 impl Backend {
-    /// Creates a new [`Backend`] from a [`sled::Db`].
-    pub fn new(db: sled::Db, package: &[u8]) -> Result<Self> {
+    /// Creates a new [`Backend`] from a radixdb storage.
+    pub fn new(storage: Arc<dyn Storage>, package: &[u8]) -> Result<Self> {
         let registry = Registry::new(package)?;
-        let docs = Docs::new(db.open_tree("docs")?);
-        let acl = Acl::new(db.open_tree("acl")?);
+        let docs = Docs::new(BlobMap::load(storage.clone(), "docs")?);
+        let acl = Acl::new(BlobMap::load(storage.clone(), "acl")?);
         let crdt = Crdt::new(
-            db.open_tree("store")?,
-            db.open_tree("expired")?,
+            BlobSet::load(storage.clone(), "store")?,
+            BlobSet::load(storage, "expired")?,
             acl.clone(),
         );
         let engine = Engine::new(acl)?;
@@ -283,6 +288,8 @@ impl Backend {
     pub fn memory(packages: &Vec<crate::registry::Package>) -> Result<Self> {
         use tracing_subscriber::fmt::format::FmtSpan;
         use tracing_subscriber::EnvFilter;
+
+        use crate::MemStorage;
         tracing_log::LogTracer::init().ok();
         let env = std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or_else(|_| "info".to_owned());
         let subscriber = tracing_subscriber::FmtSubscriber::builder()
@@ -293,10 +300,7 @@ impl Backend {
         tracing::subscriber::set_global_default(subscriber).ok();
         log_panics::init();
         let package = Ref::archive(packages);
-        Self::new(
-            sled::Config::new().temporary(true).open()?,
-            package.as_bytes(),
-        )
+        Self::new(Arc::new(MemStorage::default()), package.as_bytes())
     }
 
     /// Returns a reference to the lens registry.
@@ -305,8 +309,7 @@ impl Backend {
     }
 
     fn update_acl(&mut self) -> Result<()> {
-        for res in self.crdt.iter() {
-            let key = res?;
+        for key in self.crdt.iter() {
             let path = Path::new(&key[..]);
             self.engine.add_policy(path);
         }
@@ -416,12 +419,12 @@ impl Frontend {
     }
 
     /// Returns an iterator of [`DocId`].
-    pub fn docs(&self) -> impl Iterator<Item = Result<DocId>> {
+    pub fn docs(&self) -> impl Iterator<Item = Result<DocId>> + '_ {
         self.docs.docs()
     }
 
     /// Returns an iterator of [`DocId`].
-    pub fn docs_by_schema(&self, schema: String) -> impl Iterator<Item = Result<DocId>> {
+    pub fn docs_by_schema(&self, schema: String) -> impl Iterator<Item = Result<DocId>> + '_ {
         self.docs.docs_by_schema(schema)
     }
 

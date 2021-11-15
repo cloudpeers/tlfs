@@ -18,8 +18,9 @@ use futures::stream::Stream;
 use libp2p::Swarm;
 use std::path::Path;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::Poll;
-use tlfs_crdt::{Backend, Frontend};
+use tlfs_crdt::{Backend, FileStorage, Frontend, MemStorage, Storage};
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::EnvFilter;
 
@@ -33,15 +34,15 @@ pub struct Sdk {
 impl Sdk {
     /// Creates a new persistent [`Sdk`] instance.
     pub async fn persistent(db: &Path, package: &[u8]) -> Result<Self> {
-        Self::new(sled::Config::new().path(db).open()?, package).await
+        Self::new(Arc::new(FileStorage::new(db)), package).await
     }
 
     /// Create a new in-memory [`Sdk`] instance.
     pub async fn memory(package: &[u8]) -> Result<Self> {
-        Self::new(sled::Config::new().temporary(true).open()?, package).await
+        Self::new(Arc::new(MemStorage::default()), package).await
     }
 
-    async fn new(db: sled::Db, package: &[u8]) -> Result<Self> {
+    async fn new(storage: Arc<dyn Storage>, package: &[u8]) -> Result<Self> {
         tracing_log::LogTracer::init().ok();
         let env = std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or_else(|_| "info".to_owned());
         let subscriber = tracing_subscriber::FmtSubscriber::builder()
@@ -52,7 +53,7 @@ impl Sdk {
         tracing::subscriber::set_global_default(subscriber).ok();
         log_panics::init();
 
-        let backend = Backend::new(db, package)?;
+        let backend = Backend::new(storage, package)?;
         let frontend = backend.frontend();
 
         let keypair = frontend.default_keypair()?;
@@ -133,7 +134,7 @@ impl Sdk {
     }
 
     /// Returns an iterator of [`DocId`].
-    pub fn docs(&self, schema: String) -> impl Iterator<Item = Result<DocId>> {
+    pub fn docs(&self, schema: String) -> impl Iterator<Item = Result<DocId>> + '_ {
         self.frontend.docs_by_schema(schema)
     }
 
