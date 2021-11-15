@@ -461,6 +461,11 @@ impl BlobSet {
         lock.tree().contains_key(key.as_ref())
     }
 
+    pub fn contains_prefix(&self, prefix: impl AsRef<[u8]>) -> bool {
+        let lock = self.0.lock();
+        lock.tree().scan_prefix(prefix.as_ref()).next().is_some()
+    }
+
     pub fn keys(&self) -> impl Iterator<Item = IterKey<u8>> {
         let tree = self.0.lock().tree().clone();
         tree.into_iter().map(|(k, _)| k)
@@ -498,7 +503,7 @@ impl BlobMap {
         Ok(Self(Arc::new(Mutex::new(RadixDb::load(storage, name)?))))
     }
 
-    pub fn insert(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> anyhow::Result<()> {
+    pub fn insert(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) {
         let t = ArcRadixTree::single(key.as_ref(), value.as_ref().into());
         // right biased union
         let mut db = self.0.lock();
@@ -506,15 +511,14 @@ impl BlobMap {
             *a = b.clone();
             true
         });
-        db.flush()?;
-        Ok(())
     }
 
+    /// Archive and insert a value. This will auto-flush.
     pub fn insert_archived<T: Archive + Serialize<AllocSerializer<256>>>(
         &self,
         key: impl AsRef<[u8]>,
         value: &T,
-    ) -> anyhow::Result<()> {
+    ) {
         let value = Ref::archive(value);
         let t = ArcRadixTree::single(key.as_ref(), value.as_arc().clone());
         // right biased union
@@ -523,16 +527,12 @@ impl BlobMap {
             *a = b.clone();
             true
         });
-        db.flush()?;
-        Ok(())
     }
 
-    pub fn remove(&self, key: impl AsRef<[u8]>) -> anyhow::Result<()> {
+    pub fn remove(&self, key: impl AsRef<[u8]>) {
         let t = ArcRadixTree::single(key.as_ref(), ());
         let mut db = self.0.lock();
         db.tree_mut().difference_with(&t);
-        db.flush()?;
-        Ok(())
     }
 
     pub fn get(&self, key: impl AsRef<[u8]>) -> anyhow::Result<Option<Arc<[u8]>>> {
@@ -558,5 +558,9 @@ impl BlobMap {
         prefix: impl AsRef<[u8]>,
     ) -> BoxStream<'static, Diff<u8, Arc<[u8]>>> {
         self.0.lock().watch_prefix(prefix.as_ref().into())
+    }
+
+    pub fn flush(&self) -> anyhow::Result<()> {
+        self.0.lock().flush()
     }
 }

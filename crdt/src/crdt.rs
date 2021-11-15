@@ -324,8 +324,7 @@ impl Crdt {
     pub fn join(&self, peer: &PeerId, causal: &Causal) -> Result<()> {
         for buf in causal.store.iter() {
             let path = buf.as_path();
-            let is_expired = self.expired.scan_prefix(path.as_ref()).next().is_some();
-            if !is_expired && !causal.expired.contains_prefix(path) {
+            if !self.expired.contains_prefix(path) && !causal.expired.contains_prefix(path) {
                 if !self.can(peer, Permission::Write, path)? {
                     tracing::info!("join: peer is unauthorized to insert {}", path);
                     continue;
@@ -340,9 +339,7 @@ impl Crdt {
                 tracing::info!("join: peer is unauthorized to remove {}", store_path);
                 continue;
             }
-            if self.store.contains(store_path) {
-                self.store.remove(store_path);
-            }
+            self.store.remove(store_path);
             self.expired.insert(&path);
         }
         self.expired.flush()?;

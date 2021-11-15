@@ -82,10 +82,10 @@ impl Docs {
         let mut key = [0; 33];
         key[..32].copy_from_slice(id.as_ref());
         key[32] = 0;
-        self.0.remove(key)?;
+        self.0.remove(key);
         key[32] = 1;
-        self.0.remove(key)?;
-        Ok(())
+        self.0.remove(key);
+        self.0.flush()
     }
 
     pub fn docs_by_schema(&self, schema: String) -> impl Iterator<Item = Result<DocId>> + '_ {
@@ -115,8 +115,8 @@ impl Docs {
         let mut key = [0; 33];
         key[..32].copy_from_slice(id.as_ref());
         key[32] = 0;
-        self.0.insert_archived(key, schema)?;
-        Ok(())
+        self.0.insert_archived(key, schema);
+        self.0.flush()
     }
 
     pub fn peer_id(&self, id: &DocId) -> Result<PeerId> {
@@ -134,8 +134,8 @@ impl Docs {
         let mut key = [0; 33];
         key[..32].copy_from_slice(id.as_ref());
         key[32] = 1;
-        self.0.insert(key, peer.as_ref())?;
-        Ok(())
+        self.0.insert(key, peer.as_ref());
+        self.0.flush()
     }
 
     pub fn add_keypair(&self, keypair: Keypair) -> Result<PeerId> {
@@ -143,7 +143,8 @@ impl Docs {
         let mut key = [0; 33];
         key[..32].copy_from_slice(peer.as_ref());
         key[32] = 2;
-        self.0.insert(key, keypair.as_ref())?;
+        self.0.insert(key, keypair.as_ref());
+        self.0.flush()?;
         Ok(peer)
     }
 
@@ -159,8 +160,8 @@ impl Docs {
         let mut key = [0; 33];
         key[..32].copy_from_slice(peer.as_ref());
         key[32] = 2;
-        self.0.remove(key)?;
-        Ok(())
+        self.0.remove(key);
+        self.0.flush()
     }
 
     /// Returns the default [`Keypair`]. If no default [`Keypair`] is set it will
@@ -180,8 +181,8 @@ impl Docs {
     pub fn set_default_keypair(&self, keypair: &PeerId) -> Result<()> {
         let mut key = [0; 33];
         key[32] = 3;
-        self.0.insert(&key, keypair.as_ref())?;
-        Ok(())
+        self.0.insert(&key, keypair.as_ref());
+        self.0.flush()
     }
 }
 

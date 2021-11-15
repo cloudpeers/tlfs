@@ -320,17 +320,17 @@ impl Acl {
         prefix.peer(&peer);
         prefix.extend(path.child().unwrap());
         self.0
-            .insert_archived(prefix.as_path(), &Rule::new(id, perm))?;
-        Ok(())
+            .insert_archived(prefix.as_path(), &Rule::new(id, perm));
+        self.0.flush()
     }
 
     fn revoke_rules(&self, revoked: BTreeSet<Dot>) -> Result<()> {
         for (k, v) in self.0.iter() {
             if revoked.contains(&Ref::<Rule>::new(v.clone()).as_ref().id) {
-                self.0.remove(k)?;
+                self.0.remove(k);
             }
         }
-        Ok(())
+        self.0.flush()
     }
 
     fn implies(&self, peer: &PeerId, doc: &DocId, perm: Permission, path: Path) -> Result<bool> {
