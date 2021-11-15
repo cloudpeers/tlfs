@@ -1,7 +1,7 @@
 use crate::dotset::Dot;
 use crate::id::{DocId, PeerId};
 use crate::path::{Path, PathBuf};
-use crate::radixdb::{Batch, BlobMap, Storage};
+use crate::radixdb::{BlobMap, Diff, Storage};
 use crate::util::Ref;
 use anyhow::Result;
 use bytecheck::CheckBytes;
@@ -304,7 +304,7 @@ impl Acl {
         Ok(Self(BlobMap::load(storage, name)?))
     }
 
-    pub fn subscribe(&self, doc: &DocId) -> BoxStream<'static, Batch<u8, Arc<[u8]>>> {
+    pub fn subscribe(&self, doc: &DocId) -> BoxStream<'static, Diff<u8, Arc<[u8]>>> {
         let mut path = PathBuf::new();
         path.doc(doc);
         self.0.watch_prefix(path)

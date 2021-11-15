@@ -45,7 +45,7 @@ impl Sdk {
     /// Create a new in-memory [`Sdk`] instance.
     #[cfg(not(target_arch = "wasm32"))]
     pub async fn in_memory(package: &[u8]) -> Result<Self> {
-        let (sdk, driver) = Self::new(Arc::new(tlfs_crdit::MemStorage::default()), package).await?;
+        let (sdk, driver) = Self::new(Arc::new(tlfs_crdt::MemStorage::default()), package).await?;
         async_global_executor::spawn::<_, ()>(driver).detach();
 
         Ok(sdk)

@@ -313,6 +313,7 @@ impl Crdt {
                 self.store.insert(path);
             }
         }
+        self.store.flush()?;
         Ok(())
     }
 
@@ -344,6 +345,8 @@ impl Crdt {
             }
             self.expired.insert(&path);
         }
+        self.expired.flush()?;
+        self.store.flush()?;
         Ok(())
     }
 
@@ -405,6 +408,8 @@ impl Crdt {
         for k in self.expired.scan_prefix(&path) {
             self.expired.remove(k);
         }
+        self.expired.flush()?;
+        self.store.flush()?;
         Ok(())
     }
 
@@ -425,6 +430,8 @@ impl Crdt {
             }
             self.expired.remove(k);
         }
+        self.expired.flush()?;
+        self.store.flush()?;
         Ok(())
     }
 }
