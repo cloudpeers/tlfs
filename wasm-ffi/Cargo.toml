@@ -29,7 +29,7 @@ libp2p = { version = "0.41.0", features = [
   "wasm-bindgen",
   "wasm-ext-websocket"
 ], default_features = false }
-libp2p-webrtc = { git = "https://github.com/wngr/libp2p-webrtc" }
+libp2p-webrtc = "0.2.0"
 anyhow = "1.0.44"
 futures-timer = { version = "3.0.2", features = ["wasm-bindgen"] }
 instant = { version = "0.1.11", features = ["wasm-bindgen"] }

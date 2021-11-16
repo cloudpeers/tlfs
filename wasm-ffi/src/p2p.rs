@@ -173,7 +173,7 @@ impl SwarmWrapper {
                 AddressScore::Infinite,
             );
             for b in &bootstrap {
-                if let Err(e) = swarm.dial_addr(b.clone()) {
+                if let Err(e) = swarm.dial(b.clone()) {
                     error!("Error dialing bootstrap {}: {:#}", b, e);
                 }
             }
@@ -235,7 +235,7 @@ impl State {
     fn handle_command(&mut self, cmd: SwarmCommand) -> bool {
         match cmd {
             SwarmCommand::Dial { addr, tx } => {
-                let _ = tx.send(self.swarm.dial_addr(addr).map_err(Into::into));
+                let _ = tx.send(self.swarm.dial(addr).map_err(Into::into));
             }
             SwarmCommand::GetInfo { tx } => {
                 let _ = tx.send(Ok(self.info.clone()));
@@ -286,7 +286,7 @@ impl State {
                             } else {
                                 a.clone()
                             };
-                        let _ = self.swarm.dial_addr(a_with_p2p);
+                        let _ = self.swarm.dial(a_with_p2p);
                     }
                 }
             }
