@@ -71,7 +71,7 @@ impl Sdk {
                 match cmd {
                     Command::AddAddress(peer, addr) => {
                         swarm.behaviour_mut().add_address(&peer, addr);
-                        if let Err(err) = swarm.dial(&peer.to_libp2p().to_peer_id()) {
+                        if let Err(err) = swarm.dial(peer.to_libp2p().to_peer_id()) {
                             tracing::error!("{}", err);
                         }
                     }
