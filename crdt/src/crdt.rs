@@ -59,6 +59,14 @@ impl DotStore {
     pub fn extend(&mut self, other: Self) {
         self.0.union_with(&other.0)
     }
+
+    pub fn tree(&self) -> &RadixTree<u8, ()> {
+        &self.0
+    }
+
+    pub fn tree_mut(&mut self) -> &mut RadixTree<u8, ()> {
+        &mut self.0
+    }
 }
 
 impl FromIterator<PathBuf> for DotStore {
@@ -322,15 +330,16 @@ impl Crdt {
     /// would be a little bit more complicated to ensure convergence in the presence of
     /// revocations.
     pub fn join(&self, peer: &PeerId, causal: &Causal) -> Result<()> {
-        for buf in causal.store.iter() {
+        let mut store = causal.store.clone();
+        store.tree_mut().remove_prefix_with(&self.expired.tree());
+        store.tree_mut().remove_prefix_with(causal.expired.tree());
+        for buf in store.iter() {
             let path = buf.as_path();
-            if !self.expired.contains_prefix(path) && !causal.expired.contains_prefix(path) {
-                if !self.can(peer, Permission::Write, path)? {
-                    tracing::info!("join: peer is unauthorized to insert {}", path);
-                    continue;
-                }
-                self.store.insert(&path);
+            if !self.can(peer, Permission::Write, path)? {
+                tracing::info!("join: peer is unauthorized to insert {}", path);
+                continue;
             }
+            self.store.insert(&path);
         }
         for buf in causal.expired.iter() {
             let path = buf.as_path();

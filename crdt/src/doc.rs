@@ -311,7 +311,7 @@ impl Backend {
 
     fn update_acl(&mut self) -> Result<()> {
         for key in self.crdt.iter() {
-            let path = Path::new(&key[..]);
+            let path = Path::new(&key);
             self.engine.add_policy(path);
         }
         self.engine.update_acl()

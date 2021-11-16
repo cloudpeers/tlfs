@@ -292,6 +292,7 @@ impl Rule {
     }
 }
 
+/// Stores the current permissions, as doc.peer.<path> => Rule
 #[derive(Clone)]
 pub struct Acl(BlobMap);
 

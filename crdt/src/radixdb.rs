@@ -482,6 +482,10 @@ impl BlobSet {
     ) -> BoxStream<'static, Diff<u8, ()>> {
         self.0.lock().watch_prefix(prefix.as_ref().into())
     }
+
+    pub fn tree(&self) -> ArcRadixTree<u8, ()> {
+        self.0.lock().tree().clone()
+    }
 }
 
 /// A map with blob keys and values, backed by a radix tree
