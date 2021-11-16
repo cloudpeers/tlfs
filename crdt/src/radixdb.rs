@@ -25,7 +25,7 @@ use rkyv::{
     },
     AlignedVec, Archive, Archived, Deserialize, Fallible, Serialize,
 };
-use vec_collections::{
+use vec_collections::radix_tree::{
     AbstractRadixTree, AbstractRadixTreeMut, ArcRadixTree, IterKey, TKey, TValue,
 };
 

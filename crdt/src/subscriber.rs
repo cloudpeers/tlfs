@@ -8,7 +8,7 @@ use rkyv::archived_root;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use vec_collections::IterKey;
+use vec_collections::radix_tree::IterKey;
 
 /// Event returned from a subscription.
 #[derive(Debug)]

@@ -9,7 +9,7 @@ use anyhow::Result;
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Archived, Deserialize, Serialize};
 use std::iter::FromIterator;
-use vec_collections::{AbstractRadixTree, AbstractRadixTreeMut, IterKey, RadixTree};
+use vec_collections::radix_tree::{AbstractRadixTree, AbstractRadixTreeMut, IterKey, RadixTree};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
