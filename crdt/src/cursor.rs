@@ -7,7 +7,6 @@ use crate::id::{DocId, PeerId};
 use crate::path::{Path, PathBuf};
 use crate::schema::{ArchivedSchema, PrimitiveKind, Schema};
 use crate::subscriber::Subscriber;
-use crate::Segment;
 use anyhow::{anyhow, Context, Result};
 use rkyv::Archived;
 use smallvec::SmallVec;
