@@ -7,6 +7,7 @@ use crate::id::{DocId, PeerId};
 use crate::path::{Path, PathBuf};
 use crate::schema::{ArchivedSchema, PrimitiveKind, Schema};
 use crate::subscriber::Subscriber;
+use crate::Segment;
 use anyhow::{anyhow, Context, Result};
 use rkyv::Archived;
 use smallvec::SmallVec;
@@ -23,6 +24,27 @@ pub struct Cursor<'a> {
     path: PathBuf,
     /// Helpers to work with nested ORArrays.
     array: SmallVec<[ArrayWrapper; 1]>,
+}
+
+#[derive(Debug)]
+pub struct OwnedCursor {
+    key: Keypair,
+    peer_id: PeerId,
+    /// The [`Schema`] this [`Cursor`] is pointing to.
+    schema: Archived<Schema>,
+    crdt: Crdt,
+    /// The path this [`Cursor`] is pointing to.
+    path: PathBuf,
+    /// Helpers to work with nested ORArrays.
+    array: SmallVec<[ArrayWrapper; 1]>,
+    id: DocId,
+}
+impl OwnedCursor {
+    pub fn change(&self, f: impl Fn(Cursor)) {
+        let cursor = Cursor::new(self.key, self.id, &self.schema, &self.crdt);
+        //self.schema = cursor.schema.to_owned();
+        f(cursor);
+    }
 }
 
 impl<'a> Cursor<'a> {
@@ -193,6 +215,11 @@ impl<'a> Cursor<'a> {
         } else {
             anyhow::bail!("not an Array<_>");
         }
+    }
+
+    /// Returns the schema this cursor is pointing at.
+    pub fn schema(&self) -> &ArchivedSchema {
+        self.schema
     }
 
     /// Returns if the array is empty.

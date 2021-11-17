@@ -3,7 +3,8 @@ use libp2p::Multiaddr;
 use log::*;
 use std::{cell::RefCell, rc::Rc};
 use tlfs::{
-    Backend, Causal, Doc, Kind, Lens, Lenses, Package, PrimitiveKind, Ref, Sdk, ToLibp2pKeypair,
+    ArchivedSchema, Backend, Cursor, Doc, Kind, Lens, Lenses, Package, PrimitiveKind, Ref, Sdk,
+    ToLibp2pKeypair,
 };
 use wasm_bindgen::prelude::*;
 
@@ -33,25 +34,30 @@ impl LocalFirst {
             .unwrap();
         let cloud_relay =
             vec!["/dns4/local1st.net/tcp/4002/wss/p2p/12D3KooWCL3666CJUm6euzw34jMure6rgkQmW21qK4m4DEd9iWGy".parse().unwrap()];
-        let mut lenses = vec![
+        let lenses = vec![
             Lens::Make(Kind::Struct),
             Lens::AddProperty("todos".into()),
-            Lens::Make(Kind::Table(PrimitiveKind::U64)).lens_in("todos"),
-            Lens::Make(Kind::Struct).lens_map_value().lens_in("todos"),
-            Lens::AddProperty("title".into())
-                .lens_map_value()
-                .lens_in("todos"),
+            Lens::Make(Kind::Table(PrimitiveKind::Str)).lens_in("todos"),
             Lens::Make(Kind::Reg(PrimitiveKind::Str))
-                .lens_in("title")
                 .lens_map_value()
                 .lens_in("todos"),
-            Lens::AddProperty("complete".into())
-                .lens_map_value()
-                .lens_in("todos"),
-            Lens::Make(Kind::Flag)
-                .lens_in("complete")
-                .lens_map_value()
-                .lens_in("todos"),
+            //            Lens::Make(Kind::Reg(PrimitiveKind::Str)).lens_in("todos"),
+            //            Lens::Make(Kind::Table(PrimitiveKind::U64)).lens_in("todos"),
+            //            Lens::Make(Kind::Struct).lens_map_value().lens_in("todos"),
+            //            Lens::AddProperty("title".into())
+            //                .lens_map_value()
+            //                .lens_in("todos"),
+            //            Lens::Make(Kind::Reg(PrimitiveKind::Str))
+            //                .lens_in("title")
+            //                .lens_map_value()
+            //                .lens_in("todos"),
+            //            Lens::AddProperty("complete".into())
+            //                .lens_map_value()
+            //                .lens_in("todos"),
+            //            Lens::Make(Kind::Flag)
+            //                .lens_in("complete")
+            //                .lens_map_value()
+            //                .lens_in("todos"),
         ];
         let packages = vec![Package::new(
             "todoapp".into(),
@@ -181,88 +187,256 @@ struct ProxyHandler {
     // Kept to keep alive
     set: Closure<dyn Fn(JsValue, JsValue, JsValue) -> Result<bool, JsValue>>,
 }
+
 impl ProxyHandler {
     fn proxy(&self) -> Proxy {
         Proxy::new(&self.target, &self.handler)
     }
 }
 
+#[derive(Debug)]
+enum FromJs {
+    Object(JsValue),
+    Array(JsValue),
+    Function(JsValue),
+    String(String),
+    Number(f64),
+    Bool(bool),
+}
+impl From<JsValue> for FromJs {
+    fn from(v: JsValue) -> Self {
+        if v.is_object() {
+            Self::Object(v)
+        } else if Array::is_array(&v) {
+            Self::Array(v)
+        } else if v.is_function() {
+            Self::Function(v)
+        } else if let Some(s) = v.as_string() {
+            Self::String(s)
+        } else if let Some(u) = v.as_f64() {
+            Self::Number(u)
+        } else {
+            Self::Bool(v.as_bool().unwrap())
+        }
+    }
+}
+
+impl FromJs {
+    fn traverse(
+        &self,
+        c: &mut Cursor,
+        mut path: Option<&mut Vec<CursorPath>>,
+    ) -> anyhow::Result<()> {
+        info!("{:?} {:?}", self, c.schema());
+        match (self, c.schema()) {
+            (FromJs::Object(_), _) | (FromJs::Array(_), _) => unreachable!("Handled above"),
+            (FromJs::Function(_), _) => {
+                // JS probably stringifies the fn?
+                //return Ok(JsValue::undefined());
+                anyhow::bail!("Passed a function");
+            }
+            (_, ArchivedSchema::Null) | (_, ArchivedSchema::Flag) | (_, ArchivedSchema::Reg(_)) => {
+                todo!("Error or undefined?")
+            }
+            (FromJs::String(s), ArchivedSchema::Table(_, _)) => {
+                c.key_str(s)?;
+                if let Some(path) = path.as_mut() {
+                    path.push(CursorPath::KeyStr(s.into()));
+                }
+            }
+            (FromJs::String(_), ArchivedSchema::Array(_)) => {
+                anyhow::bail!("Can't index into an array with a string");
+            }
+            (FromJs::String(s), ArchivedSchema::Struct(_)) => {
+                info!("field {:?}", s);
+                c.field(s)?;
+                if let Some(path) = path.as_mut() {
+                    path.push(CursorPath::Field(s.into()));
+                }
+            }
+            (FromJs::Number(n), ArchivedSchema::Table(key_kind, _)) => match key_kind {
+                PrimitiveKind::U64 => {
+                    let n = *n as u64;
+                    c.key_u64(n)?;
+                    if let Some(path) = path.as_mut() {
+                        path.push(CursorPath::KeyU64(n));
+                    }
+                }
+                PrimitiveKind::I64 => {
+                    let n = *n as i64;
+                    c.key_i64(n)?;
+                    if let Some(path) = path.as_mut() {
+                        path.push(CursorPath::KeyI64(n));
+                    }
+                }
+                kind => anyhow::bail!("Can't index into table (expected {:?})", kind),
+            },
+            (FromJs::Number(n), ArchivedSchema::Array(_)) => {
+                let n = *n as usize;
+                c.index(n)?;
+                if let Some(path) = path.as_mut() {
+                    path.push(CursorPath::Index(n));
+                }
+            }
+            (FromJs::Number(_), ArchivedSchema::Struct(_)) => {
+                anyhow::bail!("Can't index into a struct with a number")
+            }
+            (FromJs::Bool(_), ArchivedSchema::Table(_, _)) => todo!(),
+            (FromJs::Bool(_), ArchivedSchema::Array(_)) => {
+                anyhow::bail!("Can't index into an array with a bool");
+            }
+            (FromJs::Bool(_), ArchivedSchema::Struct(_)) => {
+                anyhow::bail!("Can't index into a struct with a bool")
+            }
+        };
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+enum CursorPath {
+    KeyStr(String),
+    Field(String),
+    KeyU64(u64),
+    KeyI64(i64),
+    Index(usize),
+}
+
+impl CursorPath {
+    fn traverse(&self, c: &mut Cursor) -> anyhow::Result<()> {
+        match self {
+            CursorPath::KeyStr(s) => c.key_str(s),
+            CursorPath::Field(s) => c.field(s),
+            CursorPath::KeyU64(n) => c.key_u64(*n),
+            CursorPath::KeyI64(n) => c.key_i64(*n),
+            CursorPath::Index(n) => c.index(*n),
+        }?;
+        Ok(())
+    }
+    fn traverse_vec(v: &[Self], c: &mut Cursor) -> anyhow::Result<()> {
+        for p in v {
+            p.traverse(c)?;
+        }
+        Ok(())
+    }
+}
+
 impl ProxyHandler {
-    fn new(doc: Rc<RefCell<Doc>>) -> Result<Self, JsValue> {
+    fn new(doc: Rc<RefCell<Doc>>, path: Vec<CursorPath>) -> Result<Self, JsValue> {
         let doc_c = doc.clone();
         let ref_stack = Rc::new(RefCell::new(vec![]));
         let ref_stack_c = ref_stack.clone();
 
+        let path_c = path.clone();
         let proxy_get = Closure::wrap(Box::new(move |obj: JsValue, prop: JsValue| {
-            info!("{:?} {:?} ", obj, prop);
-
-            if prop.is_object() || Array::is_array(&prop) {
+            let prop: FromJs = prop.into();
+            info!("proxy_get {:?} {:?} {:?}", obj, prop, path_c);
+            if matches!(prop, FromJs::Array(_) | FromJs::Object(_)) {
                 // `prop` refers deeper into the object. Return a new proxy object for `prop`.
-                let handler = Self::new(doc_c.clone())?;
-                let proxy = handler.proxy();
-                ref_stack_c.borrow_mut().push(handler);
-
-                return Ok(proxy.into());
+                todo!();
+                //                let handler = Self::new(doc_c.clone(), None)?;
+                //                let proxy = handler.proxy();
+                //                ref_stack_c.borrow_mut().push(handler);
+                //
+                //                return Ok(proxy.into());
             }
 
             let doc = doc_c.borrow_mut();
-            let mut c = doc.cursor();
-            if let Some(s) = prop.as_string() {
-                if let Err(e) = c.key_str(&s) {
-                    // TODO: handle `e`
-                    c.field(&s).map_err(map_err)?;
-                }
-            } else if let Some(u) = prop.as_f64() {
-                if let Err(e) = c.key_u64(u as u64) {
-                    // todo handle `e`
-                    c.key_i64(u as i64).map_err(map_err)?;
-                }
-            } else {
-                let b = prop.as_bool().unwrap();
-                c.key_bool(b).map_err(map_err)?;
+            let mut c = {
+                let mut c = doc.cursor();
+                CursorPath::traverse_vec(path_c.as_slice(), &mut c).map_err(map_err)?;
+                c
             };
-            // FIXME: support other data types
-            if let Some(r) = c.strs().map_err(map_err)?.next() {
-                let r = r.map_err(map_err)?;
-                Ok(r.into())
-            } else {
-                Ok(JsValue::undefined())
+            let mut path = path_c.clone();
+            prop.traverse(&mut c, Some(&mut path)).map_err(map_err)?;
+
+            // Return the value or another proxy object when traversing
+            match c.schema() {
+                ArchivedSchema::Null => Ok(JsValue::undefined()),
+                ArchivedSchema::Flag => Ok(JsValue::from(c.enabled().map_err(map_err)?)),
+                ArchivedSchema::Reg(kind) => match kind {
+                    PrimitiveKind::Bool => Ok(c
+                        .bools()
+                        .map_err(map_err)?
+                        .next()
+                        .transpose()
+                        .map_err(map_err)?
+                        .map(JsValue::from)
+                        .unwrap_or_else(JsValue::undefined)),
+                    PrimitiveKind::U64 => Ok(c
+                        .u64s()
+                        .map_err(map_err)?
+                        .next()
+                        .transpose()
+                        .map_err(map_err)?
+                        .map(JsValue::from)
+                        .unwrap_or_else(JsValue::undefined)),
+
+                    PrimitiveKind::I64 => Ok(c
+                        .i64s()
+                        .map_err(map_err)?
+                        .next()
+                        .transpose()
+                        .map_err(map_err)?
+                        .map(JsValue::from)
+                        .unwrap_or_else(JsValue::undefined)),
+
+                    PrimitiveKind::Str => Ok(c
+                        .strs()
+                        .map_err(map_err)?
+                        .next()
+                        .transpose()
+                        .map_err(map_err)?
+                        .map(JsValue::from)
+                        .unwrap_or_else(JsValue::undefined)),
+                },
+                ArchivedSchema::Table(_, _)
+                | ArchivedSchema::Array(_)
+                | ArchivedSchema::Struct(_) => {
+                    info!("returning new proxy!");
+                    let handler = Self::new(doc_c.clone(), path)?;
+                    let proxy = handler.proxy();
+                    ref_stack_c.borrow_mut().push(handler);
+
+                    Ok(proxy.into())
+                }
             }
         })
             as Box<dyn Fn(JsValue, JsValue) -> Result<JsValue, JsValue>>);
-        //        let changes_c = changes.clone();
         let proxy_set = Closure::wrap(Box::new(
             move |obj: JsValue, prop: JsValue, value: JsValue| {
-                info!("{:?} {:?} {:?}", obj, prop, value);
-                let doc = doc.borrow_mut();
-                let mut c = doc.cursor();
-                if let Some(s) = prop.as_string() {
-                    if let Err(e) = c.key_str(&s) {
-                        // TODO; handle `e`
-                        c.field(&s).map_err(map_err)?;
-                    }
-                } else if let Some(f) = prop.as_f64() {
-                    if let Err(e) = c.key_u64(f as u64) {
-                        // TODO; handle `e`
-                        c.key_i64(f as i64).map_err(map_err)?;
-                    }
-                } else {
-                    c.key_bool(prop.as_bool().unwrap()).map_err(map_err)?;
-                }
+                let prop: FromJs = prop.into();
+                info!("proxy_set {:?} {:?} {:?} {:?}", obj, prop, value, path);
 
-                let causal = if let Some(s) = value.as_string() {
-                    c.assign_str(&s).map_err(map_err)?
-                } else if let Some(f) = value.as_f64() {
-                    match c.assign_u64(f as u64) {
-                        Err(e) =>
-                        // TODO; handle `e`
-                        {
-                            c.assign_i64(f as i64).map_err(map_err)?
+                let value: FromJs = value.into();
+                if matches!(value, FromJs::Array(_) | FromJs::Object(_)) {
+                    todo!()
+                }
+                let doc = doc.borrow_mut();
+                let mut c = {
+                    let mut c = doc.cursor();
+                    CursorPath::traverse_vec(path.as_slice(), &mut c).map_err(map_err)?;
+                    c
+                };
+
+                prop.traverse(&mut c, None).map_err(map_err)?;
+
+                let causal = match value {
+                    FromJs::Object(_) | FromJs::Array(_) => unreachable!(),
+                    FromJs::Function(_) => return Err("Passed a function".into()),
+                    FromJs::String(str) => c.assign_str(&str).map_err(map_err)?,
+                    FromJs::Number(f) => {
+                        if let ArchivedSchema::Reg(kind) = c.schema() {
+                            match kind {
+                                PrimitiveKind::U64 => c.assign_u64(f as u64).map_err(map_err)?,
+                                PrimitiveKind::I64 => c.assign_i64(f as i64).map_err(map_err)?,
+                                _ => return Err("Not a Reg<u64|i64>".into()),
+                            }
+                        } else {
+                            return Err("Not a Reg<_>".into());
                         }
-                        Ok(c) => c,
                     }
-                } else {
-                    c.assign_bool(value.as_bool().unwrap()).map_err(map_err)?
+                    FromJs::Bool(b) => c.assign_bool(b).map_err(map_err)?,
                 };
 
                 doc.apply(causal).map_err(map_err)?;
@@ -286,7 +460,7 @@ impl ProxyHandler {
     }
 }
 
-//#[wasm_bindgen]
+#[wasm_bindgen]
 impl DocWrapper {
     /// Returns the document identifier.
     pub fn id(&self) -> String {
@@ -295,17 +469,11 @@ impl DocWrapper {
 
     // TODO: add manual ts types for `f`
     pub fn change(&self, f: &js_sys::Function) -> Result<(), JsValue> {
-        let proxy = ProxyHandler::new(Rc::new(RefCell::new(self.inner.clone())))?;
+        let proxy = ProxyHandler::new(Rc::new(RefCell::new(self.inner.clone())), vec![])?;
 
         f.call1(&JsValue::null(), &proxy.proxy())?;
         Ok(())
     }
-
-    //    /// Applies a transaction to the document.
-    //    pub fn apply(&self, causal: &JsValue) -> Result<(), JsValue> {
-    //        let causal: Causal = causal.into_serde().map_err(map_err)?;
-    //        self.inner.apply(causal).map_err(map_err)
-    //    }
 }
 
 fn map_err(err: impl std::fmt::Display) -> JsValue {
