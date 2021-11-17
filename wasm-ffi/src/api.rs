@@ -374,13 +374,7 @@ impl ProxyHandler {
             let prop: FromJs = prop.into();
             info!("proxy_get {:?} {:?} {:?}", obj, prop, path_c);
             if matches!(prop, FromJs::Array(_) | FromJs::Object(_)) {
-                // `prop` refers deeper into the object. Return a new proxy object for `prop`.
-                todo!();
-                //                let handler = Self::new(doc_c.clone(), None)?;
-                //                let proxy = handler.proxy();
-                //                ref_stack_c.borrow_mut().push(handler);
-                //
-                //                return Ok(proxy.into());
+                todo!("I think this should not happen, pending investigation");
             }
 
             let doc = doc_c.borrow_mut();
