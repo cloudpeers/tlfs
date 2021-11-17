@@ -3,8 +3,8 @@ use libp2p::Multiaddr;
 use log::*;
 use std::{cell::RefCell, rc::Rc};
 use tlfs::{
-    ArchivedSchema, Backend, Cursor, Doc, Kind, Lens, Lenses, Package, PrimitiveKind, Ref, Sdk,
-    ToLibp2pKeypair,
+    ArchivedSchema, Backend, Causal, Cursor, Doc, Kind, Lens, Lenses, Package, PrimitiveKind, Ref,
+    Sdk, ToLibp2pKeypair,
 };
 use wasm_bindgen::prelude::*;
 
@@ -197,7 +197,7 @@ impl ProxyHandler {
 #[derive(Debug)]
 enum FromJs {
     Object(JsValue),
-    Array(JsValue),
+    Array(Array),
     Function(JsValue),
     String(String),
     Number(f64),
@@ -208,7 +208,7 @@ impl From<JsValue> for FromJs {
         if v.is_object() {
             Self::Object(v)
         } else if Array::is_array(&v) {
-            Self::Array(v)
+            Self::Array(Array::from(&v))
         } else if v.is_function() {
             Self::Function(v)
         } else if let Some(s) = v.as_string() {
@@ -290,6 +290,48 @@ impl FromJs {
             }
         };
         Ok(())
+    }
+    fn get_causal(&self, cursor: &mut Cursor) -> anyhow::Result<Causal> {
+        let mut causal = Causal::default();
+        info!("get_causal: {:?}", self);
+        match self {
+            FromJs::Object(value) => {
+                for kv in Object::entries(Object::try_from(value).unwrap()).iter() {
+                    let arr = Array::from(&kv);
+                    let mut a = arr.iter();
+                    let key: FromJs = a.next().unwrap().into();
+                    let mut here = cursor.clone();
+                    key.traverse(&mut here, None)?;
+
+                    let value: FromJs = a.next().unwrap().into();
+                    causal.join(&value.get_causal(&mut here)?);
+                }
+            }
+            FromJs::Array(arr) => {
+                for (idx, value) in arr.iter().enumerate() {
+                    let mut here = cursor.clone();
+                    here.index(idx)?;
+                    let value: FromJs = value.into();
+                    causal.join(&value.get_causal(&mut here)?);
+                }
+            }
+            FromJs::Function(_) => anyhow::bail!("Passed a function"),
+            FromJs::String(str) => causal.join(&cursor.assign_str(str)?),
+            FromJs::Number(f) => {
+                if let ArchivedSchema::Reg(kind) = cursor.schema() {
+                    match kind {
+                        PrimitiveKind::U64 => causal.join(&cursor.assign_u64(*f as u64)?),
+                        PrimitiveKind::I64 => causal.join(&cursor.assign_i64(*f as i64)?),
+                        _ => anyhow::bail!("Not a Reg<u64|i64>"),
+                    }
+                } else {
+                    anyhow::bail!("Not a Reg<_>");
+                }
+            }
+            FromJs::Bool(b) => causal.join(&cursor.assign_bool(*b)?),
+        };
+
+        Ok(causal)
     }
 }
 
@@ -407,40 +449,17 @@ impl ProxyHandler {
             move |obj: JsValue, prop: JsValue, value: JsValue| {
                 let prop: FromJs = prop.into();
                 info!("proxy_set {:?} {:?} {:?} {:?}", obj, prop, value, path);
+                let doc = doc.borrow_mut();
 
                 let value: FromJs = value.into();
-                if matches!(value, FromJs::Array(_) | FromJs::Object(_)) {
-                    todo!()
-                }
-                let doc = doc.borrow_mut();
                 let mut c = {
                     let mut c = doc.cursor();
                     CursorPath::traverse_vec(path.as_slice(), &mut c).map_err(map_err)?;
                     c
                 };
-
                 prop.traverse(&mut c, None).map_err(map_err)?;
-
-                let causal = match value {
-                    FromJs::Object(_) | FromJs::Array(_) => unreachable!(),
-                    FromJs::Function(_) => return Err("Passed a function".into()),
-                    FromJs::String(str) => c.assign_str(&str).map_err(map_err)?,
-                    FromJs::Number(f) => {
-                        if let ArchivedSchema::Reg(kind) = c.schema() {
-                            match kind {
-                                PrimitiveKind::U64 => c.assign_u64(f as u64).map_err(map_err)?,
-                                PrimitiveKind::I64 => c.assign_i64(f as i64).map_err(map_err)?,
-                                _ => return Err("Not a Reg<u64|i64>".into()),
-                            }
-                        } else {
-                            return Err("Not a Reg<_>".into());
-                        }
-                    }
-                    FromJs::Bool(b) => c.assign_bool(b).map_err(map_err)?,
-                };
-
+                let causal = value.get_causal(&mut c).map_err(map_err)?;
                 doc.apply(causal).map_err(map_err)?;
-
                 Ok(true)
             },
         )

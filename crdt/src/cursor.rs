@@ -26,27 +26,6 @@ pub struct Cursor<'a> {
     array: SmallVec<[ArrayWrapper; 1]>,
 }
 
-#[derive(Debug)]
-pub struct OwnedCursor {
-    key: Keypair,
-    peer_id: PeerId,
-    /// The [`Schema`] this [`Cursor`] is pointing to.
-    schema: Archived<Schema>,
-    crdt: Crdt,
-    /// The path this [`Cursor`] is pointing to.
-    path: PathBuf,
-    /// Helpers to work with nested ORArrays.
-    array: SmallVec<[ArrayWrapper; 1]>,
-    id: DocId,
-}
-impl OwnedCursor {
-    pub fn change(&self, f: impl Fn(Cursor)) {
-        let cursor = Cursor::new(self.key, self.id, &self.schema, &self.crdt);
-        //self.schema = cursor.schema.to_owned();
-        f(cursor);
-    }
-}
-
 impl<'a> Cursor<'a> {
     /// Creates a new [`Cursor`].
     pub fn new(key: Keypair, id: DocId, schema: &'a Archived<Schema>, crdt: &'a Crdt) -> Self {
