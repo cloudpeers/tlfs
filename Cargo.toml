@@ -23,7 +23,7 @@ bytecheck = "0.6.5"
 ed25519-dalek = "1.0.1"
 fnv = "1.0.7"
 futures = "0.3.17"
-libp2p-broadcast = "0.6.0"
+libp2p-broadcast = "0.7.0"
 log-panics = "2.0.0"
 rkyv = "0.7.19"
 tlfs-crdt = { version = "0.1.0", path = "crdt" }
@@ -54,7 +54,3 @@ async-global-executor = "2.0.2"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2.78"
-
-[patch.crates-io]
-libp2p = { git = "https://github.com/libp2p/rust-libp2p", rev = "8b68026bb04a469654020a8dcfe68308404e2510" }
-libp2p-broadcast= { git = "https://github.com/wngr/libp2p-broadcast", branch = "libp2p-v41" }
