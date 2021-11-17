@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "capi",
-    "cloud-relay",
+    #"cloud-relay",
     "crdt",
     "tlfsc",
     "wasm-ffi",
@@ -18,7 +18,6 @@ lto = true
 
 [dependencies]
 anyhow = "1.0.44"
-async-global-executor = "2.0.2"
 async-trait = "0.1.51"
 bytecheck = "0.6.5"
 ed25519-dalek = "1.0.1"
@@ -44,7 +43,14 @@ features = [
     "tcp-async-io",
     "yamux",
     "websocket",
+    "wasm-bindgen"
 ]
 
 [dev-dependencies]
 async-std = { version = "1.10.0", features = ["attributes"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+async-global-executor = "2.0.2"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2.78"

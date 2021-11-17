@@ -128,7 +128,7 @@ impl std::fmt::Debug for CausalContext {
 
 /// Represents a state transition of a crdt. Multiple state transitions can be combined
 /// together into an atomic transaction.
-#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize, Default)]
 #[archive_attr(derive(Debug, CheckBytes))]
 #[repr(C)]
 pub struct Causal {

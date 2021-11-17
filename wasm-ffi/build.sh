@@ -61,7 +61,7 @@ fi
 
 if [ -z "${NO_OPTIMIZE}" ]; then
   echo "Optimizing wasm bindings with default optimization (this might take some time)"
-  ./wasm-opt $OUT/local_first_bg.wasm -O -g --output $OUT/local_first_bg.opt.wasm
+  ./wasm-opt $OUT/local_first_bg.wasm -Oz -g --output $OUT/local_first_bg.opt.wasm
 fi
 
 echo "Find your wasm package in $OUT"

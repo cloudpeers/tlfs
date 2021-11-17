@@ -8,6 +8,7 @@ use crate::path::Path;
 use crate::radixdb::{BlobMap, BlobSet, Storage};
 use crate::registry::{Expanded, Hash, Registry};
 use crate::util::Ref;
+use crate::{MemStorage, PathBuf};
 use anyhow::{anyhow, Result};
 use futures::channel::mpsc;
 use futures::prelude::*;
@@ -280,6 +281,11 @@ impl Backend {
             }
         }
         Ok(me)
+    }
+
+    /// Creates a new [`Backend`] from a in memory [`sled::Db`].
+    pub fn in_memory(package: &[u8]) -> Result<Self> {
+        Self::new(Arc::new(MemStorage::default()), package)
     }
 
     /// Creates a new in-memory backend for testing purposes.

@@ -19,6 +19,9 @@ smallvec = "1.7.0"
 tracing = "0.1.29"
 vec-collections = { git = "https://github.com/rklaehn/vec-collections", branch = "radixdb" }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+serde = { version = "1.0.130", features = ["derive"] }
+
 [dev-dependencies]
 async-std = { version = "1.10.0", features = ["attributes"] }
 log-panics = "2.0.0"
