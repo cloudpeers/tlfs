@@ -23,7 +23,7 @@ use libp2p::{
     core::{muxing::StreamMuxerBox, transport::Boxed},
     Swarm,
 };
-use std::{path::Path, pin::Pin, sync::Arc, task::Poll};
+use std::{pin::Pin, task::Poll};
 
 /// Main entry point for `tlfs`.
 pub struct Sdk {
@@ -35,8 +35,12 @@ pub struct Sdk {
 impl Sdk {
     /// Creates a new persistent [`Sdk`] instance.
     #[cfg(not(target_arch = "wasm32"))]
-    pub async fn persistent(db: &Path, package: &[u8]) -> Result<Self> {
-        let (sdk, driver) = Self::new(Arc::new(tlfs_crdt::FileStorage::new(db)), package).await?;
+    pub async fn persistent(db: &std::path::Path, package: &[u8]) -> Result<Self> {
+        let (sdk, driver) = Self::new(
+            std::sync::Arc::new(tlfs_crdt::FileStorage::new(db)),
+            package,
+        )
+        .await?;
         async_global_executor::spawn::<_, ()>(driver).detach();
 
         Ok(sdk)
@@ -44,8 +48,12 @@ impl Sdk {
 
     /// Create a new in-memory [`Sdk`] instance.
     #[cfg(not(target_arch = "wasm32"))]
-    pub async fn in_memory(package: &[u8]) -> Result<Self> {
-        let (sdk, driver) = Self::new(Arc::new(tlfs_crdt::MemStorage::default()), package).await?;
+    pub async fn memory(package: &[u8]) -> Result<Self> {
+        let (sdk, driver) = Self::new(
+            std::sync::Arc::new(tlfs_crdt::MemStorage::default()),
+            package,
+        )
+        .await?;
         async_global_executor::spawn::<_, ()>(driver).detach();
 
         Ok(sdk)
@@ -53,7 +61,7 @@ impl Sdk {
 
     #[cfg(not(target_arch = "wasm32"))]
     async fn new(
-        storage: Arc<dyn tlfs_crdt::Storage>,
+        storage: std::sync::Arc<dyn tlfs_crdt::Storage>,
         package: &[u8],
     ) -> Result<(Self, impl Future<Output = ()>)> {
         use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
@@ -284,7 +292,7 @@ mod tests {
             8,
             &Lenses::new(lenses.clone()),
         )];
-        let sdk = Sdk::in_memory(Ref::archive(&packages).as_bytes()).await?;
+        let sdk = Sdk::memory(Ref::archive(&packages).as_bytes()).await?;
         let doc = sdk.create_doc("todoapp")?;
 
         async_std::task::sleep(Duration::from_millis(100)).await;
@@ -315,7 +323,7 @@ mod tests {
 
         lenses.push(Lens::RenameProperty("todos".into(), "tasks".into()));
         let packages = vec![Package::new("todoapp".into(), 9, &Lenses::new(lenses))];
-        let sdk2 = Sdk::in_memory(Ref::archive(&packages).as_bytes()).await?;
+        let sdk2 = Sdk::memory(Ref::archive(&packages).as_bytes()).await?;
 
         let op = doc
             .cursor()

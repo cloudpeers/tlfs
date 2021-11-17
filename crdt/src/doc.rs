@@ -8,7 +8,7 @@ use crate::path::Path;
 use crate::radixdb::{BlobMap, BlobSet, Storage};
 use crate::registry::{Expanded, Hash, Registry};
 use crate::util::Ref;
-use crate::{MemStorage, PathBuf};
+use crate::MemStorage;
 use anyhow::{anyhow, Result};
 use futures::channel::mpsc;
 use futures::prelude::*;
