@@ -1712,12 +1712,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lazy-init"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23517540be87a91d06324e6bf6286ba8214171123ee8862ae9a5e7d938d71815"
-
-[[package]]
 name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4527,14 +4521,13 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "vec-collections"
-version = "0.3.6"
-source = "git+https://github.com/rklaehn/vec-collections?branch=radixdb#d59f26766fedbc428c003ac630fb2a11d3bddfd5"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a432332822129e5cce0b297e8e7ba2e5545eb9e303d195beeca742d06873482"
 dependencies = [
  "bytecheck",
- "lazy-init",
  "lazy_static",
  "num-traits",
- "parking_lot",
  "rkyv",
  "serde",
  "smallvec",
