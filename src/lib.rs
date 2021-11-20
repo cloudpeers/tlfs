@@ -8,7 +8,7 @@ pub use crate::sync::ToLibp2pKeypair;
 pub use libp2p::Multiaddr;
 pub use tlfs_crdt::{
     ArchivedSchema, Backend, Causal, Cursor, DocId, Event, Frontend, Keypair, Kind, Lens, Lenses,
-    Package, PathBuf, PeerId, Permission, PrimitiveKind, Ref, Schema, Subscriber,
+    Package, PathBuf, PeerId, Permission, Primitive, PrimitiveKind, Ref, Schema, Subscriber,
 };
 
 use crate::sync::{Behaviour, ToLibp2pPublic};

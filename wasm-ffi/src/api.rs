@@ -1,10 +1,10 @@
 use js_sys::{Array, Object, Proxy, Reflect};
-use libp2p::Multiaddr;
+use libp2p::{futures::StreamExt, Multiaddr};
 use log::*;
 use std::{cell::RefCell, rc::Rc};
 use tlfs::{
-    ArchivedSchema, Backend, Causal, Cursor, Doc, Kind, Lens, Lenses, Package, PrimitiveKind, Ref,
-    Sdk, ToLibp2pKeypair,
+    ArchivedSchema, Backend, Causal, Cursor, Doc, Kind, Lens, Lenses, Package, Primitive,
+    PrimitiveKind, Ref, Sdk, ToLibp2pKeypair,
 };
 use wasm_bindgen::prelude::*;
 
@@ -191,6 +191,150 @@ struct ProxyHandler {
 impl ProxyHandler {
     fn proxy(&self) -> Proxy {
         Proxy::new(&self.target, &self.handler)
+    }
+}
+
+struct JsonPointer {
+    tokens: Vec<String>,
+}
+
+impl JsonPointer {
+    fn new(str: &str) -> anyhow::Result<Self> {
+        if str.is_empty() {
+            return Ok(Self { tokens: vec![] });
+        }
+        anyhow::ensure!(str.starts_with('/'), "Invalid pointer");
+        let tokens = str
+            .split('/')
+            .skip(1)
+            .map(|x| x.replace("~1", "/").replace("~0", "~"))
+            .collect();
+        Ok(Self { tokens })
+        //     /// ```
+        //    pub fn pointer(&self, pointer: &str) -> Option<&Value> {
+        //        if pointer == "" {
+        //            return Some(self);
+        //        }
+        //        if !pointer.starts_with('/') {
+        //            return None;
+        //        }
+        //        let tokens = pointer
+        //            .split('/')
+        //            .skip(1)
+        //            .map(|x| x.replace("~1", "/").replace("~0", "~"));
+        //        let mut target = self;
+        //
+        //        for token in tokens {
+        //            let target_opt = match *target {
+        //                Value::Object(ref map) => map.get(&token),
+        //                Value::Array(ref list) => parse_index(&token).and_then(|x| list.get(x)),
+        //                _ => return None,
+        //            };
+        //            if let Some(t) = target_opt {
+        //                target = t;
+        //            } else {
+        //                return None;
+        //            }
+        //        }
+        //        Some(target)
+        //    }
+    }
+    fn goto(&self, cursor: &mut Cursor) -> anyhow::Result<()> {
+        for token in &self.tokens {
+            match cursor.schema() {
+                ArchivedSchema::Table(key_kind, _) => match key_kind {
+                    PrimitiveKind::Bool => {
+                        cursor.key_bool(token.parse()?)?;
+                    }
+                    PrimitiveKind::U64 => {
+                        cursor.key_u64(token.parse()?)?;
+                    }
+                    PrimitiveKind::I64 => {
+                        cursor.key_i64(token.parse()?)?;
+                    }
+                    PrimitiveKind::Str => {
+                        cursor.key_str(token)?;
+                    }
+                },
+
+                ArchivedSchema::Array(_) => {
+                    let idx = if token == "-" {
+                        cursor.len()? as usize
+                    } else {
+                        token.parse()?
+                    };
+                    cursor.index(idx)?;
+                }
+                ArchivedSchema::Struct(_) => {
+                    cursor.field(token)?;
+                }
+                _ => anyhow::bail!("Hit a leaf"),
+            }
+        }
+        Ok(())
+    }
+}
+fn get_value(cursor: &mut Cursor) -> anyhow::Result<JsValue> {
+    match cursor.schema() {
+        ArchivedSchema::Null => Ok(JsValue::undefined()),
+        ArchivedSchema::Flag => Ok(JsValue::from_bool(cursor.enabled()?)),
+        ArchivedSchema::Reg(kind) => Ok(match kind {
+            PrimitiveKind::Bool => cursor.bools()?.next().transpose()?.map(JsValue::from_bool),
+            PrimitiveKind::U64 => cursor
+                .u64s()?
+                .next()
+                .transpose()?
+                .map(|x| JsValue::from_f64(x as f64)),
+            PrimitiveKind::I64 => cursor
+                .i64s()?
+                .next()
+                .transpose()?
+                .map(|x| JsValue::from_f64(x as f64)),
+            PrimitiveKind::Str => cursor.strs()?.next().transpose()?.map(Into::into),
+        }
+        .unwrap_or_else(JsValue::undefined)),
+        ArchivedSchema::Struct(_) | ArchivedSchema::Table(_, _) => {
+            let obj = Object::new();
+            for key in cursor.keys() {
+                let mut here = cursor.clone();
+                let key = key?;
+                let (k, v) = match key {
+                    Primitive::Bool(b) => {
+                        here.key_bool(b)?;
+                        (JsValue::from_bool(b), get_value(&mut here)?)
+                    }
+                    Primitive::U64(n) => {
+                        here.key_u64(n)?;
+                        (JsValue::from_f64(n as f64), get_value(&mut here)?)
+                    }
+                    Primitive::I64(n) => {
+                        here.key_i64(n)?;
+                        (JsValue::from_f64(n as f64), get_value(&mut here)?)
+                    }
+                    Primitive::Str(s) => {
+                        if matches!(cursor.schema(), ArchivedSchema::Struct(_)) {
+                            here.field(&s)?;
+                        } else {
+                            here.key_str(&s)?;
+                        }
+                        (s.into(), get_value(&mut here)?)
+                    }
+                };
+                Reflect::set(&obj, &k, &v).unwrap();
+            }
+            Ok(obj.into())
+        }
+        ArchivedSchema::Array(_) => {
+            let len = cursor.len()?;
+            let arr = Array::new_with_length(len);
+            for i in 0..len {
+                let mut here = cursor.clone();
+                here.index(i as usize)?;
+                let v = get_value(&mut here)?;
+                arr.set(i, v);
+            }
+            Ok(arr.into())
+        }
     }
 }
 
@@ -486,6 +630,34 @@ impl DocWrapper {
 
         f.call1(&JsValue::null(), &proxy.proxy())?;
         Ok(())
+    }
+
+    pub fn subscribe(&self, ptr: &str, callback: js_sys::Function) {
+        let ptr = JsonPointer::new(ptr).map_err(map_err).unwrap();
+        let mut cursor = self.inner.cursor();
+        ptr.goto(&mut cursor).unwrap();
+        let mut sub = cursor.subscribe();
+        let doc = self.inner.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            while let Some(_x) = sub.next().await {
+                // TODO: get val from `_x`
+                let mut c = doc.cursor();
+                ptr.goto(&mut c).unwrap();
+                let val = get_value(&mut c).expect("FIXME");
+                if callback.call1(&JsValue::null(), &val).is_err() {
+                    // TODO: Ownership?
+                    break;
+                }
+            }
+        });
+    }
+
+    #[wasm_bindgen(js_name = "getValue")]
+    pub fn get_value(&self, ptr: &str) -> Result<JsValue, JsValue> {
+        let ptr = JsonPointer::new(ptr).map_err(map_err)?;
+        let mut cursor = self.inner.cursor();
+        ptr.goto(&mut cursor).map_err(map_err)?;
+        get_value(&mut cursor).map_err(map_err)
     }
 }
 

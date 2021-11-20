@@ -10,6 +10,15 @@ use crate::subscriber::Subscriber;
 use anyhow::{anyhow, Context, Result};
 use rkyv::Archived;
 use smallvec::SmallVec;
+use tracing::info;
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub enum Primitive {
+    Bool(bool),
+    U64(u64),
+    I64(i64),
+    Str(String),
+}
 
 /// A cursor into a document used to construct transactions.
 #[derive(Clone, Debug)]
@@ -124,7 +133,24 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    //    pub fn values(&self) -> Result<impl Iterator<Item = Result<Prim
+    /// If the cursor points to a Struct or a Table, returns an iterator of all existing keys.
+    pub fn keys(&self) -> impl Iterator<Item = Result<Primitive>> {
+        let slf = self.path.clone();
+        self.crdt
+            .scan_path(slf.as_path())
+            .map(move |p| {
+                let x = Path::new(&p).strip_prefix(slf.as_path())?;
+                x.as_path().first().context("Empty")
+            })
+            .filter_map(|segment| match segment {
+                Ok(crate::Segment::Bool(b)) => Some(Ok(Primitive::Bool(b))),
+                Ok(crate::Segment::U64(n)) => Some(Ok(Primitive::U64(n))),
+                Ok(crate::Segment::I64(n)) => Some(Ok(Primitive::I64(n))),
+                Ok(crate::Segment::Str(s)) => Some(Ok(Primitive::Str(s))),
+                Ok(_) => None,
+                Err(e) => Some(Err(e)),
+            })
+    }
 
     /// Returns a cursor to a value in a table.
     pub fn key_bool(&mut self, key: bool) -> Result<&mut Self> {
