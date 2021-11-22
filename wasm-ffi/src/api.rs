@@ -7,6 +7,7 @@ use tlfs::{
     PrimitiveKind, Ref, Sdk, ToLibp2pKeypair,
 };
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
 
 use crate::p2p::mk_transport;
 
@@ -27,6 +28,7 @@ pub struct LocalFirst {
 
 #[wasm_bindgen]
 impl LocalFirst {
+    /// Creates a new SDK instance.
     #[wasm_bindgen(js_name = "init")]
     pub async fn new() -> Result<LocalFirst, JsValue> {
         let signaling_server: Multiaddr = "/dns4/local1st.net/tcp/443/wss/p2p-webrtc-star"
@@ -113,23 +115,25 @@ impl LocalFirst {
         Ok(Self { inner })
     }
 
+    /// Returns the Peer ID associated with this SDK.
     #[wasm_bindgen(js_name = "peerId")]
-    pub fn peer_id(&self) -> String {
-        self.inner.peer_id().to_string()
+    pub fn peer_id(&self) -> JsPeerId {
+        JsValue::from(self.inner.peer_id().to_string()).into()
     }
 
-    // TODO: type annotations
-    pub fn docs(&self, schema: String) -> Result<js_sys::Array, JsValue> {
+    /// Returns an array of all local docs matching the given `schema`.
+    pub fn docs(&self, schema: String) -> Result<DocArray, JsValue> {
         wrap(move || {
-            let docs = self
+            let docs: js_sys::Array = self
                 .inner
                 .docs(schema)
                 .map(|x| x.map(|y| JsValue::from(y.to_string())))
                 .collect::<anyhow::Result<_>>()?;
-            Ok(docs)
+            Ok(docs.unchecked_into())
         })
     }
 
+    /// Create a doc with the given `schema`.
     #[wasm_bindgen(js_name = "createDoc")]
     pub fn create_doc(&mut self, schema: &str) -> Result<DocWrapper, JsValue> {
         wrap(|| {
@@ -138,15 +142,21 @@ impl LocalFirst {
         })
     }
 
+    /// Opens a doc associated with the given id.
     #[wasm_bindgen(js_name = "openDoc")]
-    pub fn open_doc(&mut self, doc: String) -> Result<DocWrapper, JsValue> {
+    pub fn open_doc(&mut self, doc_id: JsDocId) -> Result<DocWrapper, JsValue> {
         wrap(|| {
-            let doc = doc.parse()?;
-            let inner = self.inner.doc(doc)?;
-            Ok(DocWrapper { inner })
+            if let Some(s) = doc_id.as_string() {
+                let doc = s.parse()?;
+                let inner = self.inner.doc(doc)?;
+                Ok(DocWrapper { inner })
+            } else {
+                anyhow::bail!("Provide a valid doc id")
+            }
         })
     }
 
+    /// Adds a multi`addr`ess for the given `peer`.
     #[wasm_bindgen(js_name = "addAddress")]
     pub fn add_address(&self, peer: String, addr: String) -> Result<(), JsValue> {
         wrap(|| {
@@ -157,6 +167,7 @@ impl LocalFirst {
         })
     }
 
+    /// Removes a multi`addr`ess for the given `peer`.
     #[wasm_bindgen(js_name = "removeAddress")]
     pub fn remove_address(&self, peer: String, addr: String) -> Result<(), JsValue> {
         wrap(|| {
@@ -527,7 +538,7 @@ impl ProxyHandler {
             let prop: FromJs = prop.into();
             info!("proxy_get {:?} {:?} {:?}", obj, prop, path_c);
             if matches!(prop, FromJs::Array(_) | FromJs::Object(_)) {
-                todo!("I think this should not happen, pending investigation");
+                todo!("I think this must not happen, pending investigation");
             }
 
             let doc = doc_c.borrow_mut();
@@ -647,6 +658,23 @@ impl ProxyHandler {
         })
     }
 }
+#[wasm_bindgen(typescript_custom_section)]
+const ADDITIONAL_TYLES: &'static str = r#"
+ export type PeerId = string;
+ export type DocId = string;
+ "#;
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(typescript_type = "(obj: any) => void")]
+    pub type ChangeCallback;
+    #[wasm_bindgen(typescript_type = "Array<DocId>")]
+    pub type DocArray;
+    #[wasm_bindgen(typescript_type = "PeerId")]
+    pub type JsPeerId;
+    #[wasm_bindgen(typescript_type = "DocId")]
+    pub type JsDocId;
+}
 
 #[wasm_bindgen]
 impl DocWrapper {
@@ -655,20 +683,28 @@ impl DocWrapper {
         self.inner.id().to_string()
     }
 
-    // TODO: add manual ts types for `f`
-    pub fn change(&self, f: &js_sys::Function) -> Result<(), JsValue> {
+    /// The provided function `f` will be called with a object proxying access to the underlying
+    /// document. Fields can be queried, changed, and/or deleted. All changes done to a document
+    /// inside `f` result in a single [`Causal`], which will be applied atomically to the document.
+    pub fn change(&self, f: ChangeCallback) -> Result<(), JsValue> {
         let proxy = ProxyHandler::new(Rc::new(RefCell::new(self.inner.clone())), vec![])?;
 
-        f.call1(&JsValue::null(), &proxy.proxy())?;
+        let fun: js_sys::Function = f.unchecked_into();
+        fun.call1(&JsValue::null(), &proxy.proxy())?;
         Ok(())
     }
 
-    #[wasm_bindgen(js_name = "changePtr")]
-    pub fn change_ptr(&self, ptr: &str, f: &js_sys::Function) -> Result<(), JsValue> {
-        todo!()
-    }
+    //    #[wasm_bindgen(js_name = "changePtr")]
+    //    pub fn change_ptr(&self, ptr: &str, f: &js_sys::Function) -> Result<(), JsValue> {
+    //        todo!()
+    //    }
 
-    pub fn subscribe(&self, ptr: &str, callback: js_sys::Function) {
+    /// Subscribe to changes to a document. The provided JSON pointer points into the document, use
+    /// `""` for the documents's root. The callback will be called with a JS object holding a full
+    /// copy of the document.
+    /// This might have performance impacts, so the `ptr` should narrow down the needed access.
+    pub fn subscribe(&self, ptr: &str, callback: ChangeCallback) {
+        let callback: js_sys::Function = callback.unchecked_into();
         let ptr = JsonPointer::new(ptr).map_err(map_err).unwrap();
         let mut cursor = self.inner.cursor();
         ptr.goto(&mut cursor).unwrap();
@@ -688,6 +724,8 @@ impl DocWrapper {
         });
     }
 
+    /// Returns a JSON object holding a copy of the values as indexed by the provided JSON pointer
+    /// `ptr`. Provide `""` when querying for the document's root.
     #[wasm_bindgen(js_name = "getValue")]
     pub fn get_value(&self, ptr: &str) -> Result<JsValue, JsValue> {
         let ptr = JsonPointer::new(ptr).map_err(map_err)?;
