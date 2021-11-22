@@ -3,7 +3,7 @@ use smallvec::{smallvec, SmallVec};
 
 /// A binary fraction type. Can encode any value in the interval [0..1) with arbitary precision.
 ///
-/// trailing zeros are not stored.
+/// trailing zeros are not stored to make it canonical.
 #[derive(PartialOrd, Ord, PartialEq, Eq, Clone)]
 pub struct Fraction(SmallVec<[u8; 8]>);
 
@@ -34,7 +34,7 @@ impl fmt::Debug for Fraction {
 impl fmt::Display for Fraction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if !self.0.is_empty() {
-            write!(f, "0x0.{}", base64::encode(&self.0))
+            write!(f, "0x0.{}", hex::encode(&self.0))
         } else {
             write!(f, "0x0")
         }
@@ -42,24 +42,26 @@ impl fmt::Display for Fraction {
 }
 
 impl Fraction {
-    pub fn new(mut data: SmallVec<[u8; 8]>) -> Self {
-        // canonicalize
-        while data.last() == Some(&0u8) {
-            data.pop();
-        }
+    pub fn new(data: SmallVec<[u8; 8]>) -> Self {
         Self(data)
     }
 
     /// shifts the digits and adds the continue bits
-    fn from_digits(mut digits: SmallVec<[u8; 8]>) -> Self {
+    pub fn from_digits(mut digits: SmallVec<[u8; 8]>) -> Self {
         assert!(digits.iter().all(|x| *x < 0x80));
         // canonicalize
-        while digits.last() == Some(&0u8) {
-            digits.pop();
+        if digits.is_empty() {
+            // make sure length is at least 1
+            digits.push(0);
+        } else {
+            // remove trailing 0 digits, except one
+            while digits.len() > 1 && digits.last() == Some(&0u8) {
+                digits.pop();
+            }
         }
         for i in 0..digits.len() {
             digits[i] <<= 1;
-            if i == digits.len() - 1 {
+            if i < digits.len() - 1 {
                 digits[i] |= 1;
             }
         }
@@ -114,7 +116,7 @@ impl Fraction {
         self.0.as_ref()
     }
     pub fn zero() -> Fraction {
-        Self::new(SmallVec::new())
+        Self::new(smallvec![0u8])
     }
     pub fn half() -> Fraction {
         Self::from_digits(smallvec![1 << (DIGIT_BITS - 1)])
@@ -130,12 +132,86 @@ impl Fraction {
     }
 }
 
-#[test]
-fn fraction_smoke() {
-    let t = Fraction::zero();
-    let u = t.succ();
-    let v = t.mid(&u);
-    assert!(t < u);
-    assert!(t < v && v < u);
-    println!("{:?} < {:?} < {:?}", t, v, u);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    #[test]
+    fn fraction_smoke() {
+        let t = Fraction::zero();
+        let u = t.succ();
+        let v = t.mid(&u);
+        assert!(t < u);
+        assert!(t < v && v < u);
+        println!("{:?} < {:?} < {:?}", t, v, u);
+    }
+
+    fn arb_fraction() -> impl Strategy<Value = Fraction> {
+        any::<Vec<u8>>().prop_map(|v| {
+            let mut digits: SmallVec<[u8; 8]> = v.into();
+            digits.iter_mut().for_each(|x| *x &= DIGIT_MASK_U8);
+            Fraction::from_digits(digits)
+        })
+    }
+
+    impl Arbitrary for Fraction {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Fraction>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            arb_fraction().boxed()
+        }
+    }
+
+    fn to_bytes(fs: &[Fraction]) -> Vec<u8> {
+        let mut res = Vec::new();
+        for f in fs {
+            res.extend_from_slice(&f.0);
+        }
+        res
+    }
+
+    proptest! {
+        #[test]
+        fn mid(
+            mut a in arb_fraction(),
+            mut b in arb_fraction(),
+        ) {
+            if a != b {
+                if a > b {
+                    std::mem::swap(&mut a, &mut b);
+                }
+                let m = a.mid(&b);
+                println!("a={:?}, b={:?}, m={:?}", a, b, m);
+                prop_assert!(a < m);
+                prop_assert!(m < b);
+            } else {
+                let m = a.mid(&b);
+                prop_assert!(m == a);
+                prop_assert!(m == b);
+            }
+        }
+
+        #[test]
+        fn succ(
+            a in arb_fraction(),
+        ) {
+            prop_assert!(a.succ() > a);
+        }
+
+        #[test]
+        fn ord(
+            a in any::<Vec<Fraction>>(),
+            b in any::<Vec<Fraction>>(),
+        ) {
+            let ab = to_bytes(&a);
+            let bb = to_bytes(&b);
+            let byte_order = ab.cmp(&bb);
+            let val_order = a.cmp(&b);
+            println!("a={:?} b={:?}", a, b);
+            println!("ab={} bb={}", hex::encode(ab), hex::encode(bb));
+            prop_assert_eq!(byte_order, val_order);
+        }
+    }
 }
