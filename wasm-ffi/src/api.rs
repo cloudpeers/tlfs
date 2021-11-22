@@ -1,10 +1,13 @@
+use anyhow::Context;
 use js_sys::{Array, Object, Proxy, Reflect};
+use libp2p::multiaddr::Protocol;
+use libp2p::swarm::AddressScore;
 use libp2p::{futures::StreamExt, Multiaddr};
 use log::*;
 use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 use tlfs::{
-    ArchivedSchema, Backend, Causal, Cursor, Doc, Kind, Lens, Lenses, Package, Primitive,
-    PrimitiveKind, Ref, Sdk, ToLibp2pKeypair,
+    libp2p_peer_id, ArchivedSchema, Backend, Causal, Cursor, Doc, Kind, Lens, Lenses, Package,
+    Primitive, PrimitiveKind, Ref, Sdk, ToLibp2pKeypair,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -87,7 +90,9 @@ impl LocalFirst {
         let backend = Backend::in_memory(package)?;
         let frontend = backend.frontend();
         let identity = frontend.default_keypair()?;
-        let transport = mk_transport(identity.to_libp2p());
+        let libp2p_identity = identity.to_libp2p();
+        let libp2p_peer: libp2p::PeerId = libp2p_identity.public().into();
+        let transport = mk_transport(libp2p_identity);
         let (inner, fut) = Sdk::new_with_transport(
             backend,
             frontend,
@@ -97,21 +102,26 @@ impl LocalFirst {
         )
         .await?;
         wasm_bindgen_futures::spawn_local(fut);
-        /*
-                    swarm.listen_on(signaling_server.clone()).expect("FIXME");
-                    swarm.add_external_address(
-                        signaling_server
-                            .with(Protocol::P2pWebRtcStar)
-                            .with(Protocol::P2p(*peer_id.as_ref())),
-                        // TODO
-                        AddressScore::Infinite,
-                    );
-                    for b in &bootstrap {
-                        if let Err(e) = swarm.dial_addr(b.clone()) {
-                            error!("Error dialing bootstrap {}: {:#}", b, e);
-                        }
-                    }
-        */
+        for mut b in bootstrap {
+            if let Some(Protocol::P2p(peer)) = b.pop() {
+                if let Ok(peer) = libp2p::PeerId::from_multihash(peer)
+                    .map_err(|_| anyhow::anyhow!("Invalid peer id"))
+                    .and_then(|x| libp2p_peer_id(&x))
+                {
+                    inner.add_address(peer, b);
+                    continue;
+                }
+            }
+            error!("Malformed bootstrap {:?}", b);
+        }
+        inner.add_external_address(
+            signaling_server
+                .with(Protocol::P2pWebRtcStar)
+                .with(Protocol::P2p(libp2p_peer.into())),
+            // TODO
+            AddressScore::Infinite,
+        );
+
         Ok(Self { inner })
     }
 

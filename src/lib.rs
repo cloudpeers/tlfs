@@ -4,14 +4,14 @@
 #![deny(missing_docs)]
 mod sync;
 
-pub use crate::sync::ToLibp2pKeypair;
+pub use crate::sync::{libp2p_peer_id, ToLibp2pKeypair, ToLibp2pPublic};
 pub use libp2p::Multiaddr;
 pub use tlfs_crdt::{
     ArchivedSchema, Backend, Causal, Cursor, DocId, Event, Frontend, Keypair, Kind, Lens, Lenses,
     Package, PathBuf, PeerId, Permission, Primitive, PrimitiveKind, Ref, Schema, Subscriber,
 };
 
-use crate::sync::{Behaviour, ToLibp2pPublic};
+use crate::sync::Behaviour;
 use anyhow::Result;
 use futures::{
     channel::{mpsc, oneshot},
@@ -21,6 +21,7 @@ use futures::{
 };
 use libp2p::{
     core::{muxing::StreamMuxerBox, transport::Boxed},
+    swarm::AddressScore,
     Swarm,
 };
 use std::{pin::Pin, task::Poll};
@@ -119,6 +120,9 @@ impl Sdk {
                             tracing::error!("{}", err);
                         }
                     }
+                    Command::AddExternalAddress(addr, score) => {
+                        swarm.add_external_address(addr, score);
+                    }
                     Command::RemoveAddress(peer, addr) => {
                         swarm.behaviour_mut().remove_address(&peer, &addr)
                     }
@@ -158,6 +162,13 @@ impl Sdk {
     pub fn add_address(&self, peer: PeerId, addr: Multiaddr) {
         self.swarm
             .unbounded_send(Command::AddAddress(peer, addr))
+            .ok();
+    }
+
+    /// Adds an external [`Multiaddr`] record for the local node.
+    pub fn add_external_address(&self, addr: Multiaddr, score: AddressScore) {
+        self.swarm
+            .unbounded_send(Command::AddExternalAddress(addr, score))
             .ok();
     }
 
@@ -252,6 +263,7 @@ impl Doc {
 
 enum Command {
     AddAddress(PeerId, Multiaddr),
+    AddExternalAddress(Multiaddr, AddressScore),
     RemoveAddress(PeerId, Multiaddr),
     Addresses(oneshot::Sender<Vec<Multiaddr>>),
     Subscribe(DocId),

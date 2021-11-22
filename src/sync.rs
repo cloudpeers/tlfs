@@ -358,7 +358,8 @@ impl ToLibp2pPublic for PeerId {
     }
 }
 
-fn libp2p_peer_id(peer_id: &libp2p::PeerId) -> Result<PeerId> {
+/// Convert a [`libp2p::PeerId`] into a [`tlfs::PeerId`], if possible.
+pub fn libp2p_peer_id(peer_id: &libp2p::PeerId) -> Result<PeerId> {
     match libp2p::multihash::Multihash::from_bytes(&peer_id.to_bytes()) {
         Ok(multihash) => {
             if multihash.code() == u64::from(libp2p::multihash::Code::Identity) {
