@@ -1,7 +1,7 @@
 use js_sys::{Array, Object, Proxy, Reflect};
 use libp2p::{futures::StreamExt, Multiaddr};
 use log::*;
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 use tlfs::{
     ArchivedSchema, Backend, Causal, Cursor, Doc, Kind, Lens, Lenses, Package, Primitive,
     PrimitiveKind, Ref, Sdk, ToLibp2pKeypair,
@@ -401,7 +401,12 @@ impl FromJs {
             (FromJs::Number(_), ArchivedSchema::Struct(_)) => {
                 anyhow::bail!("Can't index into a struct with a number")
             }
-            (FromJs::Bool(_), ArchivedSchema::Table(_, _)) => todo!(),
+            (FromJs::Bool(b), ArchivedSchema::Table(_, _)) => {
+                c.key_bool(*b)?;
+                if let Some(path) = path.as_mut() {
+                    path.push(CursorPath::KeyBool(*b));
+                }
+            }
             (FromJs::Bool(_), ArchivedSchema::Array(_)) => {
                 anyhow::bail!("Can't index into an array with a bool");
             }
@@ -417,15 +422,39 @@ impl FromJs {
         info!("get_causal: {:?}", self);
         match self {
             FromJs::Object(value) => {
+                let mut keys_to_keep = vec![];
                 for kv in Object::entries(Object::try_from(value).unwrap()).iter() {
                     let arr = Array::from(&kv);
                     let mut a = arr.iter();
                     let key: FromJs = a.next().unwrap().into();
                     let mut here = cursor.clone();
-                    key.traverse(&mut here, None)?;
+                    key.traverse(&mut here, Some(&mut keys_to_keep))?;
 
                     let value: FromJs = a.next().unwrap().into();
                     causal.join(&value.get_causal(&mut here)?);
+                }
+                let added_keys = keys_to_keep
+                    .into_iter()
+                    .filter_map(|x| match x {
+                        CursorPath::KeyStr(s) | CursorPath::Field(s) => Some(Primitive::Str(s)),
+                        CursorPath::KeyU64(n) => Some(Primitive::U64(n)),
+                        CursorPath::KeyI64(n) => Some(Primitive::I64(n)),
+                        CursorPath::KeyBool(b) => Some(Primitive::Bool(b)),
+                        _ => None,
+                    })
+                    .collect::<BTreeSet<_>>();
+                let existing_keys = cursor.keys().collect::<anyhow::Result<BTreeSet<_>>>()?;
+                for to_remove in existing_keys.difference(&added_keys) {
+                    let mut here = cursor.clone();
+                    // FIXME
+                    let value = match to_remove {
+                        Primitive::Bool(b) => FromJs::Bool(*b),
+                        Primitive::U64(n) => FromJs::Number(*n as f64),
+                        Primitive::I64(n) => FromJs::Number(*n as f64),
+                        Primitive::Str(s) => FromJs::String(s.to_string()),
+                    };
+                    value.traverse(&mut here, None)?;
+                    causal.join(&here.remove()?);
                 }
             }
             FromJs::Array(arr) => {
@@ -463,6 +492,7 @@ enum CursorPath {
     Field(String),
     KeyU64(u64),
     KeyI64(i64),
+    KeyBool(bool),
     Index(usize),
 }
 
@@ -473,6 +503,7 @@ impl CursorPath {
             CursorPath::Field(s) => c.field(s),
             CursorPath::KeyU64(n) => c.key_u64(*n),
             CursorPath::KeyI64(n) => c.key_i64(*n),
+            CursorPath::KeyBool(b) => c.key_bool(*b),
             CursorPath::Index(n) => c.index(*n),
         }?;
         Ok(())
