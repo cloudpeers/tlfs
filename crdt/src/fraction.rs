@@ -7,10 +7,6 @@ use smallvec::{smallvec, SmallVec};
 #[derive(PartialOrd, Ord, PartialEq, Eq, Clone)]
 pub struct Fraction(SmallVec<[u8; 8]>);
 
-const DIGIT_BITS: u32 = 7;
-const DIGIT_MASK: usize = (1 << DIGIT_BITS) - 1;
-const DIGIT_MASK_U8: u8 = (1 << DIGIT_BITS) - 1;
-
 impl AsRef<[u8]> for Fraction {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
@@ -42,6 +38,17 @@ impl fmt::Display for Fraction {
 }
 
 impl Fraction {
+    pub fn as_bytes(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+    pub fn zero() -> Fraction {
+        Self::new(SmallVec::new())
+    }
+
+    pub fn half() -> Fraction {
+        Self::new(smallvec![0x80u8])
+    }
+
     pub fn new(mut data: SmallVec<[u8; 8]>) -> Self {
         // canonicalize
         while data.last() == Some(&0u8) {
@@ -50,83 +57,48 @@ impl Fraction {
         Self(data)
     }
 
-    /// shifts the digits and adds the continue bits
-    fn from_digits(mut digits: SmallVec<[u8; 8]>) -> Self {
-        assert!(digits.iter().all(|x| *x < 0x80));
-        // canonicalize
-        while digits.last() == Some(&0u8) {
-            digits.pop();
-        }
-        for i in 0..digits.len() {
-            digits[i] <<= 1;
-            if i == digits.len() - 1 {
-                digits[i] |= 1;
-            }
-        }
-        Self(digits)
-    }
-
     /// Compute the midpoint between two numbers
     pub fn mid(&self, that: &Self) -> Self {
         let n = self.0.len().max(that.0.len());
-        let mut digits = SmallVec::with_capacity(n);
+        let mut res = SmallVec::with_capacity(n);
         // calculate self + that. Highest bit will be in carry.
         let mut carry = 0usize;
         for i in (0..n).rev() {
-            carry += self.digit(i);
-            carry += that.digit(i);
-            digits.push((carry & DIGIT_MASK) as u8);
-            carry >>= DIGIT_BITS;
+            carry += self[i] as usize;
+            carry += that[i] as usize;
+            res.push(carry as u8);
+            carry >>= 8;
         }
-        digits.reverse();
+        res.reverse();
         // divide by 2, including carry. Lowest bit will be in carry.
         for i in 0..n {
-            let r = digits[i];
-            digits[i] = (r >> 1) + ((carry as u8) << (DIGIT_BITS - 1));
+            let r = res[i];
+            res[i] = (r >> 1) + ((carry as u8) << 7);
             carry = (r & 1) as usize;
         }
         // if we have a carry, we need to extend the result
         if carry != 0 {
-            digits.push(0x40);
+            res.push(0x80);
         }
-        Self::from_digits(digits)
+        Self::new(res)
     }
 
     /// Compute a number that is larger than the current number by some small amount
     pub fn succ(&self) -> Self {
-        let mut digits = self.digits();
+        let mut res = self.0.clone();
         // if we would wraparound when adding, add some more fractional digits
-        if digits.iter().all(|x| *x == DIGIT_MASK_U8) {
-            let n = digits.len().max(1);
-            digits.extend((0..n).map(|_| 0u8));
+        if res.iter().all(|x| *x == 0xff) {
+            let n = res.len().max(1);
+            res.extend((0..n).map(|_| 0u8));
         }
         // add 1 to the lowest current fractional digit
-        for byte in digits.iter_mut().rev() {
-            // add 1
-            *byte = (*byte + 1) & DIGIT_MASK_U8;
+        for byte in res.iter_mut().rev() {
+            *byte += 1;
             if *byte != 0 {
                 break;
             }
         }
-        Self::from_digits(digits)
-    }
-    pub fn as_bytes(&self) -> &[u8] {
-        self.0.as_ref()
-    }
-    pub fn zero() -> Fraction {
-        Self::new(SmallVec::new())
-    }
-    pub fn half() -> Fraction {
-        Self::from_digits(smallvec![1 << (DIGIT_BITS - 1)])
-    }
-    fn digits(&self) -> SmallVec<[u8; 8]> {
-        let mut res = self.0.clone();
-        res.iter_mut().for_each(|x| *x >>= 1);
-        res
-    }
-    /// return the number part of a digit
-    fn digit(&self, i: usize) -> usize {
-        self.0.get(i).map(|x| *x >> 1).unwrap_or_default() as usize
+        Self::new(res)
     }
 }
 
