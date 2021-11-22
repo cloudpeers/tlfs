@@ -10,8 +10,8 @@ use wasm_bindgen::prelude::*;
 
 use crate::p2p::mk_transport;
 
-#[global_allocator]
-static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
+//#[global_allocator]
+//static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
 #[wasm_bindgen(start)]
 pub fn start() {
@@ -186,6 +186,8 @@ struct ProxyHandler {
     get: Closure<dyn Fn(JsValue, JsValue) -> Result<JsValue, JsValue>>,
     // Kept to keep alive
     set: Closure<dyn Fn(JsValue, JsValue, JsValue) -> Result<bool, JsValue>>,
+    // Kept to keep alive
+    delete: Closure<dyn Fn(JsValue, JsValue) -> Result<bool, JsValue>>,
 }
 
 impl ProxyHandler {
@@ -210,35 +212,8 @@ impl JsonPointer {
             .map(|x| x.replace("~1", "/").replace("~0", "~"))
             .collect();
         Ok(Self { tokens })
-        //     /// ```
-        //    pub fn pointer(&self, pointer: &str) -> Option<&Value> {
-        //        if pointer == "" {
-        //            return Some(self);
-        //        }
-        //        if !pointer.starts_with('/') {
-        //            return None;
-        //        }
-        //        let tokens = pointer
-        //            .split('/')
-        //            .skip(1)
-        //            .map(|x| x.replace("~1", "/").replace("~0", "~"));
-        //        let mut target = self;
-        //
-        //        for token in tokens {
-        //            let target_opt = match *target {
-        //                Value::Object(ref map) => map.get(&token),
-        //                Value::Array(ref list) => parse_index(&token).and_then(|x| list.get(x)),
-        //                _ => return None,
-        //            };
-        //            if let Some(t) = target_opt {
-        //                target = t;
-        //            } else {
-        //                return None;
-        //            }
-        //        }
-        //        Some(target)
-        //    }
     }
+
     fn goto(&self, cursor: &mut Cursor) -> anyhow::Result<()> {
         for token in &self.tokens {
             match cursor.schema() {
@@ -274,6 +249,7 @@ impl JsonPointer {
         Ok(())
     }
 }
+
 fn get_value(cursor: &mut Cursor) -> anyhow::Result<JsValue> {
     match cursor.schema() {
         ArchivedSchema::Null => Ok(JsValue::undefined()),
@@ -435,6 +411,7 @@ impl FromJs {
         };
         Ok(())
     }
+
     fn get_causal(&self, cursor: &mut Cursor) -> anyhow::Result<Causal> {
         let mut causal = Causal::default();
         info!("get_causal: {:?}", self);
@@ -480,6 +457,7 @@ impl FromJs {
 }
 
 #[derive(Clone, Debug)]
+// TODO: unify with JsonPointer
 enum CursorPath {
     KeyStr(String),
     Field(String),
@@ -583,16 +561,18 @@ impl ProxyHandler {
             }
         })
             as Box<dyn Fn(JsValue, JsValue) -> Result<JsValue, JsValue>>);
+        let doc_c = doc.clone();
+        let path_c = path.clone();
         let proxy_set = Closure::wrap(Box::new(
             move |obj: JsValue, prop: JsValue, value: JsValue| {
                 let prop: FromJs = prop.into();
-                info!("proxy_set {:?} {:?} {:?} {:?}", obj, prop, value, path);
-                let doc = doc.borrow_mut();
+                info!("proxy_set {:?} {:?} {:?} {:?}", obj, prop, value, path_c);
+                let doc = doc_c.borrow_mut();
 
                 let value: FromJs = value.into();
                 let mut c = {
                     let mut c = doc.cursor();
-                    CursorPath::traverse_vec(path.as_slice(), &mut c).map_err(map_err)?;
+                    CursorPath::traverse_vec(path_c.as_slice(), &mut c).map_err(map_err)?;
                     c
                 };
                 prop.traverse(&mut c, None).map_err(map_err)?;
@@ -603,14 +583,34 @@ impl ProxyHandler {
         )
             as Box<dyn Fn(JsValue, JsValue, JsValue) -> Result<bool, JsValue>>);
 
+        let proxy_delete = Closure::wrap(Box::new(move |obj: JsValue, prop: JsValue| {
+            let prop: FromJs = prop.into();
+            info!("proxy_delete {:?} {:?} {:?}", obj, prop, path);
+            let doc = doc.borrow_mut();
+
+            let mut c = {
+                let mut c = doc.cursor();
+                CursorPath::traverse_vec(path.as_slice(), &mut c).map_err(map_err)?;
+                c
+            };
+            prop.traverse(&mut c, None).map_err(map_err)?;
+            // TODO: Only do that if the prop existed
+            let causal = c.remove().map_err(map_err)?;
+            doc.apply(causal).map_err(map_err)?;
+            Ok(true)
+        })
+            as Box<dyn Fn(JsValue, JsValue) -> Result<bool, JsValue>>);
+
         let handler = Object::new();
         Reflect::set(&handler, &"get".into(), proxy_get.as_ref())?;
         Reflect::set(&handler, &"set".into(), proxy_set.as_ref())?;
+        Reflect::set(&handler, &"deleteProperty".into(), proxy_delete.as_ref())?;
 
         Ok(Self {
             get: proxy_get,
             handler,
             set: proxy_set,
+            delete: proxy_delete,
             target: Object::new(),
             ref_stack,
         })
@@ -630,6 +630,11 @@ impl DocWrapper {
 
         f.call1(&JsValue::null(), &proxy.proxy())?;
         Ok(())
+    }
+
+    #[wasm_bindgen(js_name = "changePtr")]
+    pub fn change_ptr(&self, ptr: &str, f: &js_sys::Function) -> Result<(), JsValue> {
+        todo!()
     }
 
     pub fn subscribe(&self, ptr: &str, callback: js_sys::Function) {
