@@ -556,6 +556,17 @@ impl<'a> Iterator for PathIter<'a> {
     }
 }
 
+impl<'a> DoubleEndedIterator for PathIter<'a> {
+    fn next_back(&mut self) -> Option<Segment> {
+        if let Some((path, seg)) = self.0.split_last() {
+            self.0 = path;
+            Some(seg)
+        } else {
+            None
+        }
+    }
+}
+
 impl<'a> IntoIterator for Path<'a> {
     type IntoIter = PathIter<'a>;
     type Item = Segment;
@@ -599,17 +610,11 @@ mod tests {
     fn iter() {
         let mut p = PathBuf::new();
         p.doc(&DocId::new([0; 32]));
-        println!("{:?}", p);
         p.prim_str("a");
-        println!("{:?}", p);
         p.prim_i64(42);
-        println!("{:?}", p);
         p.prim_str("b");
-        println!("{:?}", p);
         p.prim_i64(43);
-        println!("{:?}", p);
         p.prim_str("c");
-        println!("{:?}", p);
 
         let mut path = p.as_path().into_iter();
         for i in [
