@@ -501,7 +501,7 @@ impl<'a> Path<'a> {
 
     /// Returns a path that, when joined onto `base`, yields `self`.
     pub fn strip_prefix(&self, base: Self) -> Result<Self> {
-        if self.0.starts_with(&base.0) {
+        if self.0.starts_with(base.0) {
             Ok(Self(&self.0[base.0.len()..]))
         } else {
             Err(anyhow::anyhow!("StripPrefixError"))
