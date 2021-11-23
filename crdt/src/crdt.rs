@@ -11,7 +11,7 @@ use rkyv::{Archive, Archived, Deserialize, Serialize};
 use std::iter::FromIterator;
 use vec_collections::radix_tree::{AbstractRadixTree, AbstractRadixTreeMut, IterKey, RadixTree};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[derive(Clone, Default, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
 #[archive_attr(derive(Debug, CheckBytes))]
 #[archive_attr(check_bytes(
@@ -128,7 +128,7 @@ impl std::fmt::Debug for CausalContext {
 
 /// Represents a state transition of a crdt. Multiple state transitions can be combined
 /// together into an atomic transaction.
-#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[derive(Clone, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(Debug, CheckBytes))]
 #[repr(C)]
 pub struct Causal {
@@ -208,6 +208,26 @@ impl Causal {
             }
         }
         self.expired = expired;
+    }
+}
+
+impl std::fmt::Debug for Causal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Causal")
+            .field("store", &self.store)
+            .field("expired", &self.expired)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for DotStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut m = f.debug_map();
+        for p in self.iter() {
+            let path = p.as_path();
+            m.entry(&path.dot(), &path);
+        }
+        m.finish()
     }
 }
 
