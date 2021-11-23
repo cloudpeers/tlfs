@@ -48,6 +48,57 @@ impl SegmentType {
             _ => unreachable!("Unexpected SegmentType: {}", u),
         }
     }
+
+    fn last_element(data: &[u8]) -> Option<(SegmentType, usize, &[u8])> {
+        use std::mem::size_of;
+        let last = data.last()?;
+        let ty = SegmentType::new(*last).unwrap();
+        let len = 1 + match ty {
+            SegmentType::Doc => size_of::<DocId>(),
+            SegmentType::Peer => size_of::<PeerId>(),
+            SegmentType::Nonce => size_of::<u64>(),
+            SegmentType::Bool => size_of::<bool>(),
+            SegmentType::U64 => size_of::<u64>(),
+            SegmentType::I64 => size_of::<i64>(),
+            SegmentType::Dot => size_of::<Dot>(),
+            SegmentType::Sig => size_of::<Signature>(),
+            SegmentType::Str | SegmentType::Position | SegmentType::Policy => {
+                if data.len() < 3 {
+                    return None;
+                }
+                let size =
+                    u16::from_be_bytes(data[data.len() - 3..data.len() - 1].try_into().unwrap());
+                2 + (size as usize)
+            }
+        };
+        if data.len() < len {
+            return None;
+        }
+        let content = if ty.is_variable_length() {
+            &data[data.len() - len..data.len() - 3]
+        } else {
+            &data[data.len() - len..data.len() - 1]
+        };
+        Some((ty, len, content))
+    }
+
+    fn first_element(mut data: &[u8]) -> Option<(SegmentType, usize, &[u8])> {
+        while let Some((ty, len, content)) = Self::last_element(data) {
+            if len == data.len() {
+                return Some((ty, len, content));
+            } else {
+                data = &data[..data.len() - len];
+            }
+        }
+        None
+    }
+
+    fn is_variable_length(&self) -> bool {
+        matches!(
+            self,
+            SegmentType::Position | SegmentType::Str | SegmentType::Policy
+        )
+    }
 }
 
 /// A segment of a path.
@@ -249,10 +300,10 @@ impl PathBuf {
     }
 
     fn push(&mut self, ty: SegmentType, bytes: &[u8]) {
-        self.0.extend(&[ty as u8]);
-        self.push_len(bytes.len());
         self.0.extend(bytes);
-        self.push_len(bytes.len());
+        if ty.is_variable_length() {
+            self.push_len(bytes.len());
+        }
         self.0.extend(&[ty as u8]);
     }
 
@@ -411,50 +462,36 @@ impl<'a> Path<'a> {
     }
 
     fn first_len(&self) -> Option<usize> {
-        if self.is_empty() {
-            return None;
-        }
-        let mut len = [0; 2];
-        len.copy_from_slice(&self.0[1..3]);
-        Some(u16::from_be_bytes(len) as usize)
+        SegmentType::first_element(self.0).map(|(_, l, _)| l)
     }
 
     fn last_len(&self) -> Option<usize> {
-        if self.is_empty() {
-            return None;
-        }
-        let end = self.0.len();
-        let mut len = [0; 2];
-        len.copy_from_slice(&self.0[(end - 3)..(end - 1)]);
-        Some(u16::from_be_bytes(len) as usize)
+        SegmentType::last_element(self.0).map(|(_, l, _)| l)
     }
 
     /// Returns the last segment.
     pub fn last(&self) -> Option<Segment> {
-        let len = self.last_len()?;
-        let end = self.0.len();
-        let ty = SegmentType::new(self.0[end - 1])?;
-        Some(Segment::new(ty, &self.0[(end - 3 - len)..(end - 3)]))
+        let (ty, _, data) = SegmentType::last_element(self.0)?;
+        Some(Segment::new(ty, data))
     }
 
     /// Returns the first segment.
     pub fn first(&self) -> Option<Segment> {
-        let len = self.first_len()?;
-        let ty = SegmentType::new(self.0[0])?;
-        Some(Segment::new(ty, &self.0[3..(len + 3)]))
+        let (ty, _, data) = SegmentType::first_element(self.0)?;
+        Some(Segment::new(ty, data))
     }
 
     /// Returns the path without the first segment.
     pub fn child(&self) -> Option<Path<'a>> {
         let len = self.first_len()?;
-        Some(Path(&self.0[(len + 6)..]))
+        Some(Path(&self.0[len..]))
     }
 
     /// Returns the path without the last segment.
     pub fn parent(&self) -> Option<Path<'a>> {
         let len = self.last_len()?;
         let end = self.0.len();
-        Some(Path(&self.0[..(end - len - 6)]))
+        Some(Path(&self.0[..(end - len)]))
     }
 
     /// Returns an identifier for the path.
@@ -562,11 +599,17 @@ mod tests {
     fn iter() {
         let mut p = PathBuf::new();
         p.doc(&DocId::new([0; 32]));
+        println!("{:?}", p);
         p.prim_str("a");
+        println!("{:?}", p);
         p.prim_i64(42);
+        println!("{:?}", p);
         p.prim_str("b");
+        println!("{:?}", p);
         p.prim_i64(43);
+        println!("{:?}", p);
         p.prim_str("c");
+        println!("{:?}", p);
 
         let mut path = p.as_path().into_iter();
         for i in [
