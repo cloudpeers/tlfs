@@ -3,7 +3,7 @@ use crate::dotset::Dot;
 use crate::fraction::Fraction;
 use crate::id::{DocId, PeerId};
 use crate::util::Ref;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use bytecheck::CheckBytes;
 use ed25519_dalek::Signature;
 use rkyv::{Archive, Deserialize, Serialize};
@@ -500,10 +500,12 @@ impl<'a> Path<'a> {
     }
 
     /// Returns a path that, when joined onto `base`, yields `self`.
-    pub fn strip_prefix(&self, base: Self) -> Result<PathBuf> {
-        Ok(iter_after((*self).into_iter(), base.into_iter())
-            .context("StripPrefixError")?
-            .collect())
+    pub fn strip_prefix(&self, base: Self) -> Result<Self> {
+        if self.0.starts_with(&base.0) {
+            Ok(Self(&self.0[base.0.len()..]))
+        } else {
+            Err(anyhow::anyhow!("StripPrefixError"))
+        }
     }
 
     /// Returns the first segment and the path without the first segment.
@@ -518,24 +520,6 @@ impl<'a> Path<'a> {
         let parent = self.parent()?;
         let last = self.last()?;
         Some((parent, last))
-    }
-}
-
-fn iter_after<I, J>(mut iter: I, mut prefix: J) -> Option<I>
-where
-    I: Iterator<Item = Segment> + Clone,
-    J: Iterator<Item = Segment>,
-{
-    loop {
-        let mut iter_next = iter.clone();
-        match (iter_next.next(), prefix.next()) {
-            (Some(ref x), Some(ref y)) if x == y => (),
-            (Some(_), Some(_)) => return None,
-            (Some(_), None) => return Some(iter),
-            (None, None) => return Some(iter),
-            (None, Some(_)) => return None,
-        }
-        iter = iter_next;
     }
 }
 
@@ -646,7 +630,7 @@ mod tests {
         base.prim_i64(42);
 
         let relative = p.as_path().strip_prefix(base.as_path()).unwrap();
-        let mut iter = relative.as_path().into_iter();
+        let mut iter = relative.into_iter();
         for i in [
             Segment::Str("b".to_string()),
             Segment::I64(43),
