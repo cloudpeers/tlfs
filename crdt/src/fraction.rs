@@ -103,10 +103,10 @@ impl Fraction {
             digits.extend((0..n).map(|_| 0u8));
         }
         // add 1 to the lowest current fractional digit
-        for byte in digits.iter_mut().rev() {
+        for digit in digits.iter_mut().rev() {
             // add 1
-            *byte = (*byte + 1) & DIGIT_MASK_U8;
-            if *byte != 0 {
+            *digit = (*digit + 1) & DIGIT_MASK_U8;
+            if *digit != 0 {
                 break;
             }
         }
@@ -173,6 +173,7 @@ mod tests {
     }
 
     proptest! {
+
         #[test]
         fn mid(
             mut a in arb_fraction(),
