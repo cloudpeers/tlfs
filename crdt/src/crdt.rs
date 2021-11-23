@@ -750,8 +750,6 @@ mod tests {
         Ok(())
     }
 
-    // FIXME Fraction Ordering
-    #[ignore]
     #[async_std::test]
     async fn test_orarray_move() -> Result<()> {
         let packages = vec![Package::new(
@@ -773,18 +771,16 @@ mod tests {
             doc.apply(&op)?;
         }
         let mut r = vec![];
-        for i in 0..10 {
+        for i in 0..doc.cursor().len()? as usize {
             r.extend(doc.cursor().index(i)?.u64s()?.collect::<Result<Vec<_>>>()?);
         }
         assert_eq!(r, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
-        println!("{:#?}", doc);
         let move_op = doc.cursor().index(5)?.r#move(2)?;
-        println!("move_op {:#?}", move_op);
         doc.apply(&move_op)?;
 
         let mut r = vec![];
-        for i in 0..10 {
+        for i in 0..doc.cursor().len()? as usize {
             r.extend(doc.cursor().index(i)?.u64s()?.collect::<Result<Vec<_>>>()?);
         }
         assert_eq!(r, vec![0, 1, 5, 2, 3, 4, 6, 7, 8, 9]);
