@@ -6,8 +6,11 @@ WASMBINDGEN_VERSION=0.2.77
 OUT=./pkg
 
 echo "Running cargo build"
-# todo: release build
-cargo build --target wasm32-unknown-unknown
+if [ -z "${NO_OPTIMIZE}" ]; then
+  cargo build --target wasm32-unknown-unknown --release
+else
+  cargo build --target wasm32-unknown-unknown
+fi
 
 if [ -d $OUT ]; then
   echo "Clearing output directory '$OUT'"
@@ -61,7 +64,7 @@ fi
 
 if [ -z "${NO_OPTIMIZE}" ]; then
   echo "Optimizing wasm bindings with default optimization (this might take some time)"
-  ./wasm-opt $OUT/local_first_bg.wasm -O -g --output $OUT/local_first_bg.opt.wasm
+  ./wasm-opt $OUT/local_first_bg.wasm -Oz -g --output $OUT/local_first_bg.opt.wasm
 fi
 
 echo "Find your wasm package in $OUT"

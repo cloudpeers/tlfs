@@ -42,7 +42,7 @@ impl PrimitiveKind {
 pub enum Schema {
     /// Identity schema that contains only the empty [`Path`].
     Null,
-    /// Flag schema contains  paths with a single nonce segment.
+    /// Flag schema contains paths with a single nonce segment.
     Flag,
     /// Reg schema contains paths with a nonce and a primitive of kind [`PrimitiveKind`].
     Reg(PrimitiveKind),
