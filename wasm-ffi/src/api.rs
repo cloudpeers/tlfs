@@ -7,7 +7,7 @@ use log::*;
 use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 use tlfs::{
     libp2p_peer_id, ArchivedSchema, Backend, Causal, Cursor, Doc, Kind, Lens, Lenses, Package,
-    Primitive, PrimitiveKind, Ref, Sdk, ToLibp2pKeypair,
+    Permission, Primitive, PrimitiveKind, Ref, Sdk, ToLibp2pKeypair,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -86,7 +86,7 @@ impl LocalFirst {
         discovery_namespace: String,
         package: &[u8],
     ) -> anyhow::Result<Self> {
-        // TODO: bootstrap and discovery!
+        // TODO: discovery!
         let backend = Backend::in_memory(package)?;
         let frontend = backend.frontend();
         let identity = frontend.default_keypair()?;
@@ -166,6 +166,20 @@ impl LocalFirst {
         })
     }
 
+    /// Adds a doc associated with the given id.
+    #[wasm_bindgen(js_name = "addDoc")]
+    pub fn add_doc(&mut self, doc_id: JsDocId, schema: &str) -> Result<DocWrapper, JsValue> {
+        wrap(|| {
+            if let Some(s) = doc_id.as_string() {
+                let doc = s.parse()?;
+                let inner = self.inner.add_doc(doc, schema)?;
+                Ok(DocWrapper { inner })
+            } else {
+                anyhow::bail!("Provide a valid doc id")
+            }
+        })
+    }
+
     /// Adds a multi`addr`ess for the given `peer`.
     #[wasm_bindgen(js_name = "addAddress")]
     pub fn add_address(&self, peer: String, addr: String) -> Result<(), JsValue> {
@@ -186,6 +200,21 @@ impl LocalFirst {
             self.inner.remove_address(peer, addr);
             Ok(())
         })
+    }
+
+    /// Returns all addresses the local node is listening one.
+    #[wasm_bindgen]
+    pub fn addresses(&self) -> PromiseStringArray {
+        let f = self.inner.addresses();
+        wasm_bindgen_futures::future_to_promise(async move {
+            let array: js_sys::Array = f
+                .await
+                .into_iter()
+                .map(|x| JsValue::from_str(&x.to_string()))
+                .collect();
+            Ok(array.unchecked_into())
+        })
+        .unchecked_into()
     }
 }
 
@@ -680,6 +709,8 @@ extern "C" {
     pub type ChangeCallback;
     #[wasm_bindgen(typescript_type = "Array<DocId>")]
     pub type DocArray;
+    #[wasm_bindgen(typescript_type = "Promise<Array<string>>")]
+    pub type PromiseStringArray;
     #[wasm_bindgen(typescript_type = "PeerId")]
     pub type JsPeerId;
     #[wasm_bindgen(typescript_type = "DocId")]
@@ -742,6 +773,18 @@ impl DocWrapper {
         let mut cursor = self.inner.cursor();
         ptr.goto(&mut cursor).map_err(map_err)?;
         get_value(&mut cursor).map_err(map_err)
+    }
+
+    // FIXME
+    pub fn grant(&self, peer: &str) -> Result<(), JsValue> {
+        let peer: tlfs::PeerId = peer.parse().map_err(map_err)?;
+        let causal = self
+            .inner
+            .cursor()
+            .say_can(Some(peer), Permission::Write)
+            .map_err(map_err)?;
+        self.inner.apply(causal).map_err(map_err)?;
+        Ok(())
     }
 }
 

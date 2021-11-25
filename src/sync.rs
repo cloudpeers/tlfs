@@ -7,6 +7,7 @@ use futures::{
     prelude::*,
 };
 use libp2p::{
+    ping,
     request_response::{
         self, ProtocolName, ProtocolSupport, RequestId, RequestResponse, RequestResponseCodec,
         RequestResponseConfig,
@@ -137,6 +138,7 @@ type RequestResponseEvent =
 pub struct Behaviour {
     req: RequestResponse<SyncCodec>,
     broadcast: Broadcast,
+    ping: ping::Behaviour,
     #[behaviour(ignore)]
     unjoin_req: FnvHashMap<RequestId, DocId>,
     #[behaviour(ignore)]
@@ -154,6 +156,7 @@ impl Behaviour {
                 vec![(SyncProtocol, ProtocolSupport::Full)],
                 RequestResponseConfig::default(),
             ),
+            ping: ping::Behaviour::new(ping::Config::new().with_keep_alive(true)),
             unjoin_req: Default::default(),
             buffer: Default::default(),
             broadcast: Broadcast::new(BroadcastConfig::default()),
@@ -328,6 +331,10 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
             } => {}
         }
     }
+}
+
+impl NetworkBehaviourEventProcess<ping::Event> for Behaviour {
+    fn inject_event(&mut self, _event: ping::Event) {}
 }
 
 /// Conversion to libp2p

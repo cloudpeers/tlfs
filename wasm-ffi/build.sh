@@ -6,8 +6,11 @@ WASMBINDGEN_VERSION=0.2.77
 OUT=./pkg
 
 echo "Running cargo build"
-# todo: release build
-cargo build --target wasm32-unknown-unknown
+if [ -z "${NO_OPTIMIZE}" ]; then
+  cargo build --target wasm32-unknown-unknown --release
+else
+  cargo build --target wasm32-unknown-unknown
+fi
 
 if [ -d $OUT ]; then
   echo "Clearing output directory '$OUT'"

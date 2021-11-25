@@ -4,7 +4,7 @@ import './App.css'
 import { Route, Router } from 'react-router'
 import { Routes } from 'react-router-dom'
 
-const App = () => {
+const App = async () => {
   return (
     <div className="App">
       <header className="App-header">

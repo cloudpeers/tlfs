@@ -39,6 +39,7 @@ features = [
     "gossipsub",
     "mplex",
     "noise",
+    "ping",
     "request-response",
     "tcp-async-io",
     "yamux",

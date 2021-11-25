@@ -16,15 +16,14 @@ use anyhow::Result;
 use futures::{
     channel::{mpsc, oneshot},
     future::poll_fn,
-    stream::Stream,
-    Future,
+    Future, StreamExt,
 };
 use libp2p::{
     core::{muxing::StreamMuxerBox, transport::Boxed},
     swarm::AddressScore,
     Swarm,
 };
-use std::{pin::Pin, task::Poll};
+use std::task::Poll;
 
 /// Main entry point for `tlfs`.
 pub struct Sdk {
@@ -112,7 +111,7 @@ impl Sdk {
 
         let (tx, mut rx) = mpsc::unbounded();
         let driver = poll_fn(move |cx| {
-            while let Poll::Ready(Some(cmd)) = Pin::new(&mut rx).poll_next(cx) {
+            while let Poll::Ready(Some(cmd)) = rx.poll_next_unpin(cx) {
                 match cmd {
                     Command::AddAddress(peer, addr) => {
                         swarm.behaviour_mut().add_address(&peer, addr);
@@ -139,7 +138,7 @@ impl Sdk {
                 };
             }
             while swarm.behaviour_mut().poll_backend(cx).is_ready() {}
-            while Pin::new(&mut swarm).poll_next(cx).is_ready() {}
+            while swarm.poll_next_unpin(cx).is_ready() {}
             Poll::Pending
         });
 
@@ -180,14 +179,17 @@ impl Sdk {
     }
 
     /// Returns the list of [`Multiaddr`] the [`Sdk`] is listening on.
-    pub async fn addresses(&self) -> Vec<Multiaddr> {
+    pub fn addresses(&self) -> impl Future<Output = Vec<Multiaddr>> + 'static {
         let (tx, rx) = oneshot::channel();
-        if let Ok(()) = self.swarm.unbounded_send(Command::Addresses(tx)) {
-            if let Ok(addrs) = rx.await {
-                return addrs;
+        let r = self.swarm.unbounded_send(Command::Addresses(tx));
+        async move {
+            if let Ok(()) = r {
+                if let Ok(addrs) = rx.await {
+                    return addrs;
+                }
             }
+            vec![]
         }
-        vec![]
     }
 
     /// Returns an iterator of [`DocId`].
@@ -275,6 +277,7 @@ enum Command {
 mod tests {
     use super::*;
     use futures::StreamExt;
+    use std::pin::Pin;
     use std::time::Duration;
 
     #[async_std::test]
