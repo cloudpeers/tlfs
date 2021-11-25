@@ -8,6 +8,7 @@ use crate::path::Path;
 use crate::radixdb::{BlobMap, BlobSet, Storage};
 use crate::registry::{Expanded, Hash, Registry};
 use crate::util::Ref;
+use crate::MemStorage;
 use anyhow::{anyhow, Result};
 use futures::channel::mpsc;
 use futures::prelude::*;
@@ -282,6 +283,11 @@ impl Backend {
         Ok(me)
     }
 
+    /// Creates a new in memory [`Backend`].
+    pub fn in_memory(package: &[u8]) -> Result<Self> {
+        Self::new(Arc::new(MemStorage::default()), package)
+    }
+
     /// Creates a new in-memory backend for testing purposes.
     #[cfg(test)]
     #[allow(clippy::ptr_arg)]
@@ -289,7 +295,6 @@ impl Backend {
         use tracing_subscriber::fmt::format::FmtSpan;
         use tracing_subscriber::EnvFilter;
 
-        use crate::MemStorage;
         tracing_log::LogTracer::init().ok();
         let env = std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or_else(|_| "info".to_owned());
         let subscriber = tracing_subscriber::FmtSubscriber::builder()

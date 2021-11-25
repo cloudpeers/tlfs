@@ -4,25 +4,26 @@
 #![deny(missing_docs)]
 mod sync;
 
+pub use crate::sync::{libp2p_peer_id, ToLibp2pKeypair, ToLibp2pPublic};
 pub use libp2p::Multiaddr;
 pub use tlfs_crdt::{
-    Causal, Cursor, DocId, Event, Keypair, Kind, Lens, Lenses, Package, PeerId, Permission,
-    PrimitiveKind, Schema, Subscriber,
+    ArchivedSchema, Backend, Causal, Cursor, DocId, Event, Frontend, Keypair, Kind, Lens, Lenses,
+    Package, PathBuf, PeerId, Permission, PrimitiveKind, Ref, Schema, Subscriber,
 };
 
-use crate::sync::{Behaviour, ToLibp2pKeypair, ToLibp2pPublic};
+use crate::sync::Behaviour;
 use anyhow::Result;
-use futures::channel::{mpsc, oneshot};
-use futures::future::poll_fn;
-use futures::stream::Stream;
-use libp2p::Swarm;
-use std::path::Path;
-use std::pin::Pin;
-use std::sync::Arc;
+use futures::{
+    channel::{mpsc, oneshot},
+    future::poll_fn,
+    Future, StreamExt,
+};
+use libp2p::{
+    core::{muxing::StreamMuxerBox, transport::Boxed},
+    swarm::AddressScore,
+    Swarm,
+};
 use std::task::Poll;
-use tlfs_crdt::{Backend, FileStorage, Frontend, MemStorage, Storage};
-use tracing_subscriber::fmt::format::FmtSpan;
-use tracing_subscriber::EnvFilter;
 
 /// Main entry point for `tlfs`.
 pub struct Sdk {
@@ -33,16 +34,37 @@ pub struct Sdk {
 
 impl Sdk {
     /// Creates a new persistent [`Sdk`] instance.
-    pub async fn persistent(db: &Path, package: &[u8]) -> Result<Self> {
-        Self::new(Arc::new(FileStorage::new(db)), package).await
+    #[cfg(not(target_arch = "wasm32"))]
+    pub async fn persistent(db: &std::path::Path, package: &[u8]) -> Result<Self> {
+        let (sdk, driver) = Self::new(
+            std::sync::Arc::new(tlfs_crdt::FileStorage::new(db)),
+            package,
+        )
+        .await?;
+        async_global_executor::spawn::<_, ()>(driver).detach();
+
+        Ok(sdk)
     }
 
     /// Create a new in-memory [`Sdk`] instance.
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn memory(package: &[u8]) -> Result<Self> {
-        Self::new(Arc::new(MemStorage::default()), package).await
+        let (sdk, driver) = Self::new(
+            std::sync::Arc::new(tlfs_crdt::MemStorage::default()),
+            package,
+        )
+        .await?;
+        async_global_executor::spawn::<_, ()>(driver).detach();
+
+        Ok(sdk)
     }
 
-    async fn new(storage: Arc<dyn Storage>, package: &[u8]) -> Result<Self> {
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn new(
+        storage: std::sync::Arc<dyn tlfs_crdt::Storage>,
+        package: &[u8],
+    ) -> Result<(Self, impl Future<Output = ()>)> {
+        use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
         tracing_log::LogTracer::init().ok();
         let env = std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or_else(|_| "info".to_owned());
         let subscriber = tracing_subscriber::FmtSubscriber::builder()
@@ -61,19 +83,44 @@ impl Sdk {
         tracing::info!("our peer id is: {}", peer);
 
         let transport = libp2p::development_transport(keypair.to_libp2p()).await?;
+
+        Self::new_with_transport(
+            backend,
+            frontend,
+            peer,
+            transport,
+            std::iter::once("/ip4/0.0.0.0/tcp/0".parse().unwrap()),
+        )
+        .await
+    }
+
+    /// Creates a new [`Sdk`] instance from the given [`Backend`], [`Frontend`] and libp2p
+    /// transport.
+    pub async fn new_with_transport(
+        backend: Backend,
+        frontend: Frontend,
+        peer: PeerId,
+        transport: Boxed<(libp2p::PeerId, StreamMuxerBox)>,
+        listen_on: impl Iterator<Item = Multiaddr>,
+    ) -> Result<(Self, impl Future<Output = ()>)> {
         let behaviour = Behaviour::new(backend)?;
         let mut swarm = Swarm::new(transport, behaviour, peer.to_libp2p().to_peer_id());
-        swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse().unwrap())?;
+        for i in listen_on {
+            swarm.listen_on(i)?;
+        }
 
         let (tx, mut rx) = mpsc::unbounded();
-        async_global_executor::spawn::<_, ()>(poll_fn(move |cx| {
-            while let Poll::Ready(Some(cmd)) = Pin::new(&mut rx).poll_next(cx) {
+        let driver = poll_fn(move |cx| {
+            while let Poll::Ready(Some(cmd)) = rx.poll_next_unpin(cx) {
                 match cmd {
                     Command::AddAddress(peer, addr) => {
                         swarm.behaviour_mut().add_address(&peer, addr);
                         if let Err(err) = swarm.dial(peer.to_libp2p().to_peer_id()) {
                             tracing::error!("{}", err);
                         }
+                    }
+                    Command::AddExternalAddress(addr, score) => {
+                        swarm.add_external_address(addr, score);
                     }
                     Command::RemoveAddress(peer, addr) => {
                         swarm.behaviour_mut().remove_address(&peer, &addr)
@@ -91,16 +138,18 @@ impl Sdk {
                 };
             }
             while swarm.behaviour_mut().poll_backend(cx).is_ready() {}
-            while Pin::new(&mut swarm).poll_next(cx).is_ready() {}
+            while swarm.poll_next_unpin(cx).is_ready() {}
             Poll::Pending
-        }))
-        .detach();
+        });
 
-        Ok(Self {
-            frontend,
-            peer,
-            swarm: tx,
-        })
+        Ok((
+            Self {
+                frontend,
+                peer,
+                swarm: tx,
+            },
+            driver,
+        ))
     }
 
     /// Returns the [`PeerId`] of this [`Sdk`].
@@ -115,6 +164,13 @@ impl Sdk {
             .ok();
     }
 
+    /// Adds an external [`Multiaddr`] record for the local node.
+    pub fn add_external_address(&self, addr: Multiaddr, score: AddressScore) {
+        self.swarm
+            .unbounded_send(Command::AddExternalAddress(addr, score))
+            .ok();
+    }
+
     /// Removes a [`Multiaddr`] of a [`PeerId`].
     pub fn remove_address(&self, peer: PeerId, addr: Multiaddr) {
         self.swarm
@@ -123,14 +179,17 @@ impl Sdk {
     }
 
     /// Returns the list of [`Multiaddr`] the [`Sdk`] is listening on.
-    pub async fn addresses(&self) -> Vec<Multiaddr> {
+    pub fn addresses(&self) -> impl Future<Output = Vec<Multiaddr>> + 'static {
         let (tx, rx) = oneshot::channel();
-        if let Ok(()) = self.swarm.unbounded_send(Command::Addresses(tx)) {
-            if let Ok(addrs) = rx.await {
-                return addrs;
+        let r = self.swarm.unbounded_send(Command::Addresses(tx));
+        async move {
+            if let Ok(()) = r {
+                if let Ok(addrs) = rx.await {
+                    return addrs;
+                }
             }
+            vec![]
         }
-        vec![]
     }
 
     /// Returns an iterator of [`DocId`].
@@ -173,6 +232,7 @@ impl Sdk {
 }
 
 /// Document handle.
+#[derive(Clone)]
 pub struct Doc {
     doc: tlfs_crdt::Doc,
     swarm: mpsc::UnboundedSender<Command>,
@@ -205,6 +265,7 @@ impl Doc {
 
 enum Command {
     AddAddress(PeerId, Multiaddr),
+    AddExternalAddress(Multiaddr, AddressScore),
     RemoveAddress(PeerId, Multiaddr),
     Addresses(oneshot::Sender<Vec<Multiaddr>>),
     Subscribe(DocId),
@@ -212,11 +273,12 @@ enum Command {
 }
 
 #[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
 mod tests {
     use super::*;
     use futures::StreamExt;
+    use std::pin::Pin;
     use std::time::Duration;
-    use tlfs_crdt::Ref;
 
     #[async_std::test]
     async fn test_api() -> Result<()> {

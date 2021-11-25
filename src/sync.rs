@@ -7,6 +7,7 @@ use futures::{
     prelude::*,
 };
 use libp2p::{
+    ping,
     request_response::{
         self, ProtocolName, ProtocolSupport, RequestId, RequestResponse, RequestResponseCodec,
         RequestResponseConfig,
@@ -137,6 +138,7 @@ type RequestResponseEvent =
 pub struct Behaviour {
     req: RequestResponse<SyncCodec>,
     broadcast: Broadcast,
+    ping: ping::Behaviour,
     #[behaviour(ignore)]
     unjoin_req: FnvHashMap<RequestId, DocId>,
     #[behaviour(ignore)]
@@ -154,6 +156,7 @@ impl Behaviour {
                 vec![(SyncProtocol, ProtocolSupport::Full)],
                 RequestResponseConfig::default(),
             ),
+            ping: ping::Behaviour::new(ping::Config::new().with_keep_alive(true)),
             unjoin_req: Default::default(),
             buffer: Default::default(),
             broadcast: Broadcast::new(BroadcastConfig::default()),
@@ -330,7 +333,13 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
     }
 }
 
+impl NetworkBehaviourEventProcess<ping::Event> for Behaviour {
+    fn inject_event(&mut self, _event: ping::Event) {}
+}
+
+/// Conversion to libp2p
 pub trait ToLibp2pKeypair {
+    /// Converts the [`Keypair`] into a libp2p identity
     fn to_libp2p(self) -> libp2p::identity::Keypair;
 }
 
@@ -342,7 +351,9 @@ impl ToLibp2pKeypair for Keypair {
     }
 }
 
+/// Conversion to libp2p
 pub trait ToLibp2pPublic {
+    /// Converts the [`PeerId`] into a libp2p PeerId
     fn to_libp2p(self) -> libp2p::identity::PublicKey;
 }
 
@@ -354,7 +365,8 @@ impl ToLibp2pPublic for PeerId {
     }
 }
 
-fn libp2p_peer_id(peer_id: &libp2p::PeerId) -> Result<PeerId> {
+/// Convert a [`libp2p::PeerId`] into a [`tlfs::PeerId`], if possible.
+pub fn libp2p_peer_id(peer_id: &libp2p::PeerId) -> Result<PeerId> {
     match libp2p::multihash::Multihash::from_bytes(&peer_id.to_bytes()) {
         Ok(multihash) => {
             if multihash.code() == u64::from(libp2p::multihash::Code::Identity) {

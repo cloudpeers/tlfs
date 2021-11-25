@@ -6,8 +6,11 @@ WASMBINDGEN_VERSION=0.2.77
 OUT=./pkg
 
 echo "Running cargo build"
-# todo: release build
-cargo build --target wasm32-unknown-unknown
+if [ -z "${NO_OPTIMIZE}" ]; then
+  cargo build --target wasm32-unknown-unknown --release
+else
+  cargo build --target wasm32-unknown-unknown
+fi
 
 if [ -d $OUT ]; then
   echo "Clearing output directory '$OUT'"
@@ -26,7 +29,13 @@ echo "Generating wasm-bindings"
 # automatically, no need to call `.free` in JS.
 #
 # [1]: https://rustwasm.github.io/docs/wasm-bindgen/reference/weak-references.html
-wasm-bindgen ../target/wasm32-unknown-unknown/debug/tlfs_wasm_ffi.wasm \
+
+if [ -z "${NO_OPTIMIZE}" ]; then
+  MODE=release
+else
+  MODE=debug
+fi
+wasm-bindgen ../target/wasm32-unknown-unknown/$MODE/tlfs_wasm_ffi.wasm \
   --out-dir $OUT \
   --out-name local_first \
   --target web \
@@ -61,7 +70,7 @@ fi
 
 if [ -z "${NO_OPTIMIZE}" ]; then
   echo "Optimizing wasm bindings with default optimization (this might take some time)"
-  ./wasm-opt $OUT/local_first_bg.wasm -O -g --output $OUT/local_first_bg.opt.wasm
+  ./wasm-opt $OUT/local_first_bg.wasm -Oz -g --output $OUT/local_first_bg.opt.wasm
 fi
 
 echo "Find your wasm package in $OUT"
