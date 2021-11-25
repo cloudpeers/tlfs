@@ -68,7 +68,7 @@ jobs:
 
     - name: build
       working-directory: wasm-ffi
-      run: ./build.sh
+      run: NO_OPTIMIZE=1 ./build.sh
 
     - name: install wasm-pack
       run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh

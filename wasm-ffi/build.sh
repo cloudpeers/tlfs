@@ -29,7 +29,13 @@ echo "Generating wasm-bindings"
 # automatically, no need to call `.free` in JS.
 #
 # [1]: https://rustwasm.github.io/docs/wasm-bindgen/reference/weak-references.html
-wasm-bindgen ../target/wasm32-unknown-unknown/debug/tlfs_wasm_ffi.wasm \
+
+if [ -z "${NO_OPTIMIZE}" ]; then
+  MODE=release
+else
+  MODE=debug
+fi
+wasm-bindgen ../target/wasm32-unknown-unknown/$MODE/tlfs_wasm_ffi.wasm \
   --out-dir $OUT \
   --out-name local_first \
   --target web \
