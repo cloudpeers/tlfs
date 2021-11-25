@@ -11,7 +11,7 @@ use rkyv::{Archive, Archived, Deserialize, Serialize};
 use std::iter::FromIterator;
 use vec_collections::radix_tree::{AbstractRadixTree, AbstractRadixTreeMut, IterKey, RadixTree};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Archive, Deserialize, Serialize)]
+#[derive(Clone, Default, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
 #[archive_attr(derive(Debug, CheckBytes))]
 #[archive_attr(check_bytes(
@@ -128,7 +128,7 @@ impl std::fmt::Debug for CausalContext {
 
 /// Represents a state transition of a crdt. Multiple state transitions can be combined
 /// together into an atomic transaction.
-#[derive(Clone, Debug, Eq, PartialEq, Archive, Deserialize, Serialize, Default)]
+#[derive(Clone, Eq, PartialEq, Archive, Deserialize, Serialize, Default)]
 #[archive_attr(derive(Debug, CheckBytes))]
 #[repr(C)]
 pub struct Causal {
@@ -208,6 +208,26 @@ impl Causal {
             }
         }
         self.expired = expired;
+    }
+}
+
+impl std::fmt::Debug for Causal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Causal")
+            .field("store", &self.store)
+            .field("expired", &self.expired)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for DotStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut m = f.debug_map();
+        for p in self.iter() {
+            let path = p.as_path();
+            m.entry(&path.dot(), &path);
+        }
+        m.finish()
     }
 }
 
@@ -730,8 +750,6 @@ mod tests {
         Ok(())
     }
 
-    // FIXME Fraction Ordering
-    #[ignore]
     #[async_std::test]
     async fn test_orarray_move() -> Result<()> {
         let packages = vec![Package::new(
@@ -753,18 +771,16 @@ mod tests {
             doc.apply(&op)?;
         }
         let mut r = vec![];
-        for i in 0..10 {
+        for i in 0..doc.cursor().len()? as usize {
             r.extend(doc.cursor().index(i)?.u64s()?.collect::<Result<Vec<_>>>()?);
         }
         assert_eq!(r, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
-        println!("{:#?}", doc);
         let move_op = doc.cursor().index(5)?.r#move(2)?;
-        println!("move_op {:#?}", move_op);
         doc.apply(&move_op)?;
 
         let mut r = vec![];
-        for i in 0..10 {
+        for i in 0..doc.cursor().len()? as usize {
             r.extend(doc.cursor().index(i)?.u64s()?.collect::<Result<Vec<_>>>()?);
         }
         assert_eq!(r, vec![0, 1, 5, 2, 3, 4, 6, 7, 8, 9]);

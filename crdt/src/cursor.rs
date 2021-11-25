@@ -140,7 +140,7 @@ impl<'a> Cursor<'a> {
             .scan_path(slf.as_path())
             .map(move |p| {
                 let x = Path::new(&p).strip_prefix(slf.as_path())?;
-                x.as_path().first().context("Empty")
+                x.first().context("Empty")
             })
             .filter_map(|segment| match segment {
                 Ok(crate::Segment::Bool(b)) => Some(Ok(Primitive::Bool(b))),
@@ -530,10 +530,9 @@ impl ArrayWrapper {
         let (pos, uid) = if let Some(entry) = iter.nth(ix) {
             // Existing entry
             let p_c = cursor.path.clone();
-            let data = array_util::ArrayValue::from_path(
-                Path::new(&entry).strip_prefix(p_c.as_path())?.as_path(),
-            )
-            .context("Reading array data")?;
+            let data =
+                array_util::ArrayValue::from_path(Path::new(&entry).strip_prefix(p_c.as_path())?)
+                    .context("Reading array data")?;
             (data.pos, data.uid)
         } else {
             // No entry, find position to insert
@@ -546,7 +545,7 @@ impl ArrayWrapper {
                         .skip(s)
                         .map(move |iv| -> anyhow::Result<_> {
                             let meta = array_util::ArrayValue::from_path(
-                                Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
+                                Path::new(&iv).strip_prefix(p_c.as_path())?,
                             )?;
                             Ok(meta.pos)
                         });
@@ -560,7 +559,7 @@ impl ArrayWrapper {
                             .scan_path(array_value_root.as_path())
                             .map(move |iv| {
                                 let meta = array_util::ArrayValue::from_path(
-                                    Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
+                                    Path::new(&iv).strip_prefix(p_c.as_path())?,
                                 )?;
                                 Ok(meta.pos)
                             });
@@ -611,44 +610,40 @@ impl ArrayWrapper {
 
         let new_pos = {
             // TODO: use sled's size hint
-            let len = cursor.crdt.scan_path(self.value_path.as_path()).count();
+            let mut value_path = self.array_path.clone();
+            value_path.prim_str(array_util::ARRAY_VALUES);
+            let len = cursor.crdt.scan_path(value_path.as_path()).count();
 
             to = to.min(len);
             let (left, right) = match to.checked_sub(1) {
                 Some(s) => {
                     let p_c = self.array_path.clone();
-                    let mut iter = cursor
-                        .crdt
-                        .scan_path(self.value_path.as_path())
-                        .skip(s)
-                        .map(move |iv| -> anyhow::Result<_> {
+                    let mut iter = cursor.crdt.scan_path(value_path.as_path()).skip(s).map(
+                        move |iv| -> anyhow::Result<_> {
                             let meta = array_util::ArrayValue::from_path(
-                                Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
+                                Path::new(&iv).strip_prefix(p_c.as_path())?,
                             )?;
                             Ok(meta.pos)
-                        });
+                        },
+                    );
                     (iter.next(), iter.next())
                 }
                 None => {
                     let p_c = self.array_path.clone();
-                    let mut iter =
-                        cursor
-                            .crdt
-                            .scan_path(self.value_path.as_path())
-                            .map(move |iv| {
-                                let meta = array_util::ArrayValue::from_path(
-                                    Path::new(&iv).strip_prefix(p_c.as_path())?.as_path(),
-                                )?;
-                                Ok(meta.pos)
-                            });
+                    let mut iter = cursor.crdt.scan_path(value_path.as_path()).map(move |iv| {
+                        let meta = array_util::ArrayValue::from_path(
+                            Path::new(&iv).strip_prefix(p_c.as_path())?,
+                        )?;
+                        Ok(meta.pos)
+                    });
 
                     (None, iter.next())
                 }
             };
 
             let left = left.transpose()?.unwrap_or_else(Fraction::zero);
-            if let Some(r) = right.transpose()? {
-                left.mid(&r)
+            if let Some(right) = right.transpose()? {
+                left.mid(&right)
             } else {
                 left.succ()
             }
@@ -664,10 +659,11 @@ impl ArrayWrapper {
         let mut expired = DotStore::new();
         let move_op = nonce();
         for e in existing_meta {
-            let p = Path::new(&e);
-            expired.insert(p.to_owned());
+            let mut p = Path::new(&e).to_owned();
+            cursor.sign(&mut p);
+            let meta = self.get_meta_data(p.as_path())?;
+            expired.insert(p);
 
-            let meta = self.get_meta_data(p)?;
             let mut path = self.meta_path.clone();
             path.prim_u64(meta.last_update);
             path.prim_u64(move_op);
@@ -689,9 +685,10 @@ impl ArrayWrapper {
             .scan_path(self.value_path.as_path())
             .next()
             .context("Concurrent access")?;
-        let p = Path::new(&old);
-        expired.insert(p.to_owned());
-        let v = self.get_value(p)?;
+        let mut p = Path::new(&old).to_owned();
+        let v = self.get_value(p.as_path())?;
+        cursor.sign(&mut p);
+        expired.insert(p);
 
         // add new pos
         new_value_path.position(&new_pos);
@@ -759,11 +756,11 @@ impl ArrayWrapper {
         })
     }
     fn get_meta_data(&self, path: Path) -> Result<array_util::ArrayMeta> {
-        array_util::ArrayMeta::from_path(path.strip_prefix(self.array_path.as_path())?.as_path())
+        array_util::ArrayMeta::from_path(path.strip_prefix(self.array_path.as_path())?)
     }
 
     fn get_value(&self, path: Path<'_>) -> Result<array_util::ArrayValue> {
-        array_util::ArrayValue::from_path(path.strip_prefix(self.array_path.as_path())?.as_path())
+        array_util::ArrayValue::from_path(path.strip_prefix(self.array_path.as_path())?)
     }
 }
 

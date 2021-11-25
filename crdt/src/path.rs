@@ -3,7 +3,7 @@ use crate::dotset::Dot;
 use crate::fraction::Fraction;
 use crate::id::{DocId, PeerId};
 use crate::util::Ref;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use bytecheck::CheckBytes;
 use ed25519_dalek::Signature;
 use rkyv::{Archive, Deserialize, Serialize};
@@ -47,6 +47,57 @@ impl SegmentType {
             u if u == Sig as u8 => Some(Sig),
             _ => unreachable!("Unexpected SegmentType: {}", u),
         }
+    }
+
+    fn last_element(data: &[u8]) -> Option<(SegmentType, usize, &[u8])> {
+        use std::mem::size_of;
+        let last = data.last()?;
+        let ty = SegmentType::new(*last).unwrap();
+        let len = 1 + match ty {
+            SegmentType::Doc => size_of::<DocId>(),
+            SegmentType::Peer => size_of::<PeerId>(),
+            SegmentType::Nonce => size_of::<u64>(),
+            SegmentType::Bool => size_of::<bool>(),
+            SegmentType::U64 => size_of::<u64>(),
+            SegmentType::I64 => size_of::<i64>(),
+            SegmentType::Dot => size_of::<Dot>(),
+            SegmentType::Sig => size_of::<Signature>(),
+            SegmentType::Str | SegmentType::Position | SegmentType::Policy => {
+                if data.len() < 3 {
+                    return None;
+                }
+                let size =
+                    u16::from_be_bytes(data[data.len() - 3..data.len() - 1].try_into().unwrap());
+                2 + (size as usize)
+            }
+        };
+        if data.len() < len {
+            return None;
+        }
+        let content = if ty.is_variable_length() {
+            &data[data.len() - len..data.len() - 3]
+        } else {
+            &data[data.len() - len..data.len() - 1]
+        };
+        Some((ty, len, content))
+    }
+
+    fn first_element(mut data: &[u8]) -> Option<(SegmentType, usize, &[u8])> {
+        while let Some((ty, len, content)) = Self::last_element(data) {
+            if len == data.len() {
+                return Some((ty, len, content));
+            } else {
+                data = &data[..data.len() - len];
+            }
+        }
+        None
+    }
+
+    fn is_variable_length(&self) -> bool {
+        matches!(
+            self,
+            SegmentType::Position | SegmentType::Str | SegmentType::Policy
+        )
     }
 }
 
@@ -249,10 +300,10 @@ impl PathBuf {
     }
 
     fn push(&mut self, ty: SegmentType, bytes: &[u8]) {
-        self.0.extend(&[ty as u8]);
-        self.push_len(bytes.len());
         self.0.extend(bytes);
-        self.push_len(bytes.len());
+        if ty.is_variable_length() {
+            self.push_len(bytes.len());
+        }
         self.0.extend(&[ty as u8]);
     }
 
@@ -411,50 +462,36 @@ impl<'a> Path<'a> {
     }
 
     fn first_len(&self) -> Option<usize> {
-        if self.is_empty() {
-            return None;
-        }
-        let mut len = [0; 2];
-        len.copy_from_slice(&self.0[1..3]);
-        Some(u16::from_be_bytes(len) as usize)
+        SegmentType::first_element(self.0).map(|(_, l, _)| l)
     }
 
     fn last_len(&self) -> Option<usize> {
-        if self.is_empty() {
-            return None;
-        }
-        let end = self.0.len();
-        let mut len = [0; 2];
-        len.copy_from_slice(&self.0[(end - 3)..(end - 1)]);
-        Some(u16::from_be_bytes(len) as usize)
+        SegmentType::last_element(self.0).map(|(_, l, _)| l)
     }
 
     /// Returns the last segment.
     pub fn last(&self) -> Option<Segment> {
-        let len = self.last_len()?;
-        let end = self.0.len();
-        let ty = SegmentType::new(self.0[end - 1])?;
-        Some(Segment::new(ty, &self.0[(end - 3 - len)..(end - 3)]))
+        let (ty, _, data) = SegmentType::last_element(self.0)?;
+        Some(Segment::new(ty, data))
     }
 
     /// Returns the first segment.
     pub fn first(&self) -> Option<Segment> {
-        let len = self.first_len()?;
-        let ty = SegmentType::new(self.0[0])?;
-        Some(Segment::new(ty, &self.0[3..(len + 3)]))
+        let (ty, _, data) = SegmentType::first_element(self.0)?;
+        Some(Segment::new(ty, data))
     }
 
     /// Returns the path without the first segment.
     pub fn child(&self) -> Option<Path<'a>> {
         let len = self.first_len()?;
-        Some(Path(&self.0[(len + 6)..]))
+        Some(Path(&self.0[len..]))
     }
 
     /// Returns the path without the last segment.
     pub fn parent(&self) -> Option<Path<'a>> {
         let len = self.last_len()?;
         let end = self.0.len();
-        Some(Path(&self.0[..(end - len - 6)]))
+        Some(Path(&self.0[..(end - len)]))
     }
 
     /// Returns an identifier for the path.
@@ -463,10 +500,12 @@ impl<'a> Path<'a> {
     }
 
     /// Returns a path that, when joined onto `base`, yields `self`.
-    pub fn strip_prefix(&self, base: Self) -> Result<PathBuf> {
-        Ok(iter_after((*self).into_iter(), base.into_iter())
-            .context("StripPrefixError")?
-            .collect())
+    pub fn strip_prefix(&self, base: Self) -> Result<Self> {
+        if self.0.starts_with(base.0) {
+            Ok(Self(&self.0[base.0.len()..]))
+        } else {
+            Err(anyhow::anyhow!("StripPrefixError"))
+        }
     }
 
     /// Returns the first segment and the path without the first segment.
@@ -484,24 +523,6 @@ impl<'a> Path<'a> {
     }
 }
 
-fn iter_after<I, J>(mut iter: I, mut prefix: J) -> Option<I>
-where
-    I: Iterator<Item = Segment> + Clone,
-    J: Iterator<Item = Segment>,
-{
-    loop {
-        let mut iter_next = iter.clone();
-        match (iter_next.next(), prefix.next()) {
-            (Some(ref x), Some(ref y)) if x == y => (),
-            (Some(_), Some(_)) => return None,
-            (Some(_), None) => return Some(iter),
-            (None, None) => return Some(iter),
-            (None, Some(_)) => return None,
-        }
-        iter = iter_next;
-    }
-}
-
 #[derive(Clone)]
 /// Iterator over path segments.
 pub struct PathIter<'a>(Path<'a>);
@@ -511,6 +532,17 @@ impl<'a> Iterator for PathIter<'a> {
 
     fn next(&mut self) -> Option<Segment> {
         if let Some((seg, path)) = self.0.split_first() {
+            self.0 = path;
+            Some(seg)
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a> DoubleEndedIterator for PathIter<'a> {
+    fn next_back(&mut self) -> Option<Segment> {
+        if let Some((path, seg)) = self.0.split_last() {
             self.0 = path;
             Some(seg)
         } else {
@@ -598,7 +630,7 @@ mod tests {
         base.prim_i64(42);
 
         let relative = p.as_path().strip_prefix(base.as_path()).unwrap();
-        let mut iter = relative.as_path().into_iter();
+        let mut iter = relative.into_iter();
         for i in [
             Segment::Str("b".to_string()),
             Segment::I64(43),
