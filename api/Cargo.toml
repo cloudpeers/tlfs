@@ -1,0 +1,14 @@
+[package]
+name = "tlfs-api"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[build-dependencies]
+ffi-gen = { version = "0.1.0", path = "../../ffigen" }
+
+[dependencies]
+ffi-gen-macro = { version = "0.1.0", path = "../../ffigen/macro" }
+tlfs = { version = "0.1.0", path = ".." }

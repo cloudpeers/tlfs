@@ -1,4 +1,0 @@
-language = "C"
-include_guard = "TLFS_H"
-no_includes = true
-includes = ["stdbool.h", "stdint.h"]
