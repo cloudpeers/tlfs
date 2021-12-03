@@ -6,9 +6,14 @@ edition = "2021"
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+default = ["futures"]
+
 [build-dependencies]
 ffi-gen = { version = "0.1.0", path = "../../ffigen" }
 
 [dependencies]
+anyhow = "1.0.51"
 ffi-gen-macro = { version = "0.1.0", path = "../../ffigen/macro" }
+futures = { version = "0.3.18", optional = true }
 tlfs = { version = "0.1.0", path = ".." }
