@@ -146,7 +146,7 @@ impl Segment {
             }
             SegmentType::Dot => Self::Dot(Dot::new(data.try_into().unwrap())),
             SegmentType::Position => Self::Position(Fraction::new(data.into())),
-            SegmentType::Sig => Self::Sig(Signature::new(data.try_into().unwrap())),
+            SegmentType::Sig => Self::Sig(Signature::from_bytes(data).unwrap()),
         }
     }
 
