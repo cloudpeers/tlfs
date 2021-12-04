@@ -56,8 +56,22 @@ jobs:
     - name: Install rust toolchain
       uses: hecrj/setup-rust-action@v1
 
+    - name: Install node
+      uses: actions/setup-node@v2
+      with:
+        node-version: '16'
+
+    - name: Install dart
+      uses: dart-lang/setup-dart@v1
+
+    - run: cargo install --git https://github.com/vmx/wasm-multi-value-reverse-polyfill --locked
+    - run: npm i -g prettier
+    - run: dart pub global activate dartdoc
+
     - name: build lib
       working-directory: api
+      env:
+        FFIGEN: 1
       run: cargo build --release
 
     # TODO: patch returns
