@@ -89,7 +89,7 @@ jobs:
 
     - name: dart pub
       working-directory: api/dart
-      run: dart pub --dry-run
+      run: dart pub publish --dry-run
 
     # TODO
     #- name: eslint

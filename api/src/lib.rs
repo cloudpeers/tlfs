@@ -1,3 +1,6 @@
+#![allow(clippy::boxed_local)]
+#![allow(clippy::needless_question_mark)] // TODO
+
 ffi_gen_macro::ffi_gen!("api/tlfs.rsh");
 
 use anyhow::Result;
@@ -74,13 +77,10 @@ impl Doc {
     }
 }
 
+#[derive(Clone)]
 pub struct Cursor<'a>(tlfs::Cursor<'a>);
 
 impl<'a> Cursor<'a> {
-    pub fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
-
     pub fn flag_enabled(&self) -> Result<bool> {
         self.0.enabled()
     }

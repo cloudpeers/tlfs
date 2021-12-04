@@ -266,7 +266,7 @@ impl SchemaBuilder {
     fn invocation(&mut self, pair: Pair<Rule>) -> Segment {
         let mut method = None;
         let mut segment = None;
-        for pair in pair.into_inner().into_iter() {
+        for pair in pair.into_inner() {
             if pair.as_rule() == Rule::ident {
                 match (method, pair.as_str()) {
                     (None, "remove") => {
