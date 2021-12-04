@@ -1,4 +1,5 @@
 [toolchain]
-channel = "1.56.0"
+channel = "nightly"
 components = [ "rustfmt", "rust-src", "clippy" ]
 profile = "minimal"
+targets = [ "wasm32-unknown-unknown", "x86_64-unknown-linux-gnu" ]
