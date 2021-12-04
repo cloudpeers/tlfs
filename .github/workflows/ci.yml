@@ -47,17 +47,7 @@ jobs:
     - name: cargo clippy
       run: cargo clippy --workspace --examples --tests --all-features -- -D warnings
 
-  dart-format:
-    runs-on: self-hosted
-    steps:
-    - name: Checkout sources
-      uses: actions/checkout@v2
-
-    - name: dart format
-      working-directory: dart
-      run: dart format lib/tlfs.dart
-
-  wasm:
+  api:
     runs-on: self-hosted
     steps:
     - name: Checkout sources
@@ -66,44 +56,37 @@ jobs:
     - name: Install rust toolchain
       uses: hecrj/setup-rust-action@v1
 
-    - name: build
-      working-directory: wasm-ffi
-      run: NO_OPTIMIZE=1 ./build.sh
+    - name: build lib
+      working-directory: api
+      run: cargo build --release
 
-    - name: install wasm-pack
-      run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+    # TODO: patch returns
+    #- name: build wasm
+    #  working-directory: api
+    #  run: cargo build --release --target wasm32-unknown-unknown
 
-    - name: wasm-pack test
-      working-directory: wasm-ffi
-      run: wasm-pack test --headless --chrome --firefox
+    - name: dart analyzer
+      working-directory: api/dart
+      run: dart analyze lib
 
-  linux-capi-dart:
-    runs-on: self-hosted
-    steps:
-    - name: Checkout sources
-      uses: actions/checkout@v2
+    - name: dartdoc
+      working-directory: api/dart
+      run: dartdoc
 
-    - name: Install rust toolchain
-      uses: hecrj/setup-rust-action@v1
+    - name: dart pub
+      working-directory: api/dart
+      run: dart pub --dry-run
 
-    - name: install cargo-c
-      run: cargo install cargo-c
-      continue-on-error: true
+    # TODO
+    #- name: eslint
+    #  working-directory: api/js
+    #  run: eslint
 
-    - name: install tlfs
-      working-directory: capi
-      run: cargo cinstall --prefix /opt/tlfs
+    # TODO
+    #- name: typedoc
+    #  working-directory: api/js
+    #  run: typedoc
 
-    - name: dart pub get
-      working-directory: dart
-      run: dart pub get
-
-    #- name: ffigen
-    #  working-directory: dart
-    #  run: dart run ffigen
-
-    - name: dart test
-      working-directory: dart
-      run: dart test
-      env:
-        LD_LIBRARY_PATH: /opt/tlfs/lib
+    - name: npm publish
+      working-directory: api/js
+      run: npm publish --dry-run

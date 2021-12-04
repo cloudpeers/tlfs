@@ -1,0 +1,24 @@
+{
+  "name": "tlfs",
+  "version": "0.1.0",
+  "description": "The local first SDK",
+  "main": "bindings.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cloudpeers/tlfs.git"
+  },
+  "keywords": [
+    "local-first",
+    "sdk"
+  ],
+  "author": "cloudpeer",
+  "license": "ISC",
+  "types": "./bindings.d.ts",
+  "bugs": {
+    "url": "https://github.com/cloudpeers/tlfs/issues"
+  },
+  "homepage": "https://github.com/cloudpeers/tlfs#readme"
+}
