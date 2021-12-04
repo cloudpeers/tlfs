@@ -1,5 +1,4 @@
 #![allow(clippy::boxed_local)]
-#![allow(clippy::needless_question_mark)] // TODO
 
 ffi_gen_macro::ffi_gen!("api/tlfs.rsh");
 

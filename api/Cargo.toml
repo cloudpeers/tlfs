@@ -11,10 +11,10 @@ name = "tlfs"
 default = ["futures"]
 
 [build-dependencies]
-ffi-gen = { version = "0.1.0", git = "https://github.com/cloudpeers/ffi-gen" }
+ffi-gen = "0.1.0"
 
 [dependencies]
 anyhow = "1.0.51"
-ffi-gen-macro = { version = "0.1.0", git = "https://github.com/cloudpeers/ffi-gen" }
+ffi-gen-macro = "0.1.1"
 futures = { version = "0.3.18", optional = true }
 tlfs = { version = "0.1.0", path = ".." }

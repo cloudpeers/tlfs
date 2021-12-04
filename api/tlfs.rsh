@@ -209,8 +209,8 @@ object Cursor {
 
     /// Checks permissions.
     fn can(peer_id: &string, perm: u8) -> Result<bool>;
-    // TODO: Subscribe to a path.
-    //fn subscribe() -> Stream<u8>;
+    /// Subscribe to a path.
+    fn subscribe() -> Stream<u8>;
 }
 
 /// Represents a state transition of a crdt. Multiple state transitions can be combined
