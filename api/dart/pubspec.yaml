@@ -1,8 +1,10 @@
 name: tlfs
-version: 1.0.0+1
+version: 0.1.0
+description: The local first SDK for dart.
+repository: https://github.com/cloudpeers/tlfs
 
 environment:
   sdk: ">=2.12.0 <3.0.0"
 
-dev_dependencies: 
+dev_dependencies:
   lints: ^1.0.1
