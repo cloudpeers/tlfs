@@ -8,6 +8,9 @@ fn main() {
         "cargo:rerun-if-changed={}",
         path.as_path().to_str().unwrap()
     );
+    if std::env::var_os("FFIGEN").is_none() {
+        return;
+    }
     let ffigen = FfiGen::new(&path).unwrap();
     let dart = dir.join("dart").join("lib").join("tlfs.dart");
     ffigen.generate_dart(dart, "tlfs", "tlfs").unwrap();
