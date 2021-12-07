@@ -8,7 +8,8 @@ crate-type = ["cdylib"]
 name = "tlfs"
 
 [features]
-default = ["futures"]
+default = ["capi", "futures"]
+capi = []
 
 [build-dependencies]
 ffi-gen = "0.1.0"
