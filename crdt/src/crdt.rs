@@ -317,7 +317,7 @@ impl Crdt {
         Ok(ctx)
     }
 
-    pub fn join_policy(&self, causal: &Causal) -> Result<()> {
+    pub async fn join_policy(&self, causal: &Causal) -> Result<()> {
         for buf in causal.store.iter() {
             let path = buf.as_path();
             if path
@@ -333,7 +333,7 @@ impl Crdt {
                 self.store.insert(path);
             }
         }
-        self.store.flush()?;
+        self.store.flush().await?;
         Ok(())
     }
 
@@ -341,7 +341,7 @@ impl Crdt {
     /// the peer that created the transaction. The reason for this is that the logic
     /// would be a little bit more complicated to ensure convergence in the presence of
     /// revocations.
-    pub fn join(&self, peer: &PeerId, causal: &Causal) -> Result<()> {
+    pub async fn join(&self, peer: &PeerId, causal: &Causal) -> Result<()> {
         for buf in causal.store.iter() {
             let path = buf.as_path();
             let is_expired = self.expired.scan_prefix(path.as_ref()).next().is_some();
@@ -365,8 +365,8 @@ impl Crdt {
             }
             self.expired.insert(&path);
         }
-        self.expired.flush()?;
-        self.store.flush()?;
+        self.expired.flush().await?;
+        self.store.flush().await?;
         Ok(())
     }
 
@@ -419,7 +419,7 @@ impl Crdt {
         Ok(Causal { expired, store })
     }
 
-    pub fn remove(&self, doc: &DocId) -> Result<()> {
+    pub async fn remove(&self, doc: &DocId) -> Result<()> {
         let mut path = PathBuf::new();
         path.doc(doc);
         for k in self.store.scan_prefix(&path) {
@@ -428,12 +428,12 @@ impl Crdt {
         for k in self.expired.scan_prefix(&path) {
             self.expired.remove(k);
         }
-        self.expired.flush()?;
-        self.store.flush()?;
+        self.expired.flush().await?;
+        self.store.flush().await?;
         Ok(())
     }
 
-    pub fn transform(&self, doc: &DocId, from: LensesRef, to: LensesRef) -> Result<()> {
+    pub async fn transform<'a>(&self, doc: &DocId, from: LensesRef<'a>, to: LensesRef<'a>) -> Result<()> {
         let mut path = PathBuf::new();
         path.doc(doc);
         for k in self.scan_path(path.as_path()) {
@@ -450,8 +450,8 @@ impl Crdt {
             }
             self.expired.remove(k);
         }
-        self.expired.flush()?;
-        self.store.flush()?;
+        self.expired.flush().await?;
+        self.store.flush().await?;
         Ok(())
     }
 }
@@ -465,6 +465,7 @@ mod tests {
     use crate::schema::PrimitiveKind;
     use crate::util::Ref;
     use crate::{props::*, Keypair};
+    use async_std::task::block_on;
     use proptest::prelude::*;
     use std::collections::BTreeSet;
     use std::pin::Pin;
@@ -476,20 +477,20 @@ mod tests {
             1,
             &Lenses::new(vec![Lens::Make(Kind::Flag)]),
         )];
-        let mut sdk = Backend::memory(&packages)?;
+        let mut sdk = Backend::memory(&packages).await?;
         let peer = sdk.frontend().generate_keypair()?;
         let doc = sdk
             .frontend()
-            .create_doc(peer, "crdt", Keypair::generate())?;
+            .create_doc(peer, "crdt", Keypair::generate()).await?;
         Pin::new(&mut sdk).await?;
         assert!(!doc.cursor().enabled()?);
 
         let op = doc.cursor().enable()?;
-        doc.apply(&op)?;
+        doc.apply(&op).await?;
         assert!(doc.cursor().enabled()?);
 
         let op = doc.cursor().disable()?;
-        doc.apply(&op)?;
+        doc.apply(&op).await?;
         assert!(!doc.cursor().enabled()?);
 
         Ok(())
@@ -506,29 +507,29 @@ mod tests {
         let key = Keypair::generate();
         let peer = key.peer_id();
 
-        let mut sdk1 = Backend::memory(&packages)?;
+        let mut sdk1 = Backend::memory(&packages).await?;
         sdk1.frontend().add_keypair(key)?;
-        let doc1 = sdk1.frontend().create_doc(peer, "crdt", la)?;
+        let doc1 = sdk1.frontend().create_doc(peer, "crdt", la).await?;
         Pin::new(&mut sdk1).await?;
 
-        let mut sdk2 = Backend::memory(&packages)?;
+        let mut sdk2 = Backend::memory(&packages).await?;
         sdk2.frontend().add_keypair(key)?;
-        let doc2 = sdk2.frontend().create_doc(peer, "crdt", la)?;
+        let doc2 = sdk2.frontend().create_doc(peer, "crdt", la).await?;
         Pin::new(&mut sdk2).await?;
 
         let op = doc1.cursor().enable()?;
-        doc1.apply(&op)?;
-        doc2.apply(&op)?;
+        doc1.apply(&op).await?;
+        doc2.apply(&op).await?;
 
         assert!(doc1.cursor().enabled()?);
         assert!(doc2.cursor().enabled()?);
 
         let op = doc1.cursor().disable()?;
-        doc1.apply(&op)?;
+        doc1.apply(&op).await?;
 
         let delta = sdk1.unjoin(&peer, doc1.id(), Ref::archive(&doc2.ctx()?).as_ref())?;
         let hash = sdk1.frontend().schema(doc1.id())?.as_ref().hash();
-        sdk2.join(&peer, doc1.id(), &hash, delta)?;
+        sdk2.join(&peer, doc1.id(), &hash, delta).await?;
 
         assert!(!doc1.cursor().enabled()?);
         assert!(!doc2.cursor().enabled()?);
@@ -543,23 +544,23 @@ mod tests {
             1,
             &Lenses::new(vec![Lens::Make(Kind::Reg(PrimitiveKind::U64))]),
         )];
-        let mut sdk = Backend::memory(&packages)?;
+        let mut sdk = Backend::memory(&packages).await?;
         let peer1 = sdk.frontend().generate_keypair()?;
         let doc = sdk
             .frontend()
-            .create_doc(peer1, "crdt", Keypair::generate())?;
+            .create_doc(peer1, "crdt", Keypair::generate()).await?;
         Pin::new(&mut sdk).await?;
 
         let peer2 = sdk.frontend().generate_keypair()?;
         let op = doc.cursor().say_can(Some(peer2), Permission::Write)?;
-        doc.apply(&op)?;
+        doc.apply(&op).await?;
         Pin::new(&mut sdk).await?;
         let doc2 = sdk.frontend().doc_as(*doc.id(), &peer2)?;
 
         let op1 = doc.cursor().assign_u64(42)?;
         let op2 = doc2.cursor().assign_u64(43)?;
-        doc.apply(&op1)?;
-        doc.apply(&op2)?;
+        doc.apply(&op1).await?;
+        doc.apply(&op2).await?;
 
         let values = doc.cursor().u64s()?.collect::<Result<BTreeSet<u64>>>()?;
         assert_eq!(values.len(), 2);
@@ -567,7 +568,7 @@ mod tests {
         assert!(values.contains(&43));
 
         let op = doc.cursor().assign_u64(99)?;
-        doc.apply(&op)?;
+        doc.apply(&op).await?;
 
         let values = doc.cursor().u64s()?.collect::<Result<BTreeSet<u64>>>()?;
         assert_eq!(values.len(), 1);
@@ -586,19 +587,19 @@ mod tests {
                 Lens::LensMap(Box::new(Lens::Make(Kind::Reg(PrimitiveKind::U64)))),
             ]),
         )];
-        let mut sdk = Backend::memory(&packages)?;
+        let mut sdk = Backend::memory(&packages).await?;
         let peer = sdk.frontend().generate_keypair()?;
         let doc = sdk
             .frontend()
-            .create_doc(peer, "crdt", Keypair::generate())?;
+            .create_doc(peer, "crdt", Keypair::generate()).await?;
         Pin::new(&mut sdk).await?;
         let mut cur = doc.cursor();
         cur.index(0)?;
         let op = cur.assign_u64(42)?;
 
         let op1 = cur.assign_u64(43)?;
-        doc.apply(&op)?;
-        doc.apply(&op1)?;
+        doc.apply(&op).await?;
+        doc.apply(&op1).await?;
 
         let r = doc
             .cursor()
@@ -610,13 +611,13 @@ mod tests {
         assert!(r.contains(&43));
 
         let op2 = cur.assign_u64(44)?;
-        doc.apply(&op2)?;
+        doc.apply(&op2).await?;
 
         let r = doc.cursor().index(0)?.u64s()?.collect::<Result<Vec<_>>>()?;
         assert_eq!(r, vec![44]);
 
         let op_delete = doc.cursor().index(0)?.delete()?;
-        doc.apply(&op_delete)?;
+        doc.apply(&op_delete).await?;
         assert!(doc.cursor().index(0)?.u64s()?.next().is_none());
 
         Ok(())
@@ -635,19 +636,19 @@ mod tests {
                 ))))),
             ]),
         )];
-        let mut sdk = Backend::memory(&packages)?;
+        let mut sdk = Backend::memory(&packages).await?;
         let peer = sdk.frontend().generate_keypair()?;
         let doc = sdk
             .frontend()
-            .create_doc(peer, "crdt", Keypair::generate())?;
+            .create_doc(peer, "crdt", Keypair::generate()).await?;
         Pin::new(&mut sdk).await?;
         let mut cur = doc.cursor();
         cur.index(0)?.key_str("a")?;
         let op = cur.assign_u64(42)?;
 
         let op1 = cur.assign_u64(43)?;
-        doc.apply(&op)?;
-        doc.apply(&op1)?;
+        doc.apply(&op).await?;
+        doc.apply(&op1).await?;
 
         let r = doc
             .cursor()
@@ -660,7 +661,7 @@ mod tests {
         assert!(r.contains(&43));
 
         let op2 = cur.assign_u64(44)?;
-        doc.apply(&op2)?;
+        doc.apply(&op2).await?;
 
         let r = doc
             .cursor()
@@ -671,7 +672,7 @@ mod tests {
         assert_eq!(r, vec![44]);
 
         let op_delete = doc.cursor().index(0)?.key_str("a")?.delete()?;
-        doc.apply(&op_delete)?;
+        doc.apply(&op_delete).await?;
         assert!(doc
             .cursor()
             .index(0)?
@@ -699,19 +700,19 @@ mod tests {
                 ))))),
             ]),
         )];
-        let mut sdk = Backend::memory(&packages)?;
+        let mut sdk = Backend::memory(&packages).await?;
         let peer = sdk.frontend().generate_keypair()?;
         let doc = sdk
             .frontend()
-            .create_doc(peer, "crdt", Keypair::generate())?;
+            .create_doc(peer, "crdt", Keypair::generate()).await?;
         Pin::new(&mut sdk).await?;
         let mut cur = doc.cursor();
         cur.index(0)?.key_str("a")?.index(0)?;
         let op = cur.assign_u64(42)?;
 
         let op1 = cur.assign_u64(43)?;
-        doc.apply(&op)?;
-        doc.apply(&op1)?;
+        doc.apply(&op).await?;
+        doc.apply(&op1).await?;
 
         let r = doc
             .cursor()
@@ -725,7 +726,7 @@ mod tests {
         assert!(r.contains(&43));
 
         let op2 = cur.assign_u64(44)?;
-        doc.apply(&op2)?;
+        doc.apply(&op2).await?;
 
         let r = doc
             .cursor()
@@ -737,7 +738,7 @@ mod tests {
         assert_eq!(r, vec![44]);
 
         let op_delete = doc.cursor().index(0)?.key_str("a")?.delete()?;
-        doc.apply(&op_delete)?;
+        doc.apply(&op_delete).await?;
         assert!(doc
             .cursor()
             .index(0)?
@@ -760,15 +761,15 @@ mod tests {
                 Lens::LensMap(Box::new(Lens::Make(Kind::Reg(PrimitiveKind::U64)))),
             ]),
         )];
-        let mut sdk = Backend::memory(&packages)?;
+        let mut sdk = Backend::memory(&packages).await?;
         let peer = sdk.frontend().generate_keypair()?;
         let doc = sdk
             .frontend()
-            .create_doc(peer, "crdt", Keypair::generate())?;
+            .create_doc(peer, "crdt", Keypair::generate()).await?;
         Pin::new(&mut sdk).await?;
         for i in 0..10 {
             let op = doc.cursor().index(i)?.assign_u64(i as u64)?;
-            doc.apply(&op)?;
+            doc.apply(&op).await?;
         }
         let mut r = vec![];
         for i in 0..doc.cursor().len()? as usize {
@@ -777,7 +778,7 @@ mod tests {
         assert_eq!(r, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
         let move_op = doc.cursor().index(5)?.r#move(2)?;
-        doc.apply(&move_op)?;
+        doc.apply(&move_op).await?;
 
         let mut r = vec![];
         for i in 0..doc.cursor().len()? as usize {
@@ -800,24 +801,24 @@ mod tests {
                 ))))),
             ]),
         )];
-        let mut sdk = Backend::memory(&packages)?;
+        let mut sdk = Backend::memory(&packages).await?;
         let peer = sdk.frontend().generate_keypair()?;
         let doc = sdk
             .frontend()
-            .create_doc(peer, "crdt", Keypair::generate())?;
+            .create_doc(peer, "crdt", Keypair::generate()).await?;
         Pin::new(&mut sdk).await?;
 
         let mut cur = doc.cursor();
         cur.key_str("a")?.key_str("b")?;
         let op = cur.assign_u64(42)?;
-        doc.apply(&op)?;
+        doc.apply(&op).await?;
 
         let values = cur.u64s()?.collect::<Result<BTreeSet<u64>>>()?;
         assert_eq!(values.len(), 1);
         assert!(values.contains(&42));
 
         let op = doc.cursor().key_str("a")?.key_str("b")?.remove()?;
-        doc.apply(&op)?;
+        doc.apply(&op).await?;
 
         let values = doc
             .cursor()
@@ -857,9 +858,9 @@ mod tests {
         #[test]
         fn crdt_join(a in arb_causal(), b in arb_causal()) {
             let doc = DocId::new([0; 32]);
-            let crdt = causal_to_crdt(&doc, &a);
+            let crdt = block_on(causal_to_crdt(&doc, &a));
             let c = join(&a, &b);
-            crdt.join(&doc.into(), &b).unwrap();
+            block_on(crdt.join(&doc.into(), &b)).unwrap();
             let c2 = crdt_to_causal(&doc, &crdt);
             assert_eq!(c, c2);
         }
@@ -867,7 +868,7 @@ mod tests {
         #[test]
         fn crdt_unjoin(a in arb_causal(), b in arb_causal()) {
             let doc = DocId::new([0; 32]);
-            let crdt = causal_to_crdt(&doc, &a);
+            let crdt = block_on(causal_to_crdt(&doc, &a));
             let c = a.unjoin(&b.ctx());
             let actx = Ref::archive(&b.ctx());
             let c2 = crdt.unjoin(&doc.into(), &doc, actx.as_ref()).unwrap();

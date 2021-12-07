@@ -75,7 +75,7 @@ impl Sdk {
         tracing::subscriber::set_global_default(subscriber).ok();
         log_panics::init();
 
-        let backend = Backend::new(storage, package)?;
+        let backend = Backend::new(storage, package).await?;
         let frontend = backend.frontend();
 
         let keypair = frontend.default_keypair()?;
@@ -198,11 +198,11 @@ impl Sdk {
     }
 
     /// Creates a new document with an initial [`Schema`].
-    pub fn create_doc(&self, schema: &str) -> Result<Doc> {
+    pub async fn create_doc(&self, schema: &str) -> Result<Doc> {
         let peer_id = self.peer_id();
         let doc = self
             .frontend
-            .create_doc(*peer_id, schema, Keypair::generate())?;
+            .create_doc(*peer_id, schema, Keypair::generate()).await?;
         self.swarm
             .unbounded_send(Command::Subscribe(*doc.id()))
             .ok();
@@ -226,8 +226,8 @@ impl Sdk {
     }
 
     /// Removes a document.
-    pub fn remove_doc(&self, id: &DocId) -> Result<()> {
-        self.frontend.remove_doc(id)
+    pub async fn remove_doc(&self, id: &DocId) -> Result<()> {
+        self.frontend.remove_doc(id).await
     }
 }
 
@@ -254,8 +254,8 @@ impl Doc {
     }
 
     /// Applies a transaction to the document.
-    pub fn apply(&self, causal: Causal) -> Result<()> {
-        self.doc.apply(&causal)?;
+    pub async fn apply(&self, causal: Causal) -> Result<()> {
+        self.doc.apply(&causal).await?;
         self.swarm
             .unbounded_send(Command::Broadcast(*self.id(), causal))
             .ok();
@@ -308,7 +308,7 @@ mod tests {
             &Lenses::new(lenses.clone()),
         )];
         let sdk = Sdk::memory(Ref::archive(&packages).as_bytes()).await?;
-        let doc = sdk.create_doc("todoapp")?;
+        let doc = sdk.create_doc("todoapp").await?;
 
         async_std::task::sleep(Duration::from_millis(100)).await;
         assert!(doc.cursor().can(sdk.peer_id(), Permission::Write)?);
@@ -324,7 +324,7 @@ mod tests {
             .key_u64(0)?
             .field("title")?
             .assign_str(title)?;
-        doc.apply(op)?;
+        doc.apply(op).await?;
 
         let value = doc
             .cursor()
@@ -343,7 +343,7 @@ mod tests {
         let op = doc
             .cursor()
             .say_can(Some(*sdk2.peer_id()), Permission::Write)?;
-        doc.apply(op)?;
+        doc.apply(op).await?;
 
         for addr in sdk.addresses().await {
             sdk2.add_address(*sdk.peer_id(), addr);

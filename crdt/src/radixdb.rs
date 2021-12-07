@@ -439,7 +439,7 @@ impl BlobSet {
         Ok(Self(Arc::new(Mutex::new(RadixDb::load(storage, name)?))))
     }
 
-    pub fn flush(&self) -> anyhow::Result<()> {
+    pub async fn flush(&self) -> anyhow::Result<()> {
         self.0.lock().flush()
     }
 

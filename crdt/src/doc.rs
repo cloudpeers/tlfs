@@ -244,7 +244,7 @@ pub struct Backend {
 
 impl Backend {
     /// Creates a new [`Backend`] from a radixdb storage.
-    pub fn new(storage: Arc<dyn Storage>, package: &[u8]) -> Result<Self> {
+    pub async fn new(storage: Arc<dyn Storage>, package: &[u8]) -> Result<Self> {
         let registry = Registry::new(package)?;
         let docs = Docs::new(BlobMap::load(storage.clone(), "docs")?);
         let acl = Acl::new(BlobMap::load(storage.clone(), "acl")?);
@@ -275,7 +275,7 @@ impl Backend {
                 let end = info.as_ref().version as usize;
                 let curr_lenses = LensesRef::new(&lenses.lenses().lenses()[..end]);
                 me.crdt
-                    .transform(&id, curr_lenses, lenses.lenses().to_ref())?;
+                    .transform(&id, curr_lenses, lenses.lenses().to_ref()).await?;
                 let info = SchemaInfo::new(info.as_ref().name.to_string(), version, hash);
                 me.docs.set_schema(&id, &info)?;
             }
@@ -284,14 +284,14 @@ impl Backend {
     }
 
     /// Creates a new in memory [`Backend`].
-    pub fn in_memory(package: &[u8]) -> Result<Self> {
-        Self::new(Arc::new(MemStorage::default()), package)
+    pub async fn in_memory(package: &[u8]) -> Result<Self> {
+        Self::new(Arc::new(MemStorage::default()), package).await
     }
 
     /// Creates a new in-memory backend for testing purposes.
     #[cfg(test)]
     #[allow(clippy::ptr_arg)]
-    pub fn memory(packages: &Vec<crate::registry::Package>) -> Result<Self> {
+    pub async fn memory(packages: &Vec<crate::registry::Package>) -> Result<Self> {
         use tracing_subscriber::fmt::format::FmtSpan;
         use tracing_subscriber::EnvFilter;
 
@@ -305,7 +305,7 @@ impl Backend {
         tracing::subscriber::set_global_default(subscriber).ok();
         log_panics::init();
         let package = Ref::archive(packages);
-        Self::new(Arc::new(MemStorage::default()), package.as_bytes())
+        Self::new(Arc::new(MemStorage::default()), package.as_bytes()).await
     }
 
     /// Returns a reference to the lens registry.
@@ -322,7 +322,7 @@ impl Backend {
     }
 
     /// Applies a remote change received from a peer.
-    pub fn join(
+    pub async fn join(
         &mut self,
         peer_id: &PeerId,
         doc: &DocId,
@@ -339,9 +339,9 @@ impl Backend {
             return Err(anyhow!("crdt failed schema validation"));
         }
         causal.transform(lenses.lenses().to_ref(), doc_lenses.lenses().to_ref());
-        self.crdt.join_policy(&causal)?;
+        self.crdt.join_policy(&causal).await?;
         self.update_acl()?;
-        self.crdt.join(peer_id, &causal)?;
+        self.crdt.join(peer_id, &causal).await?;
         Ok(())
     }
 
@@ -434,7 +434,7 @@ impl Frontend {
     }
 
     /// Creates a new document using [`Keypair`] with initial schema and owner.
-    pub fn create_doc(&self, owner: PeerId, schema: &str, la: Keypair) -> Result<Doc> {
+    pub async fn create_doc(&self, owner: PeerId, schema: &str, la: Keypair) -> Result<Doc> {
         let id = DocId::new(la.peer_id().into());
         let (version, hash) = self
             .registry
@@ -446,7 +446,7 @@ impl Frontend {
         self.docs.set_schema(&id, &info)?;
         let doc = Doc::new(id, self.clone(), la, schema);
         let delta = doc.cursor().say_can(Some(owner), Permission::Own)?;
-        self.apply(&id, &delta)?;
+        self.apply(&id, &delta).await?;
         self.docs.set_peer_id(&id, &owner)?;
         self.doc(id)
     }
@@ -465,8 +465,8 @@ impl Frontend {
     }
 
     /// Removes a document identified by [`DocId`].
-    pub fn remove_doc(&self, id: &DocId) -> Result<()> {
-        self.crdt.remove(id)?;
+    pub async fn remove_doc(&self, id: &DocId) -> Result<()> {
+        self.crdt.remove(id).await?;
         self.docs.remove(id)?;
         Ok(())
     }
@@ -508,9 +508,9 @@ impl Frontend {
     }
 
     /// Applies a local change to a document.
-    pub fn apply(&self, doc: &DocId, causal: &Causal) -> Result<()> {
+    pub async fn apply(&self, doc: &DocId, causal: &Causal) -> Result<()> {
         let peer = self.peer_id(doc)?;
-        self.crdt.join(&peer, causal)?;
+        self.crdt.join(&peer, causal).await?;
         self.tx.clone().send(()).now_or_never();
         Ok(())
     }
@@ -560,8 +560,8 @@ impl Doc {
     }
 
     /// Applies a local change to the document.
-    pub fn apply(&self, causal: &Causal) -> Result<()> {
-        self.frontend.apply(&self.id, causal)
+    pub async fn apply(&self, causal: &Causal) -> Result<()> {
+        self.frontend.apply(&self.id, causal).await
     }
 }
 
@@ -597,12 +597,12 @@ mod tests {
             8,
             &Lenses::new(lenses.clone()),
         )];
-        let mut sdk = Backend::memory(&packages)?;
+        let mut sdk = Backend::memory(&packages).await?;
 
         let peer = sdk.frontend().default_keypair()?.peer_id();
         let doc = sdk
             .frontend()
-            .create_doc(peer, "todoapp", Keypair::generate())?;
+            .create_doc(peer, "todoapp", Keypair::generate()).await?;
         Pin::new(&mut sdk).await?;
         assert!(doc.cursor().can(&peer, Permission::Write)?);
 
@@ -613,7 +613,7 @@ mod tests {
             .key_u64(0)?
             .field("title")?
             .assign_str(title)?;
-        doc.apply(&op)?;
+        doc.apply(&op).await?;
 
         let value = doc
             .cursor()
@@ -625,17 +625,17 @@ mod tests {
             .unwrap()?;
         assert_eq!(value, title);
 
-        let mut sdk2 = Backend::memory(&packages)?;
+        let mut sdk2 = Backend::memory(&packages).await?;
         let peer2 = sdk2.frontend().default_keypair()?.peer_id();
         let op = doc.cursor().say_can(Some(peer2), Permission::Write)?;
-        doc.apply(&op)?;
+        doc.apply(&op).await?;
         Pin::new(&mut sdk).await?;
 
         let doc2 = sdk2.frontend().add_doc(*doc.id(), &peer2, "todoapp")?;
         let ctx = Ref::archive(&doc2.ctx()?);
         let delta = sdk.unjoin(&peer2, doc2.id(), ctx.as_ref())?;
         let hash = sdk2.frontend().registry.lookup("todoapp").unwrap().1;
-        sdk2.join(&peer, doc.id(), &hash, delta)?;
+        sdk2.join(&peer, doc.id(), &hash, delta).await?;
 
         let value = doc2
             .cursor()

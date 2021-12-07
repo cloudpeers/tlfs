@@ -327,13 +327,13 @@ pub fn join(c: &Causal, o: &Causal) -> Causal {
     c
 }
 
-pub fn causal_to_crdt(doc: &DocId, causal: &Causal) -> Crdt {
+pub async fn causal_to_crdt(doc: &DocId, causal: &Causal) -> Crdt {
     let storage = Arc::new(MemStorage::default());
     let store = BlobSet::load(storage.clone(), "store").unwrap();
     let expired = BlobSet::load(storage.clone(), "expired").unwrap();
     let acl = Acl::new(BlobMap::load(storage, "acl").unwrap());
     let crdt = Crdt::new(store, expired, acl);
-    crdt.join(&(*doc).into(), causal).unwrap();
+    crdt.join(&(*doc).into(), causal).await.unwrap();
     crdt
 }
 
