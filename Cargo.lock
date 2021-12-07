@@ -825,7 +825,7 @@ dependencies = [
 [[package]]
 name = "ffi-gen"
 version = "0.1.0"
-source = "git+https://github.com/cloudpeers/ffi-gen?branch=fixes#1eee5f842129af6df2379fdb1f412af83ff1c4d0"
+source = "git+https://github.com/cloudpeers/ffi-gen?branch=master#0a5b29557f018d4121f726ac9547a7f6a72a409d"
 dependencies = [
  "anyhow",
  "genco",
@@ -837,7 +837,7 @@ dependencies = [
 [[package]]
 name = "ffi-gen-macro"
 version = "0.1.1"
-source = "git+https://github.com/cloudpeers/ffi-gen?branch=fixes#1eee5f842129af6df2379fdb1f412af83ff1c4d0"
+source = "git+https://github.com/cloudpeers/ffi-gen?branch=master#0a5b29557f018d4121f726ac9547a7f6a72a409d"
 dependencies = [
  "ffi-gen",
  "proc-macro2",

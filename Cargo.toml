@@ -54,5 +54,5 @@ async-global-executor = "2.0.2"
 [patch.crates-io]
 #ffi-gen = { path = "../ffigen" }
 #ffi-gen-macro = { path = "../ffigen/macro" }
-ffi-gen = { git = "https://github.com/cloudpeers/ffi-gen", branch = "fixes" }
-ffi-gen-macro = { git = "https://github.com/cloudpeers/ffi-gen", branch = "fixes" }
+ffi-gen = { git = "https://github.com/cloudpeers/ffi-gen", branch = "master" }
+ffi-gen-macro = { git = "https://github.com/cloudpeers/ffi-gen", branch = "master" }
