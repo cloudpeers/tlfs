@@ -123,32 +123,35 @@
 
 /// Main entry point for `tlfs`.
 object Sdk {
-    /// Creates a new persistent [`Sdk`] instance.
+    /// Creates a new persistent sdk instance.
     static fn create_persistent(path: &string, package: &[u8]) -> Future<Result<Sdk>>;
-    /// Create a new in-memory [`Sdk`] instance.
+    /// Create a new in-memory sdk instance.
     static fn create_memory(package: &[u8]) -> Future<Result<Sdk>>;
-    /// Returns the [`PeerId`] of this [`Sdk`].
+    /// Returns the peer id of this sdk.
     fn get_peerid() -> string;
-    /// Adds a new [`Multiaddr`] for a [`PeerId`].
-    fn add_address(peer_id: &string, addr: &string) -> Result<u8>;
-    /// Removes a [`Multiaddr`] of a [`PeerId`].
-    fn remove_address(peer_id: &string, addr: &string) -> Result<u8>;
-    // TODO: Returns the list of [`Multiaddr`] the [`Sdk`] is listening on.
-    //fn addresses() -> Future<Vec<string>>;
-    // TODO: Returns an iterator of [`DocId`].
-    //fn docs(schema: &string) -> Result<Vec<string>>;
-    /// Creates a new document with an initial [`Schema`].
+    /// Adds a new multiaddr for a peer id.
+    fn add_address(peer_id: &string, addr: &string) -> Result<()>;
+    /// Removes a multiaddr of a peer id.
+    fn remove_address(peer_id: &string, addr: &string) -> Result<()>;
+    // TODO /// Returns the list of multiaddr the sdk is listening on.
+    // fn addresses() -> Iterator<string>;
+
+    /// Returns an iterator of doc id's.
+    fn docs(schema: string) -> Result<Iterator<string>>;
+    /// Creates a new document with an initial schema.
     fn create_doc(schema: &string) -> Result<Doc>;
     /// Returns a document handle.
     fn open_doc(doc_id: &string) -> Result<Doc>;
-    /// Adds a document with a [`Schema`].
+    /// Adds a document with a schema.
     fn add_doc(doc_id: &string, schema: &string) -> Result<Doc>;
     /// Removes a document.
-    fn remove_doc(doc_id: &string) -> Result<u8>;
+    fn remove_doc(doc_id: &string) -> Result<()>;
 }
 
 /// Document handle.
 object Doc {
+    /// Returns the id of the document.
+    fn id() -> string;
     /// Returns a cursor for the document.
     fn create_cursor() -> Cursor;
     /// Applies a transaction to the document.
@@ -167,14 +170,14 @@ object Cursor {
     /// Disables a flag.
     fn flag_disable() -> Result<Causal>;
 
-    // TODO: Returns an iterator of bools.
-    //fn reg_bools() -> Result<Vec<bool>>;
+    /// Returns an iterator of bools.
+    fn reg_bools() -> Result<Iterator<bool>>;
     /// Returns an iterator of u64s.
-    fn reg_u64s() -> Result<Vec<u64>>;
+    fn reg_u64s() -> Result<Iterator<u64>>;
     /// Returns an iterator of i64s.
-    fn reg_i64s() -> Result<Vec<i64>>;
-    // TODO: Returns an iterator of strs.
-    //fn reg_strs() -> Result<Vec<string>>;
+    fn reg_i64s() -> Result<Iterator<i64>>;
+    /// Returns an iterator of strings.
+    fn reg_strs() -> Result<Iterator<string>>;
     /// Assigns a value to a register.
     fn reg_assign_bool(value: bool) -> Result<Causal>;
     /// Assigns a value to a register.
@@ -185,32 +188,48 @@ object Cursor {
     fn reg_assign_str(value: &string) -> Result<Causal>;
 
     /// Returns a cursor to a field in a struct.
-    fn struct_field(field: &string) -> Result<u8>;
+    fn struct_field(field: &string) -> Result<()>;
 
     /// Returns a cursor to a value in a table.
-    fn map_key_bool(key: bool);
+    fn map_key_bool(key: bool) -> Result<()>;
     /// Returns a cursor to a value in a table.
-    fn map_key_u64(key: u64);
+    fn map_key_u64(key: u64) -> Result<()>;
     /// Returns a cursor to a value in a table.
-    fn map_key_i64(key: i64);
+    fn map_key_i64(key: i64) -> Result<()>;
     /// Returns a cursor to a value in a table.
-    fn map_key_str(key: &string);
+    fn map_key_str(key: &string) -> Result<()>;
+    /// Returns an iterator of keys.
+    fn map_keys_bool() -> Result<Iterator<bool>>;
+    /// Returns an iterator of keys.
+    fn map_keys_u64() -> Result<Iterator<u64>>;
+    /// Returns an iterator of keys.
+    fn map_keys_i64() -> Result<Iterator<i64>>;
+    /// Returns an iterator of keys.
+    fn map_keys_str() -> Result<Iterator<string>>;
     /// Removes a value from a map.
-    fn map_remove();
+    fn map_remove() -> Result<Causal>;
 
     /// Returns the length of the array.
-    fn array_length();
+    fn array_length() -> Result<u32>;
     /// Returns a cursor to a value in an array.
-    fn array_index(idx: u32);
+    fn array_index(idx: u32) -> Result<()>;
     /// Moves the entry inside an array.
-    fn array_move(idx: u32);
+    fn array_move(idx: u32) -> Result<Causal>;
     /// Deletes the entry from an array.
-    fn array_remove();
+    fn array_remove() -> Result<Causal>;
 
     /// Checks permissions.
     fn can(peer_id: &string, perm: u8) -> Result<bool>;
+    /// Creates a policy statement.
+    fn say_can(actor: Option<string>, perm: u8) -> Result<Causal>;
+    /// Creates a conditional.
+    fn cond(actor: Actor, perm: u8) -> Result<Can>;
+    /// Creates a conditional policy statement.
+    fn say_can_if(actor: Actor, perm: u8, cond: Can) -> Result<Causal>;
+    // TODO: revoke
+
     /// Subscribe to a path.
-    fn subscribe() -> Stream<u8>;
+    fn subscribe() -> Stream<i32>;
 }
 
 /// Represents a state transition of a crdt. Multiple state transitions can be combined
@@ -218,4 +237,19 @@ object Cursor {
 object Causal {
     /// Combines two transactions into a larger transaction.
     fn join(other: Causal);
+}
+
+/// Represents a tuple of actor, permission and path.
+object Can {}
+
+/// The subject of a policy.
+object Actor {
+    /// A peer identified by id.
+    static fn peer(id: &string) -> Result<Actor>;
+    /// Any peer.
+    static fn anonymous() -> Actor;
+    /// A variable used when specifying conditional policies.
+    ///
+    /// An example usage would be "unbound can read contacts if unbound can read dashboard".
+    static fn unbound() -> Actor;
 }

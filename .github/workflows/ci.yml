@@ -61,12 +61,12 @@ jobs:
       with:
         node-version: '16'
 
-    - name: Install dart
-      uses: dart-lang/setup-dart@v1
+    - name: Install flutter
+      uses: subosito/flutter-action@v1
 
     - run: cargo install --git https://github.com/vmx/wasm-multi-value-reverse-polyfill --locked
     - run: npm i -g prettier
-    - run: dart pub global activate dartdoc
+    - run: flutter pub global activate dartdoc
 
     - name: build lib
       working-directory: api
@@ -81,7 +81,7 @@ jobs:
 
     - name: dart analyzer
       working-directory: api/dart
-      run: dart analyze lib
+      run: flutter analyze --no-fatal-infos
 
     - name: dartdoc
       working-directory: api/dart
@@ -89,7 +89,7 @@ jobs:
 
     - name: dart pub
       working-directory: api/dart
-      run: dart pub publish --dry-run
+      run: flutter pub publish --dry-run
 
     # TODO
     #- name: eslint

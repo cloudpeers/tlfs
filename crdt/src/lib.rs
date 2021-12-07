@@ -147,7 +147,7 @@ mod schema;
 mod subscriber;
 mod util;
 
-pub use crate::acl::{Actor, Permission, Policy};
+pub use crate::acl::{Actor, Can, Permission, Policy};
 pub use crate::crdt::{Causal, CausalContext};
 pub use crate::crypto::Keypair;
 pub use crate::cursor::Cursor;

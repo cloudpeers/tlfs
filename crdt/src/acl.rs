@@ -89,6 +89,7 @@ impl std::fmt::Debug for Actor {
     }
 }
 
+/// Can
 #[derive(
     Clone, Debug, Eq, Hash, PartialEq, Ord, PartialOrd, Archive, CheckBytes, Deserialize, Serialize,
 )]
@@ -101,7 +102,7 @@ pub struct Can {
 }
 
 impl Can {
-    pub fn new(actor: Actor, perm: Permission, path: PathBuf) -> Self {
+    pub(crate) fn new(actor: Actor, perm: Permission, path: PathBuf) -> Self {
         Self { actor, perm, path }
     }
 

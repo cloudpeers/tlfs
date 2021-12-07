@@ -168,6 +168,66 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    /// Returns an iterator of table keys.
+    pub fn keys_bool(&self) -> Result<impl Iterator<Item = bool> + '_> {
+        if let ArchivedSchema::Table(PrimitiveKind::Bool, _) = &self.schema {
+            Ok(self.crdt.scan_path(self.path.as_path()).filter_map(|key| {
+                Path::new(&key)
+                    .strip_prefix(self.path.as_path())
+                    .ok()?
+                    .first()?
+                    .prim_bool()
+            }))
+        } else {
+            Err(anyhow!("not a Table<bool, _>"))
+        }
+    }
+
+    /// Returns an iterator of table keys.
+    pub fn keys_u64(&self) -> Result<impl Iterator<Item = u64> + '_> {
+        if let ArchivedSchema::Table(PrimitiveKind::U64, _) = &self.schema {
+            Ok(self.crdt.scan_path(self.path.as_path()).filter_map(|key| {
+                Path::new(&key)
+                    .strip_prefix(self.path.as_path())
+                    .ok()?
+                    .first()?
+                    .prim_u64()
+            }))
+        } else {
+            Err(anyhow!("not a Table<u64, _>"))
+        }
+    }
+
+    /// Returns an iterator of table keys.
+    pub fn keys_i64(&self) -> Result<impl Iterator<Item = i64> + '_> {
+        if let ArchivedSchema::Table(PrimitiveKind::I64, _) = &self.schema {
+            Ok(self.crdt.scan_path(self.path.as_path()).filter_map(|key| {
+                Path::new(&key)
+                    .strip_prefix(self.path.as_path())
+                    .ok()?
+                    .first()?
+                    .prim_i64()
+            }))
+        } else {
+            Err(anyhow!("not a Table<i64, _>"))
+        }
+    }
+
+    /// Returns an iterator of table keys.
+    pub fn keys_str(&self) -> Result<impl Iterator<Item = String> + '_> {
+        if let ArchivedSchema::Table(PrimitiveKind::Str, _) = &self.schema {
+            Ok(self.crdt.scan_path(self.path.as_path()).filter_map(|key| {
+                Path::new(&key)
+                    .strip_prefix(self.path.as_path())
+                    .ok()?
+                    .first()?
+                    .prim_string()
+            }))
+        } else {
+            Err(anyhow!("not a Table<String, _>"))
+        }
+    }
+
     /// Returns a cursor to a value in an array.
     pub fn index(&mut self, ix: usize) -> Result<&mut Self> {
         if let ArchivedSchema::Array(schema) = &self.schema {

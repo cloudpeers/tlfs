@@ -22,14 +22,14 @@ impl Sdk {
         self.0.peer_id().to_string()
     }
 
-    pub fn add_address(&self, peer_id: &str, addr: &str) -> Result<u8> {
+    pub fn add_address(&self, peer_id: &str, addr: &str) -> Result<()> {
         self.0.add_address(peer_id.parse()?, addr.parse()?);
-        Ok(0)
+        Ok(())
     }
 
-    pub fn remove_address(&self, peer_id: &str, addr: &str) -> Result<u8> {
+    pub fn remove_address(&self, peer_id: &str, addr: &str) -> Result<()> {
         self.0.remove_address(peer_id.parse()?, addr.parse()?);
-        Ok(0)
+        Ok(())
     }
 
     pub async fn addresses(&self) -> Vec<String> {
@@ -57,22 +57,24 @@ impl Sdk {
         Ok(Doc(self.0.add_doc(doc_id.parse()?, schema)?))
     }
 
-    pub fn remove_doc(&self, doc_id: &str) -> Result<u8> {
-        self.0.remove_doc(&doc_id.parse()?)?;
-        Ok(0)
+    pub fn remove_doc(&self, doc_id: &str) -> Result<()> {
+        self.0.remove_doc(&doc_id.parse()?)
     }
 }
 
 pub struct Doc(tlfs::Doc);
 
 impl Doc {
+    pub fn id(&self) -> String {
+        self.0.id().to_string()
+    }
+
     pub fn create_cursor(&self) -> Cursor {
         Cursor(self.0.cursor())
     }
 
-    pub fn apply_causal(&self, causal: Box<Causal>) -> Result<u8> {
-        self.0.apply(causal.0)?;
-        Ok(0)
+    pub fn apply_causal(&self, causal: Box<Causal>) -> Result<()> {
+        self.0.apply(causal.0)
     }
 }
 
@@ -124,29 +126,45 @@ impl<'a> Cursor<'a> {
         Ok(Causal(self.0.assign_str(value)?))
     }
 
-    pub fn struct_field(&mut self, field: &str) -> Result<u8> {
+    pub fn struct_field(&mut self, field: &str) -> Result<()> {
         self.0.field(field)?;
-        Ok(0)
+        Ok(())
     }
 
-    pub fn map_key_bool(&mut self, key: bool) -> Result<u8> {
+    pub fn map_key_bool(&mut self, key: bool) -> Result<()> {
         self.0.key_bool(key)?;
-        Ok(0)
+        Ok(())
     }
 
-    pub fn map_key_u64(&mut self, key: u64) -> Result<u8> {
+    pub fn map_key_u64(&mut self, key: u64) -> Result<()> {
         self.0.key_u64(key)?;
-        Ok(0)
+        Ok(())
     }
 
-    pub fn map_key_i64(&mut self, key: i64) -> Result<u8> {
+    pub fn map_key_i64(&mut self, key: i64) -> Result<()> {
         self.0.key_i64(key)?;
-        Ok(0)
+        Ok(())
     }
 
-    pub fn map_key_str(&mut self, key: &str) -> Result<u8> {
+    pub fn map_key_str(&mut self, key: &str) -> Result<()> {
         self.0.key_str(key)?;
-        Ok(0)
+        Ok(())
+    }
+
+    pub fn map_keys_bool(&self) -> Result<Vec<bool>> {
+        Ok(self.0.keys_bool()?.collect())
+    }
+
+    pub fn map_keys_u64(&self) -> Result<Vec<u64>> {
+        Ok(self.0.keys_u64()?.collect())
+    }
+
+    pub fn map_keys_i64(&self) -> Result<Vec<i64>> {
+        Ok(self.0.keys_i64()?.collect())
+    }
+
+    pub fn map_keys_str(&self) -> Result<Vec<String>> {
+        Ok(self.0.keys_str()?.collect())
     }
 
     pub fn map_remove(&self) -> Result<Causal> {
@@ -157,9 +175,9 @@ impl<'a> Cursor<'a> {
         self.0.len()
     }
 
-    pub fn array_index(&mut self, index: usize) -> Result<u8> {
+    pub fn array_index(&mut self, index: usize) -> Result<()> {
         self.0.index(index)?;
-        Ok(0)
+        Ok(())
     }
 
     pub fn array_move(&mut self, index: usize) -> Result<Causal> {
@@ -171,17 +189,29 @@ impl<'a> Cursor<'a> {
     }
 
     pub fn can(&self, peer_id: &str, perm: u8) -> Result<bool> {
-        let perm = match perm {
-            0 => Permission::Read,
-            1 => Permission::Write,
-            2 => Permission::Control,
-            3 => Permission::Own,
-            _ => anyhow::bail!("invalid permission"),
-        };
+        let perm = parse_perm(perm)?;
         self.0.can(&peer_id.parse()?, perm)
     }
 
-    pub fn subscribe(&self) -> impl Stream<Item = u8> {
+    pub fn say_can(&self, actor: Option<String>, perm: u8) -> Result<Causal> {
+        let actor = actor.map(|s| s.parse()).transpose()?;
+        let perm = parse_perm(perm)?;
+        Ok(Causal(self.0.say_can(actor, perm)?))
+    }
+
+    pub fn cond(&self, actor: Box<Actor>, perm: u8) -> Result<Can> {
+        let perm = parse_perm(perm)?;
+        Ok(Can(self.0.cond(actor.0, perm)))
+    }
+
+    pub fn say_can_if(&self, actor: Box<Actor>, perm: u8, cond: Box<Can>) -> Result<Causal> {
+        let perm = parse_perm(perm)?;
+        Ok(Causal(self.0.say_can_if(actor.0, perm, cond.0)?))
+    }
+
+    // TODO: revoke
+
+    pub fn subscribe(&self) -> impl Stream<Item = i32> {
         self.0.subscribe().map(|_batch| 0)
     }
 }
@@ -191,5 +221,33 @@ pub struct Causal(tlfs::Causal);
 impl Causal {
     pub fn join(&mut self, other: Box<Causal>) {
         self.0.join(&other.0);
+    }
+}
+
+pub struct Can(tlfs::Can);
+
+fn parse_perm(perm: u8) -> Result<Permission> {
+    Ok(match perm {
+        0 => Permission::Read,
+        1 => Permission::Write,
+        2 => Permission::Control,
+        3 => Permission::Own,
+        _ => anyhow::bail!("invalid permission"),
+    })
+}
+
+pub struct Actor(tlfs::Actor);
+
+impl Actor {
+    pub fn peer(id: &str) -> Result<Self> {
+        Ok(Self(tlfs::Actor::Peer(id.parse()?)))
+    }
+
+    pub fn anonymous() -> Self {
+        Self(tlfs::Actor::Anonymous)
+    }
+
+    pub fn unbound() -> Self {
+        Self(tlfs::Actor::Unbound)
     }
 }
