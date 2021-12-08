@@ -22,7 +22,7 @@ jobs:
         - target: x86_64-pc-windows-msvc
           host: windows-latest
           file: tlfsc.exe
-          tar: tar
+          tar: C:\Program Files\Git\usr\bin\tar.exe
     runs-on: ${{ matrix.platform.host }}
     steps:
     - name: Checkout sources
@@ -62,7 +62,7 @@ jobs:
         #- target: x86_64-pc-windows-msvc
         #  host: windows-latest
         #  file: libtlfs.dll
-        #  tar: tar
+        #  tar: C:\Program Files\Git\usr\bin\tar.exe
         - target: aarch64-linux-android
           host: ubuntu-latest
           file: libtlfs.so
