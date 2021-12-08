@@ -19,11 +19,14 @@ jobs:
       working-directory: tlfsc
       run: cargo build --release
 
+    - name: Auth
+      run: echo $GITHUB_TOKEN | gh auth login --with-token
+
     - name: Upload tlfsc
       working-directory: target/release
       env:
         TAG: $(cat $GITHUB_EVENT_PATH | jq .release.tag_name)
-      run: gh release $TAG upload tlfsc -R $GITHUB_REPOSITORY --clobber
+      run: gh auth login --with-token | gh release $TAG upload tlfsc -R $GITHUB_REPOSITORY --clobber
 
   tlfs_linux:
     runs-on: self-hosted
@@ -37,6 +40,9 @@ jobs:
     - name: Build tlfs
       working-directory: api
       run: cargo build --release
+
+    - name: Auth
+      run: echo $GITHUB_TOKEN | gh auth login --with-token
 
     - name: Upload tlfs
       working-directory: target/release
@@ -53,15 +59,19 @@ jobs:
     - name: Install rust toolchain
       uses: hecrj/setup-rust-action@v1
       with:
+        rust-version: "stable,nightly"
         targets: aarch64-linux-android
 
     - name: Install cargo apk
       run: cargo install cargo-apk
 
+    - name: Auth
+      run: echo $GITHUB_TOKEN | gh auth login --with-token
+
     - name: Build tlfs
       working-directory: api
       continue-on-error: true # currently this fails as cargo-apk ignores the [lib] name setting
-      run: cargo apk build --release --target aarch64-linux-android
+      run: cargo +nightly apk build --release --target aarch64-linux-android
 
     - name: Upload tlfs
       working-directory: target/aarch64-linux-android/release
