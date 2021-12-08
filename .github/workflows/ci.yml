@@ -75,7 +75,7 @@ jobs:
       run: cargo build --release
 
     - name: install tlfsc
-      working-directory: tlfs
+      working-directory: tlfsc
       run: cargo install --path .
 
     - name: dart test
