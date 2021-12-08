@@ -74,6 +74,16 @@ jobs:
         FFIGEN: 1
       run: cargo build --release
 
+    - name: install tlfsc
+      working-directory: tlfs
+      run: cargo install --path .
+
+    - name: dart test
+      working-directory: api/dart
+      env:
+        LD_LIBRARY_PATH: ../../target/release
+      run: flutter test
+
     # TODO: patch returns
     #- name: build wasm
     #  working-directory: api
