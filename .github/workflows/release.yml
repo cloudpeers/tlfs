@@ -14,12 +14,15 @@ jobs:
         - target: x86_64-unknown-linux-gnu
           host: ubuntu-latest
           file: tlfsc
+          tar: tar
         - target: x86_64-apple-darwin
           host: macos-latest
           file: tlfsc
+          tar: gtar
         - target: x86_64-pc-windows-msvc
           host: windows-latest
           file: tlfsc.exe
+          tar: tar
     runs-on: ${{ matrix.platform.host }}
     steps:
     - name: Checkout sources
@@ -34,7 +37,7 @@ jobs:
 
     - name: Create artefact
       working-directory: target/release
-      run: tar -I zstd -cf tlfsc.${{ matrix.platform.target }}.tar.zst ${{ matrix.platform.file }}
+      run: ${{ matrix.platform.tar }} -I zstd -cf tlfsc.${{ matrix.platform.target }}.tar.zst ${{ matrix.platform.file }}
 
     - name: Upload tlfsc
       working-directory: target/release
@@ -45,23 +48,29 @@ jobs:
 
   libtlfs:
     strategy:
+      fail-fast: false
       matrix:
         platform:
         - target: x86_64-unknown-linux-gnu
           host: ubuntu-latest
           file: libtlfs.so
+          tar: tar
         - target: x86_64-apple-darwin
           host: macos-latest
           file: libtlfs.so
+          tar: gtar
         - target: x86_64-pc-windows-msvc
           host: windows-latest
           file: libtlfs.dll
+          tar: tar
         - target: aarch64-linux-android
           host: ubuntu-latest
           file: libtlfs.so
+          tar: tar
         - target: aarch64-apple-ios
           host: macos-latest
           file: libtlfs.a
+          tar: gtar
     runs-on: ${{ matrix.platform.host }}
     steps:
     - name: Checkout sources
@@ -91,10 +100,10 @@ jobs:
 
     - name: Create artefact
       working-directory: target/${{ matrix.platform.target }}/release
-      run: tar -I zstd -cf libtlfs.${{ matrix.platform.target }}.tar.zst ${{ matrix.platform.file }}
+      run: ${{ matrix.platform.tar }} -I zstd -cf libtlfs.${{ matrix.platform.target }}.tar.zst ${{ matrix.platform.file }}
 
     - name: Upload tlfs
-      working-directory: target/release
+      working-directory: target/${{ matrix.platform.target }}/release
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         TAG: ${{ github.event.release.tag_name }}
