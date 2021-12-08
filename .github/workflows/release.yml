@@ -7,7 +7,7 @@ name: release tlfs
 
 jobs:
   tlfsc_linux:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
     - name: Checkout sources
       uses: actions/checkout@v2
@@ -27,7 +27,7 @@ jobs:
       run: gh release upload $TAG tlfsc -R $GITHUB_REPOSITORY --clobber
 
   tlfs_linux:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
     - name: Checkout sources
       uses: actions/checkout@v2
@@ -55,7 +55,7 @@ jobs:
     - name: Install rust toolchain
       uses: hecrj/setup-rust-action@v1
       with:
-        rust-version: "stable,nightly"
+        rust-version: nightly
         targets: aarch64-linux-android
 
     - name: Install cargo apk
@@ -64,7 +64,7 @@ jobs:
     - name: Build tlfs
       working-directory: api
       continue-on-error: true # currently this fails as cargo-apk ignores the [lib] name setting
-      run: cargo +nightly apk build --release --target aarch64-linux-android
+      run: cargo apk build --release --target aarch64-linux-android
 
     - name: Upload tlfs
       working-directory: target/aarch64-linux-android/release
