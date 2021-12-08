@@ -15,9 +15,6 @@ jobs:
     - name: Install rust toolchain
       uses: hecrj/setup-rust-action@v1
 
-    - name: Install jq
-      uses: sergeysova/jq-action@v2
-
     - name: Build tlfsc
       working-directory: tlfsc
       run: cargo build --release
@@ -26,7 +23,7 @@ jobs:
       working-directory: target/release
       env:
         TAG: $(cat $GITHUB_EVENT_PATH | jq .release.tag_name)
-      run: gh $TAG release upload tlfsc -R $GITHUB_REPOSITORY --clobber
+      run: gh release $TAG upload tlfsc -R $GITHUB_REPOSITORY --clobber
 
   tlfs_linux:
     runs-on: self-hosted
@@ -37,9 +34,6 @@ jobs:
     - name: Install rust toolchain
       uses: hecrj/setup-rust-action@v1
 
-    - name: Install jq
-      uses: sergeysova/jq-action@v2
-
     - name: Build tlfs
       working-directory: api
       run: cargo build --release
@@ -48,7 +42,7 @@ jobs:
       working-directory: target/release
       env:
         TAG: $(cat $GITHUB_EVENT_PATH | jq .release.tag_name)
-      run: gh $TAG release upload libtlfs.so#x86_64-unknown-linux-gnu -R $GITHUB_REPOSITORY --clobber
+      run: gh release upload $TAG libtlfs.so#x86_64-unknown-linux-gnu -R $GITHUB_REPOSITORY --clobber
 
   tlfs_android:
     runs-on: ubuntu-latest
@@ -64,9 +58,6 @@ jobs:
     - name: Install cargo apk
       run: cargo install cargo-apk
 
-    - name: Install jq
-      uses: sergeysova/jq-action@v2
-
     - name: Build tlfs
       working-directory: api
       continue-on-error: true # currently this fails as cargo-apk ignores the [lib] name setting
@@ -76,4 +67,4 @@ jobs:
       working-directory: target/aarch64-linux-android/release
       env:
         TAG: $(cat $GITHUB_EVENT_PATH | jq .release.tag_name)
-      run: gh $TAG release upload libtlfs.so#aarch64-linux-android -R $GITHUB_REPOSITORY --clobber
+      run: gh release upload $TAG libtlfs.so#aarch64-linux-android -R $GITHUB_REPOSITORY --clobber
