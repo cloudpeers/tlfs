@@ -19,14 +19,12 @@ jobs:
       working-directory: tlfsc
       run: cargo build --release
 
-    - name: Auth
-      run: echo $GITHUB_TOKEN | gh auth login --with-token
-
     - name: Upload tlfsc
       working-directory: target/release
       env:
-        TAG: $(cat $GITHUB_EVENT_PATH | jq .release.tag_name)
-      run: gh auth login --with-token | gh release $TAG upload tlfsc -R $GITHUB_REPOSITORY --clobber
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        TAG: ${{ github.event.release.tag_name }}
+      run: gh release upload $TAG tlfsc -R $GITHUB_REPOSITORY --clobber
 
   tlfs_linux:
     runs-on: self-hosted
@@ -41,13 +39,11 @@ jobs:
       working-directory: api
       run: cargo build --release
 
-    - name: Auth
-      run: echo $GITHUB_TOKEN | gh auth login --with-token
-
     - name: Upload tlfs
       working-directory: target/release
       env:
-        TAG: $(cat $GITHUB_EVENT_PATH | jq .release.tag_name)
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        TAG: ${{ github.event.release.tag_name }}
       run: gh release upload $TAG libtlfs.so#x86_64-unknown-linux-gnu -R $GITHUB_REPOSITORY --clobber
 
   tlfs_android:
@@ -65,9 +61,6 @@ jobs:
     - name: Install cargo apk
       run: cargo install cargo-apk
 
-    - name: Auth
-      run: echo $GITHUB_TOKEN | gh auth login --with-token
-
     - name: Build tlfs
       working-directory: api
       continue-on-error: true # currently this fails as cargo-apk ignores the [lib] name setting
@@ -76,5 +69,6 @@ jobs:
     - name: Upload tlfs
       working-directory: target/aarch64-linux-android/release
       env:
-        TAG: $(cat $GITHUB_EVENT_PATH | jq .release.tag_name)
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        TAG: ${{ github.event.release.tag_name }}
       run: gh release upload $TAG libtlfs.so#aarch64-linux-android -R $GITHUB_REPOSITORY --clobber
