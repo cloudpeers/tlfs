@@ -6,8 +6,20 @@ on:
 name: release tlfs
 
 jobs:
-  tlfsc_linux:
-    runs-on: ubuntu-latest
+  tlfsc:
+    strategy:
+      matrix:
+        platform:
+        - target: x86_64-unknown-linux-gnu
+          host: ubuntu-latest
+          file: tlfsc
+        - target: x86_64-apple-darwin
+          host: macos-latest
+          file: tlfsc
+        - target: x86_64-pc-windows-msvc
+          host: windows-latest
+          file: tlfsc.exe
+    runs-on: ${{ matrix.platform.host }}
     steps:
     - name: Checkout sources
       uses: actions/checkout@v2
@@ -19,35 +31,37 @@ jobs:
       working-directory: tlfsc
       run: cargo build --release
 
+    - name: Create artefact
+      working-directory: target/release
+      run: tar --zstd -cf tlfsc.${{ matrix.platform.target }}.tar.zst ${{ matrix.platform.file }}
+
     - name: Upload tlfsc
       working-directory: target/release
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         TAG: ${{ github.event.release.tag_name }}
-      run: gh release upload $TAG tlfsc -R $GITHUB_REPOSITORY --clobber
+      run: gh release upload $TAG tlfsc.${{ matrix.platform.target }}.tar.zst -R $GITHUB_REPOSITORY
 
-  tlfs_linux:
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout sources
-      uses: actions/checkout@v2
-
-    - name: Install rust toolchain
-      uses: hecrj/setup-rust-action@v1
-
-    - name: Build tlfs
-      working-directory: api
-      run: cargo build --release
-
-    - name: Upload tlfs
-      working-directory: target/release
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        TAG: ${{ github.event.release.tag_name }}
-      run: gh release upload $TAG libtlfs.so#x86_64-unknown-linux-gnu -R $GITHUB_REPOSITORY --clobber
-
-  tlfs_android:
-    runs-on: ubuntu-latest
+  tlfs:
+    strategy:
+      matrix:
+        platform:
+        - target: x86_64-unknown-linux-gnu
+          host: ubuntu-latest
+          file: libtlfs.so
+        - target: x86_64-apple-darwin
+          host: macos-latest
+          file: libtlfs.so
+        - target: x86_64-pc-windows-msvc
+          host: windows-latest
+          file: libtlfs.dll
+        - target: aarch64-linux-android
+          host: ubuntu-latest
+          file: libtlfs.so
+        - target: aarch64-apple-ios
+          host: macos-latest
+          file: libtlfs.a
+    runs-on: ${{ matrix.platform.host }}
     steps:
     - name: Checkout sources
       uses: actions/checkout@v2
@@ -56,19 +70,31 @@ jobs:
       uses: hecrj/setup-rust-action@v1
       with:
         rust-version: nightly
-        targets: aarch64-linux-android
+        targets: ${{ matrix.platform.target }}
 
     - name: Install cargo apk
+      if: contains(matrix.platform.target, 'android')
       run: cargo install cargo-apk
 
     - name: Build tlfs
       working-directory: api
-      continue-on-error: true # currently this fails as cargo-apk ignores the [lib] name setting
-      run: cargo apk build --release --target aarch64-linux-android
+      if: contains(matrix.platform.target, 'android') == false
+      run: cargo build --release --target ${{ matrix.platform.target }}
+
+    - name: Build tlfs (android)
+      working-directory: api
+      if: contains(matrix.platform.target, 'android')
+      # currently this fails as cargo-apk ignores the [lib] name setting
+      continue-on-error: true
+      run: cargo apk build --release --target ${{ matrix.platform.target }}
+
+    - name: Create artefact
+      working-directory: target/${{ matrix.platform.target }}/release
+      run: tar --zstd -cf libtlfs.${{ matrix.platform.target }}.tar.zst ${{ matrix.platform.file }}
 
     - name: Upload tlfs
-      working-directory: target/aarch64-linux-android/release
+      working-directory: target/release
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         TAG: ${{ github.event.release.tag_name }}
-      run: gh release upload $TAG libtlfs.so#aarch64-linux-android -R $GITHUB_REPOSITORY --clobber
+      run: gh release upload $TAG tlfs.${{ matrix.platform.target }}.tar.zst -R $GITHUB_REPOSITORY
