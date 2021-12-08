@@ -37,7 +37,7 @@ jobs:
 
     - name: Create artefact
       working-directory: target/release
-      run: ${{ matrix.platform.tar }} -I zstd -cf tlfsc.${{ matrix.platform.target }}.tar.zst ${{ matrix.platform.file }}
+      run: ${{ matrix.platform.tar }} --zstd -cf tlfsc.${{ matrix.platform.target }}.tar.zst ${{ matrix.platform.file }}
 
     - name: Upload tlfsc
       working-directory: target/release
@@ -57,12 +57,12 @@ jobs:
           tar: tar
         - target: x86_64-apple-darwin
           host: macos-latest
-          file: libtlfs.so
+          file: libtlfs.dylib
           tar: gtar
-        - target: x86_64-pc-windows-msvc
-          host: windows-latest
-          file: libtlfs.dll
-          tar: tar
+        #- target: x86_64-pc-windows-msvc
+        #  host: windows-latest
+        #  file: libtlfs.dll
+        #  tar: tar
         - target: aarch64-linux-android
           host: ubuntu-latest
           file: libtlfs.so
@@ -100,7 +100,7 @@ jobs:
 
     - name: Create artefact
       working-directory: target/${{ matrix.platform.target }}/release
-      run: ${{ matrix.platform.tar }} -I zstd -cf libtlfs.${{ matrix.platform.target }}.tar.zst ${{ matrix.platform.file }}
+      run: ${{ matrix.platform.tar }} --zstd -cf libtlfs.${{ matrix.platform.target }}.tar.zst ${{ matrix.platform.file }}
 
     - name: Upload tlfs
       working-directory: target/${{ matrix.platform.target }}/release
