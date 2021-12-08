@@ -824,9 +824,9 @@ dependencies = [
 
 [[package]]
 name = "ffi-gen"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bdd25a10e27e09abff2b579fa7dcb7c6a799b794d5b0f4f9d3a2f5930eb387d"
+checksum = "56248e91399147d758a55781cc5f42de64d521dfd9a2d998e9632c596872167c"
 dependencies = [
  "anyhow",
  "genco",
@@ -3952,9 +3952,9 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "vec-collections"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea7ce83c592c9a15e7ee32b4978341f33892ea9bbbfc06f19f6f929c52509675"
+checksum = "3c9965c8f2ffed1dbcd16cafe18a009642f540fa22661c6cfd6309ddb02e4982"
 dependencies = [
  "binary-merge",
  "bytecheck",

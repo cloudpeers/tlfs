@@ -1,0 +1,10 @@
+todoapp {
+    0.1.0 {
+        .: Struct
+        .title: MVReg<String>
+        .tasks: Array
+        .tasks.[]: Struct
+        .tasks.[].title: MVReg<String>
+        .tasks.[].complete: EWFlag
+    }
+}
