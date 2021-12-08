@@ -8,6 +8,7 @@ name: release tlfs
 jobs:
   tlfsc:
     strategy:
+      fail-fast: false
       matrix:
         platform:
         - target: x86_64-unknown-linux-gnu
@@ -33,7 +34,7 @@ jobs:
 
     - name: Create artefact
       working-directory: target/release
-      run: tar --zstd -cf tlfsc.${{ matrix.platform.target }}.tar.zst ${{ matrix.platform.file }}
+      run: tar -I zstd -cf tlfsc.${{ matrix.platform.target }}.tar.zst ${{ matrix.platform.file }}
 
     - name: Upload tlfsc
       working-directory: target/release
@@ -90,7 +91,7 @@ jobs:
 
     - name: Create artefact
       working-directory: target/${{ matrix.platform.target }}/release
-      run: tar --zstd -cf libtlfs.${{ matrix.platform.target }}.tar.zst ${{ matrix.platform.file }}
+      run: tar -I zstd -cf libtlfs.${{ matrix.platform.target }}.tar.zst ${{ matrix.platform.file }}
 
     - name: Upload tlfs
       working-directory: target/release
