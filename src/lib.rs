@@ -3,6 +3,7 @@
 //! See the `tlfs_crdt` docs for details of how it works.
 #![deny(missing_docs)]
 mod sync;
+mod transport;
 
 pub use crate::sync::{libp2p_peer_id, ToLibp2pKeypair, ToLibp2pPublic};
 pub use libp2p::Multiaddr;
@@ -72,7 +73,16 @@ impl Sdk {
             .with_env_filter(EnvFilter::new(env))
             .with_writer(std::io::stderr)
             .finish();
-        tracing::subscriber::set_global_default(subscriber).ok();
+        if cfg!(target_os = "android") {
+            #[cfg(target_os = "android")]
+            use tracing_subscriber::layer::SubscriberExt;
+            #[cfg(target_os = "android")]
+            let subscriber = subscriber.with(tracing_android::layer("com.cloudpeer")?);
+            tracing::subscriber::set_global_default(subscriber).ok();
+            std::env::set_var("RUST_BACKTRACE", "1");
+        } else {
+            tracing::subscriber::set_global_default(subscriber).ok();
+        }
         log_panics::init();
 
         let backend = Backend::new(storage, package)?;
@@ -82,8 +92,7 @@ impl Sdk {
         let peer = keypair.peer_id();
         tracing::info!("our peer id is: {}", peer);
 
-        let transport = libp2p::development_transport(keypair.to_libp2p()).await?;
-
+        let transport = transport::transport(keypair.to_libp2p())?;
         Self::new_with_transport(
             backend,
             frontend,

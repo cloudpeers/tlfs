@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart';
@@ -9,6 +10,7 @@ import './tlfs.dart' as tlfs;
 Future<tlfs.Sdk> _loadSdk(String appname) async {
   final documentsDirectory = await getApplicationDocumentsDirectory();
   final dbPath = join(documentsDirectory.path, appname, 'db');
+  await Directory(dbPath).create(recursive: true);
   final assetName =
       'assets/{appname}.tlfs.rkyv'.replaceAll('{appname}', appname);
   final schema = await rootBundle.load(assetName);
