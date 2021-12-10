@@ -284,14 +284,14 @@ impl Backend {
     }
 
     /// Creates a new in memory [`Backend`].
-    pub fn in_memory(package: &[u8]) -> Result<Self> {
+    pub fn memory(package: &[u8]) -> Result<Self> {
         Self::new(Arc::new(MemStorage::default()), package)
     }
 
     /// Creates a new in-memory backend for testing purposes.
     #[cfg(test)]
     #[allow(clippy::ptr_arg)]
-    pub fn memory(packages: &Vec<crate::registry::Package>) -> Result<Self> {
+    pub fn test(packages: &str) -> Result<Self> {
         use tracing_subscriber::fmt::format::FmtSpan;
         use tracing_subscriber::EnvFilter;
 
@@ -304,8 +304,9 @@ impl Backend {
             .finish();
         tracing::subscriber::set_global_default(subscriber).ok();
         log_panics::init();
-        let package = Ref::archive(packages);
-        Self::new(Arc::new(MemStorage::default()), package.as_bytes())
+        let packages = tlfsc::compile_lenses(packages)?;
+        let packages = Ref::archive(&packages);
+        Self::memory(packages.as_bytes())
     }
 
     /// Returns a reference to the lens registry.
@@ -568,37 +569,22 @@ impl Doc {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Kind, Lens, Lenses, Package, Permission, PrimitiveKind};
+    use crate::Permission;
 
     #[async_std::test]
     async fn test_api() -> Result<()> {
-        let lenses = vec![
-            Lens::Make(Kind::Struct),
-            Lens::AddProperty("todos".into()),
-            Lens::Make(Kind::Table(PrimitiveKind::U64)).lens_in("todos"),
-            Lens::Make(Kind::Struct).lens_map_value().lens_in("todos"),
-            Lens::AddProperty("title".into())
-                .lens_map_value()
-                .lens_in("todos"),
-            Lens::Make(Kind::Reg(PrimitiveKind::Str))
-                .lens_in("title")
-                .lens_map_value()
-                .lens_in("todos"),
-            Lens::AddProperty("complete".into())
-                .lens_map_value()
-                .lens_in("todos"),
-            Lens::Make(Kind::Flag)
-                .lens_in("complete")
-                .lens_map_value()
-                .lens_in("todos"),
-        ];
-        let packages = vec![Package::new(
-            "todoapp".into(),
-            8,
-            &Lenses::new(lenses.clone()),
-        )];
-        let mut sdk = Backend::memory(&packages)?;
-
+        let packages = r#"
+            todoapp {
+                0.1.0 {
+                    .: Struct
+                    .todos: Table<u64>
+                    .todos.{}: Struct
+                    .todos.{}.title: MVReg<String>
+                    .todos.{}.complete: EWFlag
+                }
+            }
+        "#;
+        let mut sdk = Backend::test(packages)?;
         let peer = sdk.frontend().default_keypair()?.peer_id();
         let doc = sdk
             .frontend()
@@ -625,7 +611,7 @@ mod tests {
             .unwrap()?;
         assert_eq!(value, title);
 
-        let mut sdk2 = Backend::memory(&packages)?;
+        let mut sdk2 = Backend::test(packages)?;
         let peer2 = sdk2.frontend().default_keypair()?.peer_id();
         let op = doc.cursor().say_can(Some(peer2), Permission::Write)?;
         doc.apply(&op)?;

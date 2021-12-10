@@ -23,5 +23,6 @@ vec-collections = { version = "0.4.1", features = ["radixtree", "rkyv", "rkyv_va
 async-std = { version = "1.10.0", features = ["attributes"] }
 log-panics = "2.0.0"
 proptest = "1.0.0"
+tlfsc = { path = "../tlfsc" }
 tracing-log = "0.1.2"
 tracing-subscriber = "0.2.25"

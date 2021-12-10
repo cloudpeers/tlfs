@@ -439,18 +439,20 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Backend, Keypair, Kind, Lens, Lenses, Package};
+    use crate::{Backend, Keypair};
     use std::pin::Pin;
     use Permission::*;
 
     #[async_std::test]
     async fn test_la_says_can() -> Result<()> {
-        let lenses = Lenses::new(vec![
-            Lens::Make(Kind::Struct),
-            Lens::AddProperty("contacts".into()),
-        ]);
-        let packages = vec![Package::new("acl".into(), 2, &lenses)];
-        let mut sdk = Backend::memory(&packages)?;
+        let mut sdk = Backend::test(
+            r#"acl {
+            0.1.0 {
+                .: Struct
+                .contacts: EWFlag
+            }
+        }"#,
+        )?;
         let a = sdk.frontend().generate_keypair()?;
         let b = sdk.frontend().generate_keypair()?;
 
@@ -469,7 +471,7 @@ mod tests {
 
     #[async_std::test]
     async fn test_says_if() -> Result<()> {
-        let mut sdk = Backend::memory(&vec![Package::empty("acl".into())])?;
+        let mut sdk = Backend::test("acl {}")?;
         let a = sdk.frontend().generate_keypair()?;
         let b = sdk.frontend().generate_keypair()?;
         let doc1 = sdk.frontend().create_doc(a, "acl", Keypair::generate())?;
@@ -493,7 +495,7 @@ mod tests {
 
     #[async_std::test]
     async fn test_says_if_unbound() -> Result<()> {
-        let mut sdk = Backend::memory(&vec![Package::empty("acl".into())])?;
+        let mut sdk = Backend::test("acl {}")?;
         let a = sdk.frontend().generate_keypair()?;
         let b = sdk.frontend().generate_keypair()?;
         let doc1 = sdk.frontend().create_doc(a, "acl", Keypair::generate())?;
@@ -516,7 +518,7 @@ mod tests {
 
     #[async_std::test]
     async fn test_own_and_control() -> Result<()> {
-        let mut sdk = Backend::memory(&vec![Package::empty("acl".into())])?;
+        let mut sdk = Backend::test("acl {}")?;
         let a = sdk.frontend().generate_keypair()?;
         let b = sdk.frontend().generate_keypair()?;
         let c = sdk.frontend().generate_keypair()?;
@@ -541,7 +543,7 @@ mod tests {
 
     #[async_std::test]
     async fn test_anonymous_can() -> Result<()> {
-        let mut sdk = Backend::memory(&vec![Package::empty("acl".into())])?;
+        let mut sdk = Backend::test("acl {}")?;
         let a = sdk.frontend().generate_keypair()?;
         let b = sdk.frontend().generate_keypair()?;
         let doc = sdk.frontend().create_doc(a, "acl", Keypair::generate())?;
@@ -556,7 +558,7 @@ mod tests {
 
     #[async_std::test]
     async fn test_revoke() -> Result<()> {
-        let mut sdk = Backend::memory(&vec![Package::empty("acl".into())])?;
+        let mut sdk = Backend::test("acl {}")?;
         let a = sdk.frontend().generate_keypair()?;
         let b = sdk.frontend().generate_keypair()?;
         let doc = sdk.frontend().create_doc(a, "acl", Keypair::generate())?;
@@ -579,7 +581,7 @@ mod tests {
 
     #[async_std::test]
     async fn test_cant_revoke_inv() -> Result<()> {
-        let mut sdk = Backend::memory(&vec![Package::empty("acl".into())])?;
+        let mut sdk = Backend::test("acl {}")?;
         let a = sdk.frontend().generate_keypair()?;
         let b = sdk.frontend().generate_keypair()?;
         let doc = sdk.frontend().create_doc(a, "acl", Keypair::generate())?;
