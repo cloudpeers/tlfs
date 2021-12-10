@@ -45,8 +45,8 @@ impl Sdk {
         self.0.docs(schema).map(|id| Ok(id?.to_string())).collect()
     }
 
-    pub fn create_doc(&self, schema: &str) -> Result<Doc> {
-        Ok(Doc(self.0.create_doc(schema)?))
+    pub async fn create_doc(&self, schema: &str) -> Result<Doc> {
+        Ok(Doc(self.0.create_doc(schema).await?))
     }
 
     pub fn open_doc(&self, doc_id: &str) -> Result<Doc> {

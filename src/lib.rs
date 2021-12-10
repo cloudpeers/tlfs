@@ -207,11 +207,12 @@ impl Sdk {
     }
 
     /// Creates a new document with an initial [`Schema`].
-    pub fn create_doc(&self, schema: &str) -> Result<Doc> {
+    pub async fn create_doc(&self, schema: &str) -> Result<Doc> {
         let peer_id = self.peer_id();
         let doc = self
             .frontend
-            .create_doc(*peer_id, schema, Keypair::generate())?;
+            .create_doc(*peer_id, schema, Keypair::generate())
+            .await?;
         self.swarm
             .unbounded_send(Command::Subscribe(*doc.id()))
             .ok();
