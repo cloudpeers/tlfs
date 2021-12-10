@@ -17,7 +17,7 @@ use anyhow::Result;
 use futures::{
     channel::{mpsc, oneshot},
     future::poll_fn,
-    Future, StreamExt,
+    Future, Stream, StreamExt,
 };
 use libp2p::{
     core::{muxing::StreamMuxerBox, transport::Boxed},
@@ -237,6 +237,11 @@ impl Sdk {
     /// Removes a document.
     pub fn remove_doc(&self, id: &DocId) -> Result<()> {
         self.frontend.remove_doc(id)
+    }
+
+    /// Subscribes to document changes.
+    pub fn subscribe(&self) -> impl Stream<Item = ()> {
+        self.frontend.subscribe()
     }
 }
 

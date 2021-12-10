@@ -184,6 +184,10 @@ impl Docs {
         self.0.insert(&key, keypair.as_ref())?;
         Ok(())
     }
+
+    pub fn subscribe(&self) -> impl Stream<Item = ()> {
+        self.0.watch_prefix(&[]).map(|_| ())
+    }
 }
 
 struct DebugDoc<'a>(&'a Docs, DocId);
@@ -514,6 +518,11 @@ impl Frontend {
         self.crdt.join(&peer, causal)?;
         self.tx.clone().send(()).now_or_never();
         Ok(())
+    }
+
+    /// Subscribes to document changes.
+    pub fn subscribe(&self) -> impl Stream<Item = ()> {
+        self.docs.subscribe()
     }
 }
 
