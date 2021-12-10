@@ -19,8 +19,8 @@ void main() {
     final id = doc.id();
     print('doc: $id');
 
-    for (final doc_id in sdk.docs("todoapp")) {
-      print(doc_id);
+    for (final docId in sdk.docs("todoapp")) {
+      print(docId);
     }
 
     final cursor = doc.createCursor();
