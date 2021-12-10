@@ -242,8 +242,8 @@ pub struct Backend {
     crdt: Crdt,
     docs: Docs,
     engine: Engine,
-    tx: mpsc::Sender<oneshot::Sender<()>>,
-    rx: mpsc::Receiver<oneshot::Sender<()>>,
+    tx: mpsc::UnboundedSender<oneshot::Sender<()>>,
+    rx: mpsc::UnboundedReceiver<oneshot::Sender<()>>,
 }
 
 impl Backend {
@@ -258,7 +258,7 @@ impl Backend {
             acl.clone(),
         );
         let engine = Engine::new(acl)?;
-        let (tx, rx) = mpsc::channel(1);
+        let (tx, rx) = mpsc::unbounded();
         let mut me = Self {
             registry,
             crdt,
@@ -391,7 +391,7 @@ pub struct Frontend {
     crdt: Crdt,
     docs: Docs,
     registry: Registry,
-    tx: mpsc::Sender<oneshot::Sender<()>>,
+    tx: mpsc::UnboundedSender<oneshot::Sender<()>>,
 }
 
 impl Frontend {
@@ -399,7 +399,7 @@ impl Frontend {
         crdt: Crdt,
         docs: Docs,
         registry: Registry,
-        tx: mpsc::Sender<oneshot::Sender<()>>,
+        tx: mpsc::UnboundedSender<oneshot::Sender<()>>,
     ) -> Self {
         Self {
             crdt,
@@ -463,13 +463,11 @@ impl Frontend {
         self.docs.set_schema(&id, &info)?;
         let doc = Doc::new(id, self.clone(), la, schema);
         let delta = doc.cursor().say_can(Some(owner), Permission::Own)?;
-        self.apply(&id, &delta)?;
+        let fut = self.apply(&id, &delta)?;
         self.docs.set_peer_id(&id, &owner)?;
-        let (tx, rx) = oneshot::channel();
-        self.tx.clone().send(tx).now_or_never();
         let doc = self.doc(id)?;
         Ok(async move {
-            rx.await.ok();
+            fut.await;
             doc
         })
     }
@@ -531,13 +529,14 @@ impl Frontend {
     }
 
     /// Applies a local change to a document.
-    pub fn apply(&self, doc: &DocId, causal: &Causal) -> Result<()> {
+    pub fn apply(&self, doc: &DocId, causal: &Causal) -> Result<impl Future<Output = ()>> {
         let peer = self.peer_id(doc)?;
         self.crdt.join(&peer, causal)?;
         let (tx, rx) = oneshot::channel();
-        self.tx.clone().send(tx).now_or_never();
-        drop(rx);
-        Ok(())
+        self.tx.clone().unbounded_send(tx)?;
+        Ok(async move {
+            rx.await.ok();
+        })
     }
 
     /// Subscribes to document changes.
@@ -591,7 +590,9 @@ impl Doc {
 
     /// Applies a local change to the document.
     pub fn apply(&self, causal: &Causal) -> Result<()> {
-        self.frontend.apply(&self.id, causal)
+        let fut = self.frontend.apply(&self.id, causal)?;
+        drop(fut);
+        Ok(())
     }
 }
 
@@ -615,10 +616,11 @@ mod tests {
         "#;
         let mut sdk = Backend::test(packages)?;
         let peer = sdk.frontend().default_keypair()?.peer_id();
-        let doc = sdk
+        let fut = sdk
             .frontend()
             .create_doc(peer, "todoapp", Keypair::generate())?;
         Pin::new(&mut sdk).await?;
+        let doc = fut.await;
         assert!(doc.cursor().can(&peer, Permission::Write)?);
 
         let title = "something that needs to be done";
