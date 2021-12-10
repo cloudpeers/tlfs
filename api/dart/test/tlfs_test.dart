@@ -11,11 +11,11 @@ void main() {
     f.openSync();
     final Uint8List bytes = f.readAsBytesSync();
     final api = Api.load();
-    final sdk = await api.createMemory(api, bytes);
+    final sdk = await api.createMemory(bytes);
     final peer = sdk.getPeerid();
     print('peer: $peer');
 
-    final doc = sdk.createDoc("todoapp");
+    final doc = await sdk.createDoc("todoapp");
     final id = doc.id();
     print('doc: $id');
 
