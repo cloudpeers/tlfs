@@ -3561,6 +3561,7 @@ dependencies = [
  "proptest",
  "rkyv",
  "smallvec",
+ "tlfsc",
  "tracing",
  "tracing-log",
  "tracing-subscriber",
