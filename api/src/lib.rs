@@ -9,15 +9,15 @@ use tlfs::Permission;
 
 pub struct Sdk(tlfs::Sdk);
 
+pub async fn create_persistent(path: &str, package: &[u8]) -> Result<Sdk> {
+    Ok(Sdk(tlfs::Sdk::persistent(Path::new(path), package).await?))
+}
+
+pub async fn create_memory(package: &[u8]) -> Result<Sdk> {
+    Ok(Sdk(tlfs::Sdk::memory(package).await?))
+}
+
 impl Sdk {
-    pub async fn create_persistent(path: &str, package: &[u8]) -> Result<Self> {
-        Ok(Self(tlfs::Sdk::persistent(Path::new(path), package).await?))
-    }
-
-    pub async fn create_memory(package: &[u8]) -> Result<Self> {
-        Ok(Self(tlfs::Sdk::memory(package).await?))
-    }
-
     pub fn get_peerid(&self) -> String {
         self.0.peer_id().to_string()
     }
@@ -59,6 +59,10 @@ impl Sdk {
 
     pub fn remove_doc(&self, doc_id: &str) -> Result<()> {
         self.0.remove_doc(&doc_id.parse()?)
+    }
+
+    pub fn subscribe(&self) -> impl Stream<Item = i32> {
+        self.0.subscribe().map(|_| 0)
     }
 }
 

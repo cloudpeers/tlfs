@@ -121,12 +121,14 @@
 //! To ensure the correct nodes form a fully connected component we use a point to point broadcast
 //! protocol. This makes the broadcast protocol sybil resistant and prevents eclipse attacks.
 
+/// Creates a new persistent sdk instance.
+fn create_persistent(path: &string, package: &[u8]) -> Future<Result<Sdk>>;
+
+/// Create a new in-memory sdk instance.
+fn create_memory(package: &[u8]) -> Future<Result<Sdk>>;
+
 /// Main entry point for `tlfs`.
 object Sdk {
-    /// Creates a new persistent sdk instance.
-    static fn create_persistent(path: &string, package: &[u8]) -> Future<Result<Sdk>>;
-    /// Create a new in-memory sdk instance.
-    static fn create_memory(package: &[u8]) -> Future<Result<Sdk>>;
     /// Returns the peer id of this sdk.
     fn get_peerid() -> string;
     /// Adds a new multiaddr for a peer id.
@@ -146,6 +148,8 @@ object Sdk {
     fn add_doc(doc_id: &string, schema: &string) -> Result<Doc>;
     /// Removes a document.
     fn remove_doc(doc_id: &string) -> Result<()>;
+    /// Subscribes to document changes.
+    fn subscribe() -> Stream<i32>;
 }
 
 /// Document handle.
