@@ -10,7 +10,7 @@ use crate::registry::{Expanded, Hash, Registry};
 use crate::util::Ref;
 use crate::MemStorage;
 use anyhow::{anyhow, Result};
-use futures::channel::mpsc;
+use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use rkyv::{Archive, Archived, Deserialize, Serialize};
 use std::convert::TryInto;
@@ -242,8 +242,8 @@ pub struct Backend {
     crdt: Crdt,
     docs: Docs,
     engine: Engine,
-    tx: mpsc::Sender<()>,
-    rx: mpsc::Receiver<()>,
+    tx: mpsc::Sender<oneshot::Sender<()>>,
+    rx: mpsc::Receiver<oneshot::Sender<()>>,
 }
 
 impl Backend {
@@ -375,8 +375,10 @@ impl Future for Backend {
     type Output = Result<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        if Pin::new(&mut self.rx).poll_next(cx).is_ready() {
-            Poll::Ready(self.update_acl())
+        if let Poll::Ready(Some(tx)) = Pin::new(&mut self.rx).poll_next(cx) {
+            let res = self.update_acl();
+            tx.send(()).ok();
+            Poll::Ready(res)
         } else {
             Poll::Pending
         }
@@ -389,11 +391,16 @@ pub struct Frontend {
     crdt: Crdt,
     docs: Docs,
     registry: Registry,
-    tx: mpsc::Sender<()>,
+    tx: mpsc::Sender<oneshot::Sender<()>>,
 }
 
 impl Frontend {
-    fn new(crdt: Crdt, docs: Docs, registry: Registry, tx: mpsc::Sender<()>) -> Self {
+    fn new(
+        crdt: Crdt,
+        docs: Docs,
+        registry: Registry,
+        tx: mpsc::Sender<oneshot::Sender<()>>,
+    ) -> Self {
         Self {
             crdt,
             docs,
@@ -439,7 +446,7 @@ impl Frontend {
     }
 
     /// Creates a new document using [`Keypair`] with initial schema and owner.
-    pub fn create_doc(&self, owner: PeerId, schema: &str, la: Keypair) -> Result<Doc> {
+    pub async fn create_doc(&self, owner: PeerId, schema: &str, la: Keypair) -> Result<Doc> {
         let id = DocId::new(la.peer_id().into());
         let (version, hash) = self
             .registry
@@ -453,6 +460,9 @@ impl Frontend {
         let delta = doc.cursor().say_can(Some(owner), Permission::Own)?;
         self.apply(&id, &delta)?;
         self.docs.set_peer_id(&id, &owner)?;
+        let (tx, rx) = oneshot::channel();
+        self.tx.clone().send(tx).now_or_never();
+        rx.await.ok();
         self.doc(id)
     }
 
@@ -516,7 +526,9 @@ impl Frontend {
     pub fn apply(&self, doc: &DocId, causal: &Causal) -> Result<()> {
         let peer = self.peer_id(doc)?;
         self.crdt.join(&peer, causal)?;
-        self.tx.clone().send(()).now_or_never();
+        let (tx, rx) = oneshot::channel();
+        self.tx.clone().send(tx).now_or_never();
+        drop(rx);
         Ok(())
     }
 

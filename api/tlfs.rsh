@@ -141,7 +141,7 @@ object Sdk {
     /// Returns an iterator of doc id's.
     fn docs(schema: string) -> Result<Iterator<string>>;
     /// Creates a new document with an initial schema.
-    fn create_doc(schema: &string) -> Result<Doc>;
+    fn create_doc(schema: &string) -> Future<Result<Doc>>;
     /// Returns a document handle.
     fn open_doc(doc_id: &string) -> Result<Doc>;
     /// Adds a document with a schema.
