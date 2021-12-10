@@ -11,7 +11,7 @@ void main() {
     f.openSync();
     final Uint8List bytes = f.readAsBytesSync();
     final api = Api.load();
-    final sdk = await Sdk.createMemory(api, bytes);
+    final sdk = await api.createMemory(api, bytes);
     final peer = sdk.getPeerid();
     print('peer: $peer');
 

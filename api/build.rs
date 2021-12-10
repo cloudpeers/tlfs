@@ -8,6 +8,7 @@ fn main() {
         "cargo:rerun-if-changed={}",
         path.as_path().to_str().unwrap()
     );
+    println!("cargo:rerun-if-env-changed=FFIGEN");
     if std::env::var_os("FFIGEN").is_none() {
         return;
     }
