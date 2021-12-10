@@ -211,8 +211,8 @@ impl Sdk {
         let peer_id = self.peer_id();
         let doc = self
             .frontend
-            .create_doc(*peer_id, schema, Keypair::generate())
-            .await?;
+            .create_doc(*peer_id, schema, Keypair::generate())?
+            .await;
         self.swarm
             .unbounded_send(Command::Subscribe(*doc.id()))
             .ok();
@@ -323,7 +323,7 @@ mod tests {
             &Lenses::new(lenses.clone()),
         )];
         let sdk = Sdk::memory(Ref::archive(&packages).as_bytes()).await?;
-        let doc = sdk.create_doc("todoapp")?;
+        let doc = sdk.create_doc("todoapp").await?;
 
         async_std::task::sleep(Duration::from_millis(100)).await;
         assert!(doc.cursor().can(sdk.peer_id(), Permission::Write)?);

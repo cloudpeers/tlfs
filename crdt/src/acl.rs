@@ -456,8 +456,9 @@ mod tests {
         let a = sdk.frontend().generate_keypair()?;
         let b = sdk.frontend().generate_keypair()?;
 
-        let doc = sdk.frontend().create_doc(a, "acl", Keypair::generate())?;
+        let fut = sdk.frontend().create_doc(a, "acl", Keypair::generate())?;
         Pin::new(&mut sdk).await?;
+        let doc = fut.await;
 
         assert!(!doc.cursor().can(&b, Read)?);
 
@@ -474,10 +475,12 @@ mod tests {
         let mut sdk = Backend::test("acl {}")?;
         let a = sdk.frontend().generate_keypair()?;
         let b = sdk.frontend().generate_keypair()?;
-        let doc1 = sdk.frontend().create_doc(a, "acl", Keypair::generate())?;
+        let fut = sdk.frontend().create_doc(a, "acl", Keypair::generate())?;
         Pin::new(&mut sdk).await?;
-        let doc2 = sdk.frontend().create_doc(a, "acl", Keypair::generate())?;
+        let doc1 = fut.await;
+        let fut = sdk.frontend().create_doc(a, "acl", Keypair::generate())?;
         Pin::new(&mut sdk).await?;
+        let doc2 = fut.await;
 
         let cond = doc1.cursor().cond(Actor::Peer(b), Read);
         let op = doc2.cursor().say_can_if(Actor::Peer(b), Write, cond)?;
@@ -498,9 +501,12 @@ mod tests {
         let mut sdk = Backend::test("acl {}")?;
         let a = sdk.frontend().generate_keypair()?;
         let b = sdk.frontend().generate_keypair()?;
-        let doc1 = sdk.frontend().create_doc(a, "acl", Keypair::generate())?;
-        let doc2 = sdk.frontend().create_doc(a, "acl", Keypair::generate())?;
+        let fut = sdk.frontend().create_doc(a, "acl", Keypair::generate())?;
         Pin::new(&mut sdk).await?;
+        let doc1 = fut.await;
+        let fut = sdk.frontend().create_doc(a, "acl", Keypair::generate())?;
+        Pin::new(&mut sdk).await?;
+        let doc2 = fut.await;
 
         let cond = doc1.cursor().cond(Actor::Unbound, Read);
         let op = doc2.cursor().say_can_if(Actor::Unbound, Write, cond)?;
@@ -522,8 +528,9 @@ mod tests {
         let a = sdk.frontend().generate_keypair()?;
         let b = sdk.frontend().generate_keypair()?;
         let c = sdk.frontend().generate_keypair()?;
-        let doc = sdk.frontend().create_doc(a, "acl", Keypair::generate())?;
+        let fut = sdk.frontend().create_doc(a, "acl", Keypair::generate())?;
         Pin::new(&mut sdk).await?;
+        let doc = fut.await;
 
         let op = doc.cursor().say_can(Some(b), Control)?;
         doc.apply(&op)?;
@@ -546,8 +553,9 @@ mod tests {
         let mut sdk = Backend::test("acl {}")?;
         let a = sdk.frontend().generate_keypair()?;
         let b = sdk.frontend().generate_keypair()?;
-        let doc = sdk.frontend().create_doc(a, "acl", Keypair::generate())?;
+        let fut = sdk.frontend().create_doc(a, "acl", Keypair::generate())?;
         Pin::new(&mut sdk).await?;
+        let doc = fut.await;
 
         let op = doc.cursor().say_can(None, Read)?;
         doc.apply(&op)?;
@@ -561,8 +569,9 @@ mod tests {
         let mut sdk = Backend::test("acl {}")?;
         let a = sdk.frontend().generate_keypair()?;
         let b = sdk.frontend().generate_keypair()?;
-        let doc = sdk.frontend().create_doc(a, "acl", Keypair::generate())?;
+        let fut = sdk.frontend().create_doc(a, "acl", Keypair::generate())?;
         Pin::new(&mut sdk).await?;
+        let doc = fut.await;
 
         let op = doc.cursor().say_can(Some(b), Write)?;
         doc.apply(&op)?;
@@ -584,8 +593,9 @@ mod tests {
         let mut sdk = Backend::test("acl {}")?;
         let a = sdk.frontend().generate_keypair()?;
         let b = sdk.frontend().generate_keypair()?;
-        let doc = sdk.frontend().create_doc(a, "acl", Keypair::generate())?;
+        let fut = sdk.frontend().create_doc(a, "acl", Keypair::generate())?;
         Pin::new(&mut sdk).await?;
+        let doc = fut.await;
 
         let op = doc.cursor().say_can(Some(b), Own)?;
         doc.apply(&op)?;

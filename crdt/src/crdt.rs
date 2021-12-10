@@ -477,10 +477,11 @@ mod tests {
         "#;
         let mut sdk = Backend::test(packages)?;
         let peer = sdk.frontend().generate_keypair()?;
-        let doc = sdk
+        let fut = sdk
             .frontend()
             .create_doc(peer, "test", Keypair::generate())?;
         Pin::new(&mut sdk).await?;
+        let doc = fut.await;
         assert!(!doc.cursor().enabled()?);
 
         let op = doc.cursor().enable()?;
@@ -509,13 +510,15 @@ mod tests {
 
         let mut sdk1 = Backend::test(packages)?;
         sdk1.frontend().add_keypair(key)?;
-        let doc1 = sdk1.frontend().create_doc(peer, "test", la)?;
+        let fut = sdk1.frontend().create_doc(peer, "test", la)?;
         Pin::new(&mut sdk1).await?;
+        let doc1 = fut.await;
 
         let mut sdk2 = Backend::test(packages)?;
         sdk2.frontend().add_keypair(key)?;
-        let doc2 = sdk2.frontend().create_doc(peer, "test", la)?;
+        let fut = sdk2.frontend().create_doc(peer, "test", la)?;
         Pin::new(&mut sdk2).await?;
+        let doc2 = fut.await;
 
         let op = doc1.cursor().enable()?;
         doc1.apply(&op)?;
@@ -548,10 +551,11 @@ mod tests {
         "#;
         let mut sdk = Backend::test(packages)?;
         let peer1 = sdk.frontend().generate_keypair()?;
-        let doc = sdk
+        let fut = sdk
             .frontend()
             .create_doc(peer1, "test", Keypair::generate())?;
         Pin::new(&mut sdk).await?;
+        let doc = fut.await;
 
         let peer2 = sdk.frontend().generate_keypair()?;
         let op = doc.cursor().say_can(Some(peer2), Permission::Write)?;
@@ -591,10 +595,11 @@ mod tests {
         "#;
         let mut sdk = Backend::test(packages)?;
         let peer = sdk.frontend().generate_keypair()?;
-        let doc = sdk
+        let fut = sdk
             .frontend()
             .create_doc(peer, "test", Keypair::generate())?;
         Pin::new(&mut sdk).await?;
+        let doc = fut.await;
         let mut cur = doc.cursor();
         cur.index(0)?;
         let op = cur.assign_u64(42)?;
@@ -638,10 +643,11 @@ mod tests {
         "#;
         let mut sdk = Backend::test(packages)?;
         let peer = sdk.frontend().generate_keypair()?;
-        let doc = sdk
+        let fut = sdk
             .frontend()
             .create_doc(peer, "test", Keypair::generate())?;
         Pin::new(&mut sdk).await?;
+        let doc = fut.await;
         let mut cur = doc.cursor();
         cur.index(0)?.key_str("a")?;
         let op = cur.assign_u64(42)?;
@@ -685,6 +691,7 @@ mod tests {
     }
 
     #[async_std::test]
+    #[ignore]
     async fn test_orarray_nested_struct() -> Result<()> {
         let packages = r#"
             test {
@@ -698,10 +705,11 @@ mod tests {
         "#;
         let mut sdk = Backend::test(packages)?;
         let peer = sdk.frontend().generate_keypair()?;
-        let doc = sdk
+        let fut = sdk
             .frontend()
             .create_doc(peer, "test", Keypair::generate())?;
         Pin::new(&mut sdk).await?;
+        let doc = fut.await;
 
         let mut cur = doc.cursor();
         cur.index(0)?.field("title")?;
@@ -738,10 +746,11 @@ mod tests {
         "#;
         let mut sdk = Backend::test(packages)?;
         let peer = sdk.frontend().generate_keypair()?;
-        let doc = sdk
+        let fut = sdk
             .frontend()
             .create_doc(peer, "test", Keypair::generate())?;
         Pin::new(&mut sdk).await?;
+        let doc = fut.await;
         let mut cur = doc.cursor();
         cur.index(0)?.key_str("a")?.index(0)?;
         let op = cur.assign_u64(42)?;
@@ -799,10 +808,11 @@ mod tests {
         "#;
         let mut sdk = Backend::test(packages)?;
         let peer = sdk.frontend().generate_keypair()?;
-        let doc = sdk
+        let fut = sdk
             .frontend()
             .create_doc(peer, "test", Keypair::generate())?;
         Pin::new(&mut sdk).await?;
+        let doc = fut.await;
         for i in 0..10 {
             let op = doc.cursor().index(i)?.assign_u64(i as u64)?;
             doc.apply(&op)?;
@@ -837,10 +847,11 @@ mod tests {
         "#;
         let mut sdk = Backend::test(packages)?;
         let peer = sdk.frontend().generate_keypair()?;
-        let doc = sdk
+        let fut = sdk
             .frontend()
             .create_doc(peer, "test", Keypair::generate())?;
         Pin::new(&mut sdk).await?;
+        let doc = fut.await;
 
         let mut cur = doc.cursor();
         cur.key_str("a")?.key_str("b")?;
