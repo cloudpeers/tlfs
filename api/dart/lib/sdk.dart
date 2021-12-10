@@ -14,7 +14,7 @@ Future<tlfs.Sdk> _loadSdk(String appname) async {
   final assetName =
       'assets/{appname}.tlfs.rkyv'.replaceAll('{appname}', appname);
   final schema = await rootBundle.load(assetName);
-  return tlfs.Sdk.createPersistent(tlfs.Api.load(), dbPath, schema.buffer.asUint8List());
+  return tlfs.Api.load().createPersistent(dbPath, schema.buffer.asUint8List());
 }
 
 class _InheritedSdk extends InheritedWidget {
