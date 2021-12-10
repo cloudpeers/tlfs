@@ -97,10 +97,6 @@ jobs:
       working-directory: api/dart
       run: dartdoc
 
-    - name: dart pub
-      working-directory: api/dart
-      run: flutter pub publish --dry-run
-
     # TODO
     #- name: eslint
     #  working-directory: api/js
