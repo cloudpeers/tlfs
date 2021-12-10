@@ -446,7 +446,12 @@ impl Frontend {
     }
 
     /// Creates a new document using [`Keypair`] with initial schema and owner.
-    pub async fn create_doc(&self, owner: PeerId, schema: &str, la: Keypair) -> Result<Doc> {
+    pub fn create_doc(
+        &self,
+        owner: PeerId,
+        schema: &str,
+        la: Keypair,
+    ) -> Result<impl Future<Output = Doc>> {
         let id = DocId::new(la.peer_id().into());
         let (version, hash) = self
             .registry
@@ -462,8 +467,11 @@ impl Frontend {
         self.docs.set_peer_id(&id, &owner)?;
         let (tx, rx) = oneshot::channel();
         self.tx.clone().send(tx).now_or_never();
-        rx.await.ok();
-        self.doc(id)
+        let doc = self.doc(id)?;
+        Ok(async move {
+            rx.await.ok();
+            doc
+        })
     }
 
     /// Adds an existing document identified by [`DocId`] with schema and associates the local
