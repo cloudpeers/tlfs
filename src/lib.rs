@@ -12,7 +12,7 @@ pub use tlfs_crdt::{
     Lens, Lenses, Package, PathBuf, PeerId, Permission, PrimitiveKind, Ref, Schema, Subscriber,
 };
 
-use crate::sync::Behaviour;
+use crate::sync::{notify, Behaviour};
 use anyhow::Result;
 use futures::{
     channel::{mpsc, oneshot},
@@ -21,7 +21,7 @@ use futures::{
 };
 use libp2p::{
     core::{muxing::StreamMuxerBox, transport::Boxed},
-    swarm::AddressScore,
+    swarm::{AddressScore, SwarmEvent},
     Swarm,
 };
 use std::task::Poll;
@@ -112,7 +112,7 @@ impl Sdk {
         transport: Boxed<(libp2p::PeerId, StreamMuxerBox)>,
         listen_on: impl Iterator<Item = Multiaddr>,
     ) -> Result<(Self, impl Future<Output = ()>)> {
-        let behaviour = Behaviour::new(backend)?;
+        let behaviour = Behaviour::new(backend).await?;
         let mut swarm = Swarm::new(transport, behaviour, peer.to_libp2p().to_peer_id());
         for i in listen_on {
             swarm.listen_on(i)?;
@@ -120,6 +120,8 @@ impl Sdk {
 
         let (tx, mut rx) = mpsc::unbounded();
         let driver = poll_fn(move |cx| {
+            let mut sub_addresses = vec![];
+            let mut sub_connected_peers = vec![];
             while let Poll::Ready(Some(cmd)) = rx.poll_next_unpin(cx) {
                 match cmd {
                     Command::AddAddress(peer, addr) => {
@@ -138,6 +140,28 @@ impl Sdk {
                         let addrs = swarm.listeners().cloned().collect::<Vec<_>>();
                         ch.send(addrs).ok();
                     }
+                    Command::SubscribeAddresses(ch) => {
+                        sub_addresses.push(ch);
+                    }
+                    Command::LocalPeers(ch) => {
+                        let peers = swarm.behaviour_mut().local_peers();
+                        ch.send(peers).ok();
+                    }
+                    Command::SubscribeLocalPeers(ch) => {
+                        swarm.behaviour_mut().subscribe_local_peers(ch);
+                    }
+                    Command::ConnectedPeers(ch) => {
+                        /*let peers = swarm
+                            .connected_peers()
+                            .filter_map(|peer| libp2p_peer_id(peer).ok())
+                            .collect();
+                        ch.send(peers).ok();*/
+                        // TODO: wait for PR and release.
+                        ch.send(vec![]).ok();
+                    }
+                    Command::SubscribeConnectedPeers(ch) => {
+                        sub_connected_peers.push(ch);
+                    }
                     Command::Subscribe(doc) => {
                         swarm.behaviour_mut().subscribe(&doc);
                     }
@@ -147,7 +171,15 @@ impl Sdk {
                 };
             }
             while swarm.behaviour_mut().poll_backend(cx).is_ready() {}
-            while swarm.poll_next_unpin(cx).is_ready() {}
+            while let Poll::Ready(Some(ev)) = swarm.poll_next_unpin(cx) {
+                match ev {
+                    SwarmEvent::NewListenAddr { .. } => notify(&mut sub_addresses),
+                    SwarmEvent::ExpiredListenAddr { .. } => notify(&mut sub_addresses),
+                    SwarmEvent::ConnectionEstablished { .. } => notify(&mut sub_connected_peers),
+                    SwarmEvent::ConnectionClosed { .. } => notify(&mut sub_connected_peers),
+                    _ => {}
+                }
+            }
             Poll::Pending
         });
 
@@ -188,22 +220,63 @@ impl Sdk {
     }
 
     /// Returns the list of [`Multiaddr`] the [`Sdk`] is listening on.
-    pub fn addresses(&self) -> impl Future<Output = Vec<Multiaddr>> + 'static {
+    pub fn addresses(&self) -> impl Future<Output = Vec<Multiaddr>> {
         let (tx, rx) = oneshot::channel();
-        let r = self.swarm.unbounded_send(Command::Addresses(tx));
-        async move {
-            if let Ok(()) = r {
-                if let Ok(addrs) = rx.await {
-                    return addrs;
-                }
-            }
-            vec![]
-        }
+        self.swarm.unbounded_send(Command::Addresses(tx)).unwrap();
+        async move { rx.await.unwrap() }
+    }
+
+    /// Subscribe to address changes.
+    pub fn subscribe_addresses(&self) -> impl Stream<Item = ()> {
+        let (tx, rx) = mpsc::channel(1);
+        self.swarm
+            .unbounded_send(Command::SubscribeAddresses(tx))
+            .unwrap();
+        rx
+    }
+
+    /// Returns the local peers.
+    pub fn local_peers(&self) -> impl Future<Output = Vec<PeerId>> {
+        let (tx, rx) = oneshot::channel();
+        self.swarm.unbounded_send(Command::LocalPeers(tx)).unwrap();
+        async move { rx.await.unwrap() }
+    }
+
+    /// Subscribes to local peer changes.
+    pub fn subscribe_local_peers(&self) -> impl Stream<Item = ()> {
+        let (tx, rx) = mpsc::channel(1);
+        self.swarm
+            .unbounded_send(Command::SubscribeLocalPeers(tx))
+            .unwrap();
+        rx
+    }
+
+    /// Returns the connected peers.
+    pub fn connected_peers(&self) -> impl Future<Output = Vec<PeerId>> {
+        let (tx, rx) = oneshot::channel();
+        self.swarm
+            .unbounded_send(Command::ConnectedPeers(tx))
+            .unwrap();
+        async move { rx.await.unwrap() }
+    }
+
+    /// Subscribes to local peer changes.
+    pub fn subscribe_connected_peers(&self) -> impl Stream<Item = ()> {
+        let (tx, rx) = mpsc::channel(1);
+        self.swarm
+            .unbounded_send(Command::SubscribeConnectedPeers(tx))
+            .unwrap();
+        rx
     }
 
     /// Returns an iterator of [`DocId`].
     pub fn docs(&self, schema: String) -> impl Iterator<Item = Result<DocId>> + '_ {
         self.frontend.docs_by_schema(schema)
+    }
+
+    /// Subscribes to document changes.
+    pub fn subscribe_docs(&self) -> impl Stream<Item = ()> {
+        self.frontend.subscribe()
     }
 
     /// Creates a new document with an initial [`Schema`].
@@ -238,11 +311,6 @@ impl Sdk {
     /// Removes a document.
     pub fn remove_doc(&self, id: &DocId) -> Result<()> {
         self.frontend.remove_doc(id)
-    }
-
-    /// Subscribes to document changes.
-    pub fn subscribe(&self) -> impl Stream<Item = ()> {
-        self.frontend.subscribe()
     }
 }
 
@@ -283,6 +351,11 @@ enum Command {
     AddExternalAddress(Multiaddr, AddressScore),
     RemoveAddress(PeerId, Multiaddr),
     Addresses(oneshot::Sender<Vec<Multiaddr>>),
+    SubscribeAddresses(mpsc::Sender<()>),
+    LocalPeers(oneshot::Sender<Vec<PeerId>>),
+    SubscribeLocalPeers(mpsc::Sender<()>),
+    ConnectedPeers(oneshot::Sender<Vec<PeerId>>),
+    SubscribeConnectedPeers(mpsc::Sender<()>),
     Subscribe(DocId),
     Broadcast(DocId, Causal),
 }

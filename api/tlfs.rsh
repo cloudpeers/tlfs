@@ -131,12 +131,23 @@ fn create_memory(package: &[u8]) -> Future<Result<Sdk>>;
 object Sdk {
     /// Returns the peer id of this sdk.
     fn get_peerid() -> string;
+
     /// Adds a new multiaddr for a peer id.
     fn add_address(peer_id: &string, addr: &string) -> Result<()>;
     /// Removes a multiaddr of a peer id.
     fn remove_address(peer_id: &string, addr: &string) -> Result<()>;
-    // TODO /// Returns the list of multiaddr the sdk is listening on.
+    // /// Returns the list of multiaddr the sdk is listening on.
     // fn addresses() -> Iterator<string>;
+    /// Subscribes to listening address changes.
+    fn subscribe_addresses() -> Stream<i32>;
+    // /// Returns the local peers discovered via mdns.
+    // fn local_peers() -> Future<Iterator<string>>;
+    /// Subscribes to local peer changes.
+    fn subscribe_local_peers() -> Stream<i32>;
+    // /// Returns the list of connected peers.
+    // fn connected_peers() -> Future<Iterator<string>>;
+    /// Subscribes to connected peer changes.
+    fn subscribe_connected_peers() -> Stream<i32>;
 
     /// Returns an iterator of doc id's.
     fn docs(schema: string) -> Result<Iterator<string>>;
@@ -149,7 +160,7 @@ object Sdk {
     /// Removes a document.
     fn remove_doc(doc_id: &string) -> Result<()>;
     /// Subscribes to document changes.
-    fn subscribe() -> Stream<i32>;
+    fn subscribe_docs() -> Stream<i32>;
 }
 
 /// Document handle.

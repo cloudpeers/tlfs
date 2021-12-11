@@ -3,11 +3,12 @@ use async_trait::async_trait;
 use bytecheck::CheckBytes;
 use fnv::FnvHashMap;
 use futures::{
+    channel::mpsc,
     io::{AsyncRead, AsyncWrite},
     prelude::*,
 };
 use libp2p::{
-    ping,
+    mdns, ping,
     request_response::{
         self, ProtocolName, ProtocolSupport, RequestId, RequestResponse, RequestResponseCodec,
         RequestResponseConfig,
@@ -130,6 +131,14 @@ impl RequestResponseCodec for SyncCodec {
     }
 }
 
+pub(crate) fn notify(subs: &mut Vec<mpsc::Sender<()>>) {
+    subs.retain(|tx| match tx.clone().try_send(()) {
+        Ok(()) => true,
+        Err(err) if err.is_full() => true,
+        Err(_) => false,
+    });
+}
+
 type RequestResponseEvent =
     request_response::RequestResponseEvent<Ref<SyncRequest>, Ref<SyncResponse>>;
 
@@ -139,16 +148,19 @@ pub struct Behaviour {
     req: RequestResponse<SyncCodec>,
     broadcast: Broadcast,
     ping: ping::Behaviour,
+    mdns: mdns::Mdns,
     #[behaviour(ignore)]
     unjoin_req: FnvHashMap<RequestId, DocId>,
     #[behaviour(ignore)]
     buffer: Vec<(Hash, DocId, PeerId, Causal)>,
     #[behaviour(ignore)]
     backend: Backend,
+    #[behaviour(ignore)]
+    sub_local_peers: Vec<mpsc::Sender<()>>,
 }
 
 impl Behaviour {
-    pub fn new(backend: Backend) -> Result<Self> {
+    pub async fn new(backend: Backend) -> Result<Self> {
         let mut me = Self {
             backend,
             req: RequestResponse::new(
@@ -156,10 +168,12 @@ impl Behaviour {
                 vec![(SyncProtocol, ProtocolSupport::Full)],
                 RequestResponseConfig::default(),
             ),
+            mdns: mdns::Mdns::new(mdns::MdnsConfig::default()).await?,
             ping: ping::Behaviour::new(ping::Config::new().with_keep_alive(true)),
             unjoin_req: Default::default(),
             buffer: Default::default(),
             broadcast: Broadcast::new(BroadcastConfig::default()),
+            sub_local_peers: Default::default(),
         };
         for res in me.backend.frontend().docs() {
             let doc = res?;
@@ -179,6 +193,17 @@ impl Behaviour {
     pub fn remove_address(&mut self, peer: &PeerId, addr: &Multiaddr) {
         self.req
             .remove_address(&peer.to_libp2p().to_peer_id(), addr);
+    }
+
+    pub fn local_peers(&self) -> Vec<PeerId> {
+        self.mdns
+            .discovered_nodes()
+            .filter_map(|peer| libp2p_peer_id(peer).ok())
+            .collect()
+    }
+
+    pub fn subscribe_local_peers(&mut self, ch: mpsc::Sender<()>) {
+        self.sub_local_peers.push(ch);
     }
 
     pub fn request_lenses(&mut self, peer_id: &PeerId, hash: Hash) -> RequestId {
@@ -335,6 +360,12 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
 
 impl NetworkBehaviourEventProcess<ping::Event> for Behaviour {
     fn inject_event(&mut self, _event: ping::Event) {}
+}
+
+impl NetworkBehaviourEventProcess<mdns::MdnsEvent> for Behaviour {
+    fn inject_event(&mut self, _event: mdns::MdnsEvent) {
+        notify(&mut self.sub_local_peers);
+    }
 }
 
 /// Conversion to libp2p

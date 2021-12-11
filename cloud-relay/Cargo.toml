@@ -8,7 +8,7 @@ acme-lib = "0.8.2"
 anyhow = "1.0.44"
 clap = "3.0.0-beta.5"
 hex = "0.4.3"
-libp2p = { version = "0.40.0-rc.2", features = [
+libp2p = { version = "0.41.0", features = [
   "noise",
   "mplex",
   "pnet",
@@ -21,9 +21,9 @@ libp2p = { version = "0.40.0-rc.2", features = [
   "yamux",
   "relay"
   ], default_features = false }
-rustls = "0.19.1"
+rustls = "0.20.2"
 tokio = { version = "1.12.0", features = ["full"] }
 tracing = "0.1.28"
-tracing-subscriber = "0.2.24"
+tracing-subscriber = "0.3.3"
 warp = "0.3.1"
 

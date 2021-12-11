@@ -32,17 +32,48 @@ impl Sdk {
         Ok(())
     }
 
-    pub async fn addresses(&self) -> Vec<String> {
+    pub async fn addresses(&self) -> impl Iterator<Item = String> {
         self.0
             .addresses()
             .await
             .into_iter()
             .map(|addr| addr.to_string())
-            .collect()
+    }
+
+    pub fn subscribe_addresses(&self) -> impl Stream<Item = i32> {
+        self.0.subscribe_addresses().map(|_| 0)
+    }
+
+    pub async fn local_peers(&self) -> impl Iterator<Item = String> {
+        self.0
+            .local_peers()
+            .await
+            .into_iter()
+            .map(|peer| peer.to_string())
+    }
+
+    pub fn subscribe_local_peers(&self) -> impl Stream<Item = i32> {
+        self.0.subscribe_local_peers().map(|_| 0)
+    }
+
+    pub async fn connected_peers(&self) -> impl Iterator<Item = String> {
+        self.0
+            .connected_peers()
+            .await
+            .into_iter()
+            .map(|peer| peer.to_string())
+    }
+
+    pub fn subscribe_connected_peers(&self) -> impl Stream<Item = i32> {
+        self.0.subscribe_connected_peers().map(|_| 0)
     }
 
     pub fn docs(&self, schema: String) -> Result<Vec<String>> {
         self.0.docs(schema).map(|id| Ok(id?.to_string())).collect()
+    }
+
+    pub fn subscribe_docs(&self) -> impl Stream<Item = i32> {
+        self.0.subscribe_docs().map(|_| 0)
     }
 
     pub async fn create_doc(&self, schema: &str) -> Result<Doc> {
@@ -59,10 +90,6 @@ impl Sdk {
 
     pub fn remove_doc(&self, doc_id: &str) -> Result<()> {
         self.0.remove_doc(&doc_id.parse()?)
-    }
-
-    pub fn subscribe(&self) -> impl Stream<Item = i32> {
-        self.0.subscribe().map(|_| 0)
     }
 }
 
