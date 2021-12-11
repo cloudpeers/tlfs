@@ -2713,7 +2713,7 @@ dependencies = [
  "clap",
  "hex",
  "libp2p",
- "rustls 0.20.2",
+ "rustls-pemfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -2829,6 +2829,15 @@ dependencies = [
  "ring",
  "sct 0.7.0",
  "webpki 0.22.0",
+]
+
+[[package]]
+name = "rustls-pemfile"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5eebeaeb360c87bfb72e84abdb3447159c0eaececf1bef2aecd65a8be949d1c9"
+dependencies = [
+ "base64",
 ]
 
 [[package]]

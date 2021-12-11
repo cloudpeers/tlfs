@@ -78,22 +78,20 @@ async fn main() -> anyhow::Result<()> {
                 acme::get_cert(domain, email, &opts.tls_cert, &opts.tls_private_key).await?;
             }
 
-            let der = rustls::internal::pemfile::pkcs8_private_keys(&mut BufReader::new(
-                fs::File::open(&opts.tls_private_key)?,
-            ))
+            let der = rustls_pemfile::pkcs8_private_keys(&mut BufReader::new(fs::File::open(
+                &opts.tls_private_key,
+            )?))
             .map_err(|_| anyhow::anyhow!("Reading TLS private key"))?
             .into_iter()
             .next()
             .context("Extracting private key")?;
-            let private_key = websocket::tls::PrivateKey::new(der.0);
+            let private_key = websocket::tls::PrivateKey::new(der);
 
-            let certs = rustls::internal::pemfile::certs(&mut BufReader::new(fs::File::open(
-                &opts.tls_cert,
-            )?))
-            .map_err(|_| anyhow::anyhow!("Reading TLS cert chain"))?
-            .into_iter()
-            .map(|x| websocket::tls::Certificate::new(x.0))
-            .collect();
+            let certs = rustls_pemfile::certs(&mut BufReader::new(fs::File::open(&opts.tls_cert)?))
+                .map_err(|_| anyhow::anyhow!("Reading TLS cert chain"))?
+                .into_iter()
+                .map(websocket::tls::Certificate::new)
+                .collect();
             Some((private_key, certs))
         } else {
             anyhow::bail!("Please provide `cert,` `private_key`, `domain`, and `email` options");
