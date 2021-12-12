@@ -752,14 +752,24 @@ impl ArrayWrapper {
             cursor.sign(&mut p);
             inner.expired.insert(p);
         }
+
+        let mut last_move = None;
         // and all meta entries
-        let last_move = {
-            let mut iter = cursor.crdt.scan_path(self.meta_path.as_path());
-            let meta_data = iter.next().context("No metadata for array entry found")?;
-            self.get_meta_data(Path::new(&meta_data))?.last_move
-        };
+        for e in cursor.crdt.scan_path(self.meta_path.as_path()) {
+            let mut p = Path::new(&e).to_owned();
+            if last_move.is_none() {
+                last_move.replace(self.get_meta_data(p.as_path())?.last_move);
+            }
+            cursor.sign(&mut p);
+            inner.expired.insert(p);
+        }
         // Commit current position
-        let meta_entry = ArrayMetaEntry::new(self.uid, nonce(), last_move, self.pos.clone());
+        let meta_entry = ArrayMetaEntry::new(
+            self.uid,
+            nonce(),
+            last_move.context("No metadata for value entry found")?,
+            self.pos.clone(),
+        );
         let mut p = meta_entry.to_path(self.meta_path.clone());
         cursor.sign(&mut p);
         inner.store.insert(p);
