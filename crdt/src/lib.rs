@@ -151,7 +151,7 @@ pub use crate::acl::{Actor, Can, Permission, Policy};
 pub use crate::crdt::{Causal, CausalContext};
 pub use crate::crypto::Keypair;
 pub use crate::cursor::Cursor;
-pub use crate::doc::{Backend, Doc, Frontend};
+pub use crate::doc::{Backend, Doc, Frontend, SchemaInfo};
 pub use crate::dotset::{ArchivedDotSet, Dot, DotSet};
 pub use crate::id::{DocId, PeerId};
 pub use crate::lens::{ArchivedKind, ArchivedLens, ArchivedLenses, Kind, Lens, LensRef, Lenses};
