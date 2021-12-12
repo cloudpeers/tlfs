@@ -1,6 +1,7 @@
 use crate::acl::{Actor, Can, Permission, Policy};
 use crate::crdt::{Causal, Crdt, DotStore};
 use crate::crypto::Keypair;
+use crate::cursor::array_util::ArrayMetaEntry;
 use crate::dotset::Dot;
 use crate::fraction::Fraction;
 use crate::id::{DocId, PeerId};
@@ -557,9 +558,10 @@ impl ArrayWrapper {
         let (pos, uid) = if let Some(entry) = iter.nth(ix) {
             // Existing entry
             let p_c = cursor.path.clone();
-            let data =
-                array_util::ArrayValue::from_path(Path::new(&entry).strip_prefix(p_c.as_path())?)
-                    .context("Reading array data")?;
+            let data = array_util::ArrayValueEntry::from_path(
+                Path::new(&entry).strip_prefix(p_c.as_path())?,
+            )
+            .context("Reading array data")?;
             (data.pos, data.uid)
         } else {
             // No entry, find position to insert
@@ -571,7 +573,7 @@ impl ArrayWrapper {
                         .scan_path(array_value_root.as_path())
                         .skip(s)
                         .map(move |iv| -> anyhow::Result<_> {
-                            let meta = array_util::ArrayValue::from_path(
+                            let meta = array_util::ArrayValueEntry::from_path(
                                 Path::new(&iv).strip_prefix(p_c.as_path())?,
                             )?;
                             Ok(meta.pos)
@@ -585,7 +587,7 @@ impl ArrayWrapper {
                             .crdt
                             .scan_path(array_value_root.as_path())
                             .map(move |iv| {
-                                let meta = array_util::ArrayValue::from_path(
+                                let meta = array_util::ArrayValueEntry::from_path(
                                     Path::new(&iv).strip_prefix(p_c.as_path())?,
                                 )?;
                                 Ok(meta.pos)
@@ -647,7 +649,7 @@ impl ArrayWrapper {
                     let p_c = self.array_path.clone();
                     let mut iter = cursor.crdt.scan_path(value_path.as_path()).skip(s).map(
                         move |iv| -> anyhow::Result<_> {
-                            let meta = array_util::ArrayValue::from_path(
+                            let meta = array_util::ArrayValueEntry::from_path(
                                 Path::new(&iv).strip_prefix(p_c.as_path())?,
                             )?;
                             Ok(meta.pos)
@@ -658,7 +660,7 @@ impl ArrayWrapper {
                 None => {
                     let p_c = self.array_path.clone();
                     let mut iter = cursor.crdt.scan_path(value_path.as_path()).map(move |iv| {
-                        let meta = array_util::ArrayValue::from_path(
+                        let meta = array_util::ArrayValueEntry::from_path(
                             Path::new(&iv).strip_prefix(p_c.as_path())?,
                         )?;
                         Ok(meta.pos)
@@ -675,7 +677,7 @@ impl ArrayWrapper {
                 left.succ()
             }
         };
-        // --
+
         let existing_meta = cursor
             .crdt
             .scan_path(self.meta_path.as_path())
@@ -688,24 +690,16 @@ impl ArrayWrapper {
         for e in existing_meta {
             let mut p = Path::new(&e).to_owned();
             cursor.sign(&mut p);
-            let meta = self.get_meta_data(p.as_path())?;
+            let mut meta = self.get_meta_data(p.as_path())?;
             expired.insert(p);
 
-            let mut path = self.meta_path.clone();
-            path.prim_u64(meta.last_update);
-            path.prim_u64(move_op);
-            path.position(&meta.pos);
+            meta.last_move = move_op;
 
-            cursor.nonce(&mut path);
+            let mut path = meta.to_path(self.meta_path.clone());
             cursor.sign(&mut path);
 
             store.insert(path);
         }
-        let mut new_value_path = {
-            let mut p = self.array_path.clone();
-            p.prim_str(array_util::ARRAY_VALUES);
-            p
-        };
         // remove old pos
         let old = cursor
             .crdt
@@ -713,17 +707,17 @@ impl ArrayWrapper {
             .next()
             .context("Concurrent access")?;
         let mut p = Path::new(&old).to_owned();
-        let v = self.get_value(p.as_path())?;
+        let mut v = self.get_value(p.as_path())?;
         cursor.sign(&mut p);
         expired.insert(p);
 
-        // add new pos
-        new_value_path.position(&new_pos);
-        new_value_path.prim_u64(self.uid);
-        new_value_path.nonce(nonce());
-        for s in v.value {
-            new_value_path.push_segment(s);
-        }
+        v.pos = new_pos;
+        let mut new_value_path = v.to_path({
+            let mut p = self.array_path;
+            p.prim_str(array_util::ARRAY_VALUES);
+            p
+        });
+
         // overwrite existing peer and sig fields
         cursor.sign(&mut new_value_path);
         store.insert(new_value_path);
@@ -752,25 +746,29 @@ impl ArrayWrapper {
         // and adding a single tree of height 3 with the current position. This position is chosen
         // deterministically from the set of current possible positions.
 
-        inner.expired.extend(self.tombstone(cursor)?);
-
+        // tombstone old value
+        for e in cursor.crdt.scan_path(cursor.path.as_path()) {
+            let mut p = Path::new(&e).to_owned();
+            cursor.sign(&mut p);
+            inner.expired.insert(p);
+        }
+        // and all meta entries
+        let last_move = {
+            let mut iter = cursor.crdt.scan_path(self.meta_path.as_path());
+            let meta_data = iter.next().context("No metadata for array entry found")?;
+            self.get_meta_data(Path::new(&meta_data))?.last_move
+        };
         // Commit current position
-        let mut p = self.meta_path.clone();
-        p.prim_u64(nonce());
-        p.prim_u64(nonce());
-        p.position(&self.pos);
-        p.nonce(nonce());
+        let meta_entry = ArrayMetaEntry::new(self.uid, nonce(), last_move, self.pos.clone());
+        let mut p = meta_entry.to_path(self.meta_path.clone());
         cursor.sign(&mut p);
         inner.store.insert(p);
         Ok(inner)
     }
 
     fn insert(&self, cursor: &Cursor, mut inner: Causal) -> Result<Causal> {
-        let mut p = self.meta_path.clone();
-        p.prim_u64(nonce());
-        p.prim_u64(nonce());
-        p.position(&self.pos);
-        p.nonce(nonce());
+        let meta_entry = ArrayMetaEntry::new(self.uid, nonce(), nonce(), self.pos.clone());
+        let mut p = meta_entry.to_path(self.meta_path.clone());
         cursor.sign(&mut p);
         inner.store.insert(p);
         Ok(inner)
@@ -782,12 +780,12 @@ impl ArrayWrapper {
             store: Default::default(),
         })
     }
-    fn get_meta_data(&self, path: Path) -> Result<array_util::ArrayMeta> {
-        array_util::ArrayMeta::from_path(path.strip_prefix(self.array_path.as_path())?)
+    fn get_meta_data(&self, path: Path) -> Result<array_util::ArrayMetaEntry> {
+        array_util::ArrayMetaEntry::from_path(path.strip_prefix(self.array_path.as_path())?)
     }
 
-    fn get_value(&self, path: Path<'_>) -> Result<array_util::ArrayValue> {
-        array_util::ArrayValue::from_path(path.strip_prefix(self.array_path.as_path())?)
+    fn get_value(&self, path: Path<'_>) -> Result<array_util::ArrayValueEntry> {
+        array_util::ArrayValueEntry::from_path(path.strip_prefix(self.array_path.as_path())?)
     }
 }
 
@@ -798,14 +796,16 @@ mod array_util {
 
     pub(crate) const ARRAY_VALUES: &str = "VALUES";
     pub(crate) const ARRAY_META: &str = "META";
-    pub(crate) struct ArrayValue {
-        pub(crate) uid: u64,
+
+    // <path_to_array>.VALUES.<pos>.<uid>.<value>
+    pub(crate) struct ArrayValueEntry {
         pub(crate) pos: Fraction,
+        pub(crate) uid: u64,
         pub(crate) value: Vec<Segment>,
     }
-    impl ArrayValue {
+    impl ArrayValueEntry {
         /// `path` needs to point into the array root dir
-        pub(crate) fn from_path(path: Path<'_>) -> Result<ArrayValue> {
+        pub(crate) fn from_path(path: Path<'_>) -> Result<ArrayValueEntry> {
             let mut path = path.into_iter();
             anyhow::ensure!(
                 path.next()
@@ -842,16 +842,34 @@ mod array_util {
             );
             Ok(Self { uid, pos, value })
         }
+
+        pub(crate) fn to_path(&self, mut base: PathBuf) -> PathBuf {
+            base.position(&self.pos);
+            base.prim_u64(self.uid);
+            for s in &self.value {
+                base.push_segment(s.clone());
+            }
+            base
+        }
     }
 
+    // <path_to_array>.META.<uid>.<nonce>.<nonce>.<pos>.<nonce>.<peer>.<sig>
     #[allow(dead_code)]
-    pub(crate) struct ArrayMeta {
+    pub(crate) struct ArrayMetaEntry {
         pub(crate) last_update: u64,
         pub(crate) last_move: u64,
         pub(crate) uid: u64,
         pub(crate) pos: Fraction,
     }
-    impl ArrayMeta {
+    impl ArrayMetaEntry {
+        pub(crate) fn new(uid: u64, last_update: u64, last_move: u64, pos: Fraction) -> Self {
+            Self {
+                uid,
+                last_update,
+                last_move,
+                pos,
+            }
+        }
         /// `path` needs to point into the array root dir
         pub(crate) fn from_path(path: Path) -> Result<Self> {
             let mut path = path.into_iter();
@@ -891,6 +909,15 @@ mod array_util {
                 pos,
                 uid,
             })
+        }
+
+        pub(crate) fn to_path(&self, mut base: PathBuf) -> PathBuf {
+            // uid is expected to be already part of `base`
+            base.prim_u64(self.last_update);
+            base.prim_u64(self.last_move);
+            base.position(&self.pos);
+            base.prim_u64(nonce());
+            base
         }
     }
 }

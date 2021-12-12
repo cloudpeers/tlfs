@@ -691,7 +691,6 @@ mod tests {
     }
 
     #[async_std::test]
-    #[ignore]
     async fn test_orarray_nested_struct() -> Result<()> {
         let packages = r#"
             test {
@@ -715,6 +714,15 @@ mod tests {
         cur.index(0)?.field("title")?;
         let op = cur.assign_str("something that needs to be done")?;
         doc.apply(&op)?;
+
+        let r = doc
+            .cursor()
+            .index(0)?
+            .field("title")?
+            .strs()?
+            .collect::<Result<Vec<_>>>()?;
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0], "something that needs to be done");
 
         let mut cur = doc.cursor();
         cur.index(0)?.field("complete")?;

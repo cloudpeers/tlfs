@@ -508,6 +508,11 @@ impl<'a> Path<'a> {
         }
     }
 
+    /// Returns true if `Self` starts with `base`.
+    pub fn starts_with(&self, base: Self) -> bool {
+        self.0.starts_with(base.0)
+    }
+
     /// Returns the first segment and the path without the first segment.
     pub fn split_first(&self) -> Option<(Segment, Path<'a>)> {
         let first = self.first()?;
