@@ -19,16 +19,20 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+/// Information about the schema of a document.
 #[derive(Debug, Archive, Deserialize, Serialize)]
 #[archive_attr(derive(Debug))]
 pub struct SchemaInfo {
-    name: String,
-    version: u32,
-    hash: [u8; 32],
+    /// Name of the schema.
+    pub name: String,
+    /// Version of the schema.
+    pub version: u32,
+    /// Hash of the schema.
+    pub hash: [u8; 32],
 }
 
 impl SchemaInfo {
-    pub fn new(name: String, version: u32, hash: Hash) -> Self {
+    fn new(name: String, version: u32, hash: Hash) -> Self {
         Self {
             name,
             version,
@@ -576,6 +580,11 @@ impl Doc {
     /// Returns the [`DocId`].
     pub fn id(&self) -> &DocId {
         &self.id
+    }
+
+    /// Returns the schema info of the doc.
+    pub fn schema(&self) -> Result<Ref<SchemaInfo>> {
+        self.frontend.schema(&self.id)
     }
 
     /// Computes the [`CausalContext`] to sync with a remote peer.

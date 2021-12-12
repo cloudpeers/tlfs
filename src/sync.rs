@@ -51,6 +51,7 @@ impl ProtocolName for SyncProtocol {
 #[archive_attr(derive(Debug, CheckBytes))]
 #[repr(C)]
 pub enum SyncRequest {
+    Invite(DocId, String),
     Lenses([u8; 32]),
     Unjoin(DocId, CausalContext),
 }
@@ -59,6 +60,7 @@ pub enum SyncRequest {
 #[archive_attr(derive(Debug, CheckBytes))]
 #[repr(C)]
 pub enum SyncResponse {
+    Invite,
     Lenses(Vec<u8>),
     Unjoin([u8; 32], Causal),
 }
@@ -69,6 +71,16 @@ pub enum SyncResponse {
 pub struct Delta {
     schema: [u8; 32],
     causal: Causal,
+}
+
+/// Invitation to collaborate on a document.
+#[derive(Clone, Debug)]
+#[repr(C)]
+pub struct Invite {
+    /// Document identifier.
+    pub doc: DocId,
+    /// Schema of the document.
+    pub schema: String,
 }
 
 #[derive(Clone, Default)]
@@ -157,6 +169,10 @@ pub struct Behaviour {
     backend: Backend,
     #[behaviour(ignore)]
     sub_local_peers: Vec<mpsc::Sender<()>>,
+    #[behaviour(ignore)]
+    sub_invites: Vec<mpsc::Sender<()>>,
+    #[behaviour(ignore)]
+    invites: Vec<Invite>,
 }
 
 impl Behaviour {
@@ -174,6 +190,8 @@ impl Behaviour {
             buffer: Default::default(),
             broadcast: Broadcast::new(BroadcastConfig::default()),
             sub_local_peers: Default::default(),
+            sub_invites: Default::default(),
+            invites: Default::default(),
         };
         for res in me.backend.frontend().docs() {
             let doc = res?;
@@ -206,6 +224,10 @@ impl Behaviour {
         self.sub_local_peers.push(ch);
     }
 
+    pub fn subscribe_invites(&mut self, ch: mpsc::Sender<()>) {
+        self.sub_invites.push(ch);
+    }
+
     pub fn request_lenses(&mut self, peer_id: &PeerId, hash: Hash) -> RequestId {
         tracing::debug!("request_lenses {} {}", peer_id, hash);
         let peer_id = peer_id.to_libp2p().to_peer_id();
@@ -226,6 +248,17 @@ impl Behaviour {
     pub fn subscribe(&mut self, doc: &DocId) {
         let topic = Topic::new(doc.as_ref());
         self.broadcast.subscribe(topic);
+    }
+
+    pub fn invite(&mut self, peer_id: &PeerId, doc: DocId, schema: String) -> RequestId {
+        tracing::debug!("invite {} {}", peer_id, doc);
+        let peer_id = peer_id.to_libp2p().to_peer_id();
+        let req = SyncRequest::Invite(doc, schema);
+        self.req.send_request(&peer_id, Ref::archive(&req))
+    }
+
+    pub fn clear_invites(&mut self) -> Vec<Invite> {
+        std::mem::take(&mut self.invites)
     }
 
     pub fn broadcast(&mut self, doc: &DocId, causal: Causal) -> Result<()> {
@@ -288,9 +321,19 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
                     channel,
                 } => {
                     tracing::debug!("{:?}", request.as_ref());
-                    use ArchivedSyncRequest::*;
+                    use ArchivedSyncRequest as SyncRequest;
                     match request.as_ref() {
-                        Lenses(hash) => {
+                        SyncRequest::Invite(doc, schema) => {
+                            self.invites.push(Invite {
+                                doc: *doc,
+                                schema: schema.to_string(),
+                            });
+                            notify(&mut self.sub_invites);
+                            let resp = SyncResponse::Invite;
+                            let resp = Ref::archive(&resp);
+                            self.req.send_response(channel, resp).ok();
+                        }
+                        SyncRequest::Lenses(hash) => {
                             let hash = Hash::from(*hash);
                             if let Some(lenses) = self.backend.registry().get(&hash) {
                                 let resp = SyncResponse::Lenses(lenses.as_ref().as_ref().to_vec());
@@ -298,7 +341,7 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
                                 self.req.send_response(channel, resp).ok();
                             }
                         }
-                        Unjoin(doc, ctx) => {
+                        SyncRequest::Unjoin(doc, ctx) => {
                             let peer = unwrap!(libp2p_peer_id(&peer));
                             let causal = unwrap!(self.backend.unjoin(&peer, doc, ctx));
                             let schema =
@@ -316,6 +359,7 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
                     tracing::debug!("{:?}", response.as_ref());
                     use ArchivedSyncResponse::*;
                     match response.as_ref() {
+                        Invite => {}
                         Lenses(lenses) => {
                             let schema = unwrap!(self.backend.registry().register(lenses));
                             for i in 0..self.buffer.len() {

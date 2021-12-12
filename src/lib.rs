@@ -5,7 +5,7 @@
 mod sync;
 mod transport;
 
-pub use crate::sync::{libp2p_peer_id, ToLibp2pKeypair, ToLibp2pPublic};
+pub use crate::sync::{libp2p_peer_id, Invite, ToLibp2pKeypair, ToLibp2pPublic};
 pub use libp2p::Multiaddr;
 pub use tlfs_crdt::{
     Actor, ArchivedSchema, Backend, Can, Causal, Cursor, DocId, Event, Frontend, Keypair, Kind,
@@ -168,6 +168,16 @@ impl Sdk {
                     Command::Broadcast(doc, causal) => {
                         swarm.behaviour_mut().broadcast(&doc, causal).ok();
                     }
+                    Command::Invite(peer, doc, schema) => {
+                        swarm.behaviour_mut().invite(&peer, doc, schema);
+                    }
+                    Command::Invites(tx) => {
+                        let invites = swarm.behaviour_mut().clear_invites();
+                        tx.send(invites).ok();
+                    }
+                    Command::SubscribeInvites(ch) => {
+                        swarm.behaviour_mut().subscribe_invites(ch);
+                    }
                 };
             }
             while swarm.behaviour_mut().poll_backend(cx).is_ready() {}
@@ -269,6 +279,22 @@ impl Sdk {
         rx
     }
 
+    /// Clears and returns pending invitations.
+    pub fn invites(&self) -> impl Future<Output = Vec<Invite>> {
+        let (tx, rx) = oneshot::channel();
+        self.swarm.unbounded_send(Command::Invites(tx)).unwrap();
+        async move { rx.await.unwrap() }
+    }
+
+    /// Subscribe to invitations.
+    pub fn subscribe_invites(&self) -> impl Stream<Item = ()> {
+        let (tx, rx) = mpsc::channel(1);
+        self.swarm
+            .unbounded_send(Command::SubscribeInvites(tx))
+            .unwrap();
+        rx
+    }
+
     /// Returns an iterator of [`DocId`].
     pub fn docs(&self, schema: String) -> impl Iterator<Item = Result<DocId>> + '_ {
         self.frontend.docs_by_schema(schema)
@@ -344,6 +370,20 @@ impl Doc {
             .ok();
         Ok(())
     }
+
+    /// Invite peer. Make sure the peer has at least read permission before
+    /// doing this.
+    pub fn invite(&self, peer: PeerId) -> Result<()> {
+        let schema = self.doc.schema()?;
+        self.swarm
+            .unbounded_send(Command::Invite(
+                peer,
+                *self.id(),
+                schema.as_ref().name.to_string(),
+            ))
+            .unwrap();
+        Ok(())
+    }
 }
 
 enum Command {
@@ -358,6 +398,9 @@ enum Command {
     SubscribeConnectedPeers(mpsc::Sender<()>),
     Subscribe(DocId),
     Broadcast(DocId, Causal),
+    Invite(PeerId, DocId, String),
+    Invites(oneshot::Sender<Vec<Invite>>),
+    SubscribeInvites(mpsc::Sender<()>),
 }
 
 #[cfg(test)]
@@ -424,19 +467,28 @@ mod tests {
             .unwrap()?;
         assert_eq!(value, title);
 
+        let mut local_peers = sdk.subscribe_local_peers();
+
         lenses.push(Lens::RenameProperty("todos".into(), "tasks".into()));
         let packages = vec![Package::new("todoapp".into(), 9, &Lenses::new(lenses))];
         let sdk2 = Sdk::memory(Ref::archive(&packages).as_bytes()).await?;
+        let mut invites = sdk2.subscribe_invites();
 
-        let op = doc
-            .cursor()
-            .say_can(Some(*sdk2.peer_id()), Permission::Write)?;
+        local_peers.next().await;
+        let peer_id = sdk.local_peers().await[0];
+        assert_eq!(peer_id, *sdk2.peer_id());
+        tracing::info!("found local peer");
+
+        let op = doc.cursor().say_can(Some(peer_id), Permission::Write)?;
         doc.apply(op)?;
+        doc.invite(peer_id)?;
 
-        for addr in sdk.addresses().await {
-            sdk2.add_address(*sdk.peer_id(), addr);
-        }
-        let doc2 = sdk2.add_doc(*doc.id(), "todoapp")?;
+        invites.next().await;
+        let invite = &sdk2.invites().await[0];
+        assert_eq!(&invite.doc, doc.id());
+        assert_eq!(&invite.schema, "todoapp");
+        tracing::info!("received invite");
+        let doc2 = sdk2.add_doc(invite.doc, &invite.schema)?;
         let mut sub = doc2.cursor().field("tasks")?.subscribe();
         let mut exit = false;
         while !exit {

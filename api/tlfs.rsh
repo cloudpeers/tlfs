@@ -161,6 +161,11 @@ object Sdk {
     fn remove_doc(doc_id: &string) -> Result<()>;
     /// Subscribes to document changes.
     fn subscribe_docs() -> Stream<i32>;
+
+    // /// Clears the pending invitations.
+    // fn invites() -> Future<Iterator<(string, string)>>;
+    /// Subscribes to invitation notifications.
+    fn subscribe_invites() -> Stream<i32>;
 }
 
 /// Document handle.
@@ -171,6 +176,8 @@ object Doc {
     fn create_cursor() -> Cursor;
     /// Applies a transaction to the document.
     fn apply_causal(causal: Causal);
+    /// Invites a peer to collaborate on a document.
+    fn invite_peer(peer: string) -> Result<()>;
 }
 
 /// A cursor into a document used to construct transactions.

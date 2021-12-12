@@ -91,6 +91,18 @@ impl Sdk {
     pub fn remove_doc(&self, doc_id: &str) -> Result<()> {
         self.0.remove_doc(&doc_id.parse()?)
     }
+
+    pub async fn invites(&self) -> impl Iterator<Item = (String, String)> {
+        self.0
+            .invites()
+            .await
+            .into_iter()
+            .map(|inv| (inv.doc.to_string(), inv.schema))
+    }
+
+    pub fn subscribe_invites(&self) -> impl Stream<Item = i32> {
+        self.0.subscribe_invites().map(|_| 0)
+    }
 }
 
 pub struct Doc(tlfs::Doc);
@@ -106,6 +118,10 @@ impl Doc {
 
     pub fn apply_causal(&self, causal: Box<Causal>) -> Result<()> {
         self.0.apply(causal.0)
+    }
+
+    pub fn invite_peer(&self, peer: String) -> Result<()> {
+        self.0.invite(peer.parse()?)
     }
 }
 
