@@ -50,7 +50,3 @@ tracing-android = "0.1.3"
 
 [dev-dependencies]
 async-std = { version = "1.10.0", features = ["attributes"] }
-
-[patch.crates-io]
-ffi-gen = { path = "../ffigen" }
-ffi-gen-macro = { path = "../ffigen/macro" }
