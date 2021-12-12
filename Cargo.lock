@@ -814,8 +814,6 @@ dependencies = [
 [[package]]
 name = "ffi-gen"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56248e91399147d758a55781cc5f42de64d521dfd9a2d998e9632c596872167c"
 dependencies = [
  "anyhow",
  "genco",
@@ -827,8 +825,6 @@ dependencies = [
 [[package]]
 name = "ffi-gen-macro"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69f84c1f554e4b2e133dfd9f405a0380d3eff9f6245cbc21e363ffc0af56ff26"
 dependencies = [
  "ffi-gen",
  "proc-macro2",

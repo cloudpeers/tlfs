@@ -136,16 +136,16 @@ object Sdk {
     fn add_address(peer_id: &string, addr: &string) -> Result<()>;
     /// Removes a multiaddr of a peer id.
     fn remove_address(peer_id: &string, addr: &string) -> Result<()>;
-    // /// Returns the list of multiaddr the sdk is listening on.
-    // fn addresses() -> Iterator<string>;
+    /// Returns the list of multiaddr the sdk is listening on.
+    fn addresses() -> Future<Iterator<string>>;
     /// Subscribes to listening address changes.
     fn subscribe_addresses() -> Stream<i32>;
-    // /// Returns the local peers discovered via mdns.
-    // fn local_peers() -> Future<Iterator<string>>;
+    /// Returns the local peers discovered via mdns.
+    fn local_peers() -> Future<Iterator<string>>;
     /// Subscribes to local peer changes.
     fn subscribe_local_peers() -> Stream<i32>;
-    // /// Returns the list of connected peers.
-    // fn connected_peers() -> Future<Iterator<string>>;
+    /// Returns the list of connected peers.
+    fn connected_peers() -> Future<Iterator<string>>;
     /// Subscribes to connected peer changes.
     fn subscribe_connected_peers() -> Stream<i32>;
 
@@ -162,8 +162,8 @@ object Sdk {
     /// Subscribes to document changes.
     fn subscribe_docs() -> Stream<i32>;
 
-    // /// Clears the pending invitations.
-    // fn invites() -> Future<Iterator<(string, string)>>;
+    /// Clears the pending invitations.
+    fn invites() -> Future<Iterator<(string, string)>>;
     /// Subscribes to invitation notifications.
     fn subscribe_invites() -> Stream<i32>;
 }
