@@ -30,7 +30,9 @@ class _InheritedSdk extends InheritedWidget {
   bool updateShouldNotify(InheritedWidget oldWidget) => false;
 }
 
+/// Sdk widget handles loading the sdk.
 class Sdk extends StatefulWidget {
+  /// Creates a new Sdk widget.
   const Sdk({
     Key? key,
     required this.appname,
@@ -39,7 +41,11 @@ class Sdk extends StatefulWidget {
     this.debugError,
   }) : super(key: key);
 
+  /// The name of the app is used when creating an application folder in
+  /// the documents directory and when loading the schema from the assets
+  /// folder.
   final String appname;
+  /// Inner widget.
   final Widget child;
 
   final bool debug;
@@ -56,6 +62,7 @@ class Sdk extends StatefulWidget {
   }
 }
 
+/// State for the Sdk widget.
 class SdkState extends State<Sdk> {
   tlfs.Sdk? _sdk;
   String? _err;
@@ -88,9 +95,9 @@ class SdkState extends State<Sdk> {
         child: widget.child,
       );
     } else if (_err != null) {
-      return SdkError(msg: _err!);
+      return _SdkError(msg: _err!);
     } else {
-      return SdkLoading();
+      return _SdkLoading();
     }
   }
 
@@ -103,7 +110,7 @@ class SdkState extends State<Sdk> {
   }
 }
 
-class SdkLoading extends StatelessWidget {
+class _SdkLoading extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -130,8 +137,8 @@ class SdkLoading extends StatelessWidget {
   }
 }
 
-class SdkError extends StatelessWidget {
-  const SdkError({
+class _SdkError extends StatelessWidget {
+  const _SdkError({
     Key? key,
     required this.msg,
   }) : super(key: key);
