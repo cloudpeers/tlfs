@@ -282,25 +282,29 @@ impl<'a> Cursor<'a> {
 
     /// Returns the length of the array.
     pub fn len(&self) -> Result<u32> {
-        let mut distinct_positions: BTreeSet<_> = Default::default();
         if let ArchivedSchema::Array(_) = &self.schema {
             let mut path = self.path.clone();
             path.prim_str(array_util::ARRAY_VALUES);
 
-            for e in self.crdt.scan_path(self.path.as_path()) {
-                let p = Path::new(&e);
-                let cano = p.strip_prefix(self.path.as_path())?;
-                if let Some(crate::Segment::Position(x)) = cano.first() {
-                    distinct_positions.insert(x);
-                } else {
-                    anyhow::bail!("Unexpected Array<_> layout");
-                }
-            }
-            self.path.pop();
-            Ok(distinct_positions.len() as u32)
+            let res = self.pos_iter(Some(path)).collect::<BTreeSet<_>>().len();
+            Ok(res as u32)
         } else {
             anyhow::bail!("not an Array<_>");
         }
+    }
+
+    fn pos_iter(&self, path: Option<PathBuf>) -> impl Iterator<Item = Fraction> + '_ {
+        let path = path.unwrap_or_else(|| self.path.clone());
+        self.crdt.scan_path(path.as_path()).filter_map(move |e| {
+            let p = Path::new(&e);
+            p.strip_prefix(path.as_path())
+                .ok()
+                .and_then(|e| e.first())
+                .and_then(|x| match x {
+                    crate::Segment::Position(x) => Some(x),
+                    _ => None,
+                })
+        })
     }
 
     /// Returns if the array is empty.
