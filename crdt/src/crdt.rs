@@ -759,6 +759,7 @@ mod tests {
         let op = cur.assign_str("something that needs to be done")?;
         doc.apply(&op)?;
 
+        assert_eq!(doc.cursor().len()?, 1);
         let r = doc
             .cursor()
             .index(0)?
@@ -773,6 +774,7 @@ mod tests {
         let op = cur.enable()?;
         doc.apply(&op)?;
 
+        assert_eq!(doc.cursor().len()?, 1);
         let r = doc
             .cursor()
             .index(0)?
