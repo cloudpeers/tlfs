@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use crate::acl::{Actor, Can, Permission, Policy};
 use crate::crdt::{Causal, Crdt, DotStore};
 use crate::crypto::Keypair;
@@ -244,11 +246,21 @@ impl<'a> Cursor<'a> {
 
     /// Returns the length of the array.
     pub fn len(&mut self) -> Result<u32> {
+        let mut distinct_positions: BTreeSet<_> = Default::default();
         if let ArchivedSchema::Array(_) = &self.schema {
             self.path.prim_str(array_util::ARRAY_VALUES);
-            let res = self.count_path(self.path.as_path());
+
+            for e in self.crdt.scan_path(self.path.as_path()) {
+                let p = Path::new(&e);
+                let cano = p.strip_prefix(self.path.as_path())?;
+                if let Some(crate::Segment::Position(x)) = cano.first() {
+                    distinct_positions.insert(x);
+                } else {
+                    anyhow::bail!("Unexpected Array<_> layout");
+                }
+            }
             self.path.pop();
-            res
+            Ok(distinct_positions.len() as u32)
         } else {
             anyhow::bail!("not an Array<_>");
         }
@@ -272,14 +284,6 @@ impl<'a> Cursor<'a> {
         } else {
             Err(anyhow!("not a struct"))
         }
-    }
-
-    fn count_path(&self, path: Path) -> Result<u32> {
-        let mut i = 0;
-        for _ in self.crdt.scan_path(path) {
-            i += 1;
-        }
-        Ok(i)
     }
 
     fn nonce(&self, path: &mut PathBuf) {
