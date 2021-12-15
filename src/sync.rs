@@ -19,6 +19,7 @@ use libp2p::{
 use libp2p_broadcast::{Broadcast, BroadcastConfig, BroadcastEvent, Topic};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::{
+    collections::BTreeSet,
     convert::TryInto,
     io,
     pin::Pin,
@@ -213,7 +214,7 @@ impl Behaviour {
             .remove_address(&peer.to_libp2p().to_peer_id(), addr);
     }
 
-    pub fn local_peers(&self) -> Vec<PeerId> {
+    pub fn local_peers(&self) -> BTreeSet<PeerId> {
         self.mdns
             .discovered_nodes()
             .filter_map(|peer| libp2p_peer_id(peer).ok())
