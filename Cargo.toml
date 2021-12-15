@@ -16,22 +16,22 @@ edition = "2021"
 lto = true
 
 [dependencies]
-anyhow = "1.0.44"
-async-trait = "0.1.51"
-bytecheck = "0.6.5"
+anyhow = "1.0.51"
+async-trait = "0.1.52"
+bytecheck = "0.6.7"
 ed25519-dalek = "1.0.1"
 fnv = "1.0.7"
 futures = "0.3.17"
 libp2p-broadcast = "0.7.0"
 log-panics = "2.0.0"
-rkyv = "0.7.19"
+rkyv = "0.7.26"
 tlfs-crdt = { version = "0.1.0", path = "crdt" }
 tracing = "0.1.29"
 tracing-log = "0.1.2"
 tracing-subscriber = { version = "0.3.3", features = ["env-filter"] }
 
 [dependencies.libp2p]
-version = "0.41"
+version = "0.41.0"
 default-features = false
 features = [
     "mdns",
@@ -46,7 +46,7 @@ features = [
 async-global-executor = "2.0.2"
 
 [target.'cfg(target_os = "android")'.dependencies]
-tracing-android = "0.1.3"
+tracing-android = "0.1.6"
 
 [dev-dependencies]
 async-std = { version = "1.10.0", features = ["attributes"] }

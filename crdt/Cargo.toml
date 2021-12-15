@@ -4,20 +4,20 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0.44"
+anyhow = "1.0.51"
 base64 = "0.13.0"
-blake3 = "1.0.0"
-bytecheck = "0.6.5"
+blake3 = "1.2.0"
+bytecheck = "0.6.7"
 crepe = "0.1.5"
 ed25519-dalek = "1.0.1"
 futures = "0.3.17"
 getrandom = "0.2.3"
 hex = "0.4.3"
 parking_lot = "0.11.2"
-rkyv = { version = "0.7.19", features = ["validation"] }
+rkyv = { version = "0.7.26", features = ["validation"] }
 smallvec = "1.7.0"
 tracing = "0.1.29"
-vec-collections = { version = "0.4.1", features = ["radixtree", "rkyv", "rkyv_validated"] }
+vec-collections = { version = "0.4.3", features = ["radixtree", "rkyv", "rkyv_validated"] }
 
 [dev-dependencies]
 async-std = { version = "1.10.0", features = ["attributes"] }

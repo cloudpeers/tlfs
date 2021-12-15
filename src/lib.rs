@@ -24,6 +24,7 @@ use libp2p::{
     swarm::{AddressScore, SwarmEvent},
     Swarm,
 };
+use std::collections::BTreeSet;
 use std::task::Poll;
 
 /// Main entry point for `tlfs`.
@@ -246,7 +247,7 @@ impl Sdk {
     }
 
     /// Returns the local peers.
-    pub fn local_peers(&self) -> impl Future<Output = Vec<PeerId>> {
+    pub fn local_peers(&self) -> impl Future<Output = BTreeSet<PeerId>> {
         let (tx, rx) = oneshot::channel();
         self.swarm.unbounded_send(Command::LocalPeers(tx)).unwrap();
         async move { rx.await.unwrap() }
@@ -392,7 +393,7 @@ enum Command {
     RemoveAddress(PeerId, Multiaddr),
     Addresses(oneshot::Sender<Vec<Multiaddr>>),
     SubscribeAddresses(mpsc::Sender<()>),
-    LocalPeers(oneshot::Sender<Vec<PeerId>>),
+    LocalPeers(oneshot::Sender<BTreeSet<PeerId>>),
     SubscribeLocalPeers(mpsc::Sender<()>),
     ConnectedPeers(oneshot::Sender<Vec<PeerId>>),
     SubscribeConnectedPeers(mpsc::Sender<()>),
@@ -475,7 +476,7 @@ mod tests {
         let mut invites = sdk2.subscribe_invites();
 
         local_peers.next().await;
-        let peer_id = sdk.local_peers().await[0];
+        let peer_id = sdk.local_peers().await.into_iter().next().unwrap();
         assert_eq!(peer_id, *sdk2.peer_id());
         tracing::info!("found local peer");
 
