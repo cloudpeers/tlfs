@@ -142,9 +142,7 @@ impl ArchivedSchema {
                             path.next()?.prim_u64()?;
                             path.next()?.prim_u64()?;
                             path.next()?.position()?;
-                            path.next()?.nonce()?;
-                            path.next()?.peer()?;
-                            path.next()?.sig()?;
+                            path.next()?.prim_u64()?;
                             Some(path.next().is_none())
                         }
                         _ => Some(false),
