@@ -330,6 +330,7 @@ impl Crdt {
                 .policy()
                 .is_some()
             {
+                tracing::info!("join_policy: {}", path);
                 self.store.insert(path);
             }
         }
