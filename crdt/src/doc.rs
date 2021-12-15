@@ -279,6 +279,7 @@ impl Backend {
             let info = me.docs.schema(&id)?;
             let (version, hash) = me.registry.lookup(&info.as_ref().name).unwrap();
             if version > info.as_ref().version {
+                tracing::info!("migrating document {} from {} to {}", id, info.as_ref().version, version);
                 let lenses = me.registry.get(&hash).unwrap();
                 let end = info.as_ref().version as usize;
                 let curr_lenses = LensesRef::new(&lenses.lenses().lenses()[..end]);
