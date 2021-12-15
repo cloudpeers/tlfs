@@ -119,7 +119,10 @@ impl Docs {
         let mut key = [0; 33];
         key[..32].copy_from_slice(id.as_ref());
         key[32] = 0;
-        let schema = self.0.get(key)?.ok_or_else(|| anyhow!("doc {} doesn't exist", id))?;
+        let schema = self
+            .0
+            .get(key)?
+            .ok_or_else(|| anyhow!("doc {} doesn't exist", id))?;
         Ok(Ref::new(schema))
     }
 
@@ -286,7 +289,12 @@ impl Backend {
             let info = me.docs.schema(&id)?;
             let (version, hash) = me.registry.lookup(&info.as_ref().name).unwrap();
             if version > info.as_ref().version {
-                tracing::info!("migrating document {} from {} to {}", id, info.as_ref().version, version);
+                tracing::info!(
+                    "migrating document {} from {} to {}",
+                    id,
+                    info.as_ref().version,
+                    version
+                );
                 let lenses = me.registry.get(&hash).unwrap();
                 let end = info.as_ref().version as usize;
                 let curr_lenses = LensesRef::new(&lenses.lenses().lenses()[..end]);
