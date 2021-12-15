@@ -298,7 +298,9 @@ impl NetworkBehaviourEventProcess<BroadcastEvent> for Behaviour {
             Subscribed(peer, topic) => {
                 let peer = unwrap!(libp2p_peer_id(&peer));
                 let doc = DocId::new(topic.as_ref().try_into().unwrap());
-                unwrap!(self.request_unjoin(&peer, doc));
+                if unwrap!(self.backend.contains(&doc)) {
+                    unwrap!(self.request_unjoin(&peer, doc));
+                }
             }
             Received(peer, topic, msg) => {
                 let peer = unwrap!(libp2p_peer_id(&peer));
@@ -344,9 +346,9 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
                         }
                         SyncRequest::Unjoin(doc, ctx) => {
                             let peer = unwrap!(libp2p_peer_id(&peer));
-                            let causal = unwrap!(self.backend.unjoin(&peer, doc, ctx));
                             let schema =
-                                self.backend.frontend().schema(doc).unwrap().as_ref().hash();
+                                unwrap!(self.backend.frontend().schema(doc)).as_ref().hash();
+                            let causal = unwrap!(self.backend.unjoin(&peer, doc, ctx));
                             let resp = SyncResponse::Unjoin(schema.into(), causal);
                             let resp = Ref::archive(&resp);
                             self.req.send_response(channel, resp).ok();
