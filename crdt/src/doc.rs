@@ -108,11 +108,18 @@ impl Docs {
             })
     }
 
+    pub fn contains(&self, id: &DocId) -> Result<bool> {
+        let mut key = [0; 33];
+        key[..32].copy_from_slice(id.as_ref());
+        key[32] = 0;
+        Ok(self.0.get(key)?.is_some())
+    }
+
     pub fn schema(&self, id: &DocId) -> Result<Ref<SchemaInfo>> {
         let mut key = [0; 33];
         key[..32].copy_from_slice(id.as_ref());
         key[32] = 0;
-        let schema = self.0.get(key)?.unwrap();
+        let schema = self.0.get(key)?.ok_or_else(|| anyhow!("doc {} doesn't exist", id))?;
         Ok(Ref::new(schema))
     }
 
@@ -329,6 +336,11 @@ impl Backend {
             self.engine.add_policy(path);
         }
         self.engine.update_acl()
+    }
+
+    /// Checks if the store contains a document.
+    pub fn contains(&self, doc: &DocId) -> Result<bool> {
+        self.docs.contains(doc)
     }
 
     /// Applies a remote change received from a peer.
