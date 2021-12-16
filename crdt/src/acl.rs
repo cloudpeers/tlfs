@@ -305,6 +305,16 @@ impl Acl {
         Ok(Self(BlobMap::load(storage, name)?))
     }
 
+    pub fn active_peer(&self, peer: &PeerId) -> bool {
+        for (key, _) in self.0.iter() {
+            let peer2 = Path::new(&key).child().unwrap().first().unwrap().peer().unwrap();
+            if *peer == peer2 {
+                return true;
+            }
+        }
+        false
+    }
+
     pub fn subscribe(&self, doc: &DocId) -> BoxStream<'static, Diff<u8, Arc<[u8]>>> {
         let mut path = PathBuf::new();
         path.doc(doc);
@@ -395,6 +405,10 @@ impl Engine {
             policy: Default::default(),
             acl,
         })
+    }
+
+    pub fn active_peer(&self, peer: &PeerId) -> bool {
+        self.acl.active_peer(peer)
     }
 
     pub fn add_policy(&mut self, path: Path) {
