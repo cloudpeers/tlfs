@@ -13,13 +13,16 @@ use libp2p::{
         self, ProtocolName, ProtocolSupport, RequestId, RequestResponse, RequestResponseCodec,
         RequestResponseConfig,
     },
-    swarm::NetworkBehaviourEventProcess,
+    swarm::{
+        dial_opts::{DialOpts, PeerCondition},
+        NetworkBehaviour, NetworkBehaviourAction, NetworkBehaviourEventProcess, PollParameters,
+    },
     Multiaddr, NetworkBehaviour,
 };
 use libp2p_broadcast::{Broadcast, BroadcastConfig, BroadcastEvent, Topic};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, VecDeque},
     convert::TryInto,
     io,
     pin::Pin,
@@ -156,7 +159,7 @@ type RequestResponseEvent =
     request_response::RequestResponseEvent<Ref<SyncRequest>, Ref<SyncResponse>>;
 
 #[derive(NetworkBehaviour)]
-#[behaviour(event_process = true)]
+#[behaviour(event_process = true, poll_method = "poll_dial")]
 pub struct Behaviour {
     req: RequestResponse<SyncCodec>,
     broadcast: Broadcast,
@@ -174,6 +177,8 @@ pub struct Behaviour {
     sub_invites: Vec<mpsc::Sender<()>>,
     #[behaviour(ignore)]
     invites: Vec<Invite>,
+    #[behaviour(ignore)]
+    dial: VecDeque<PeerId>,
 }
 
 impl Behaviour {
@@ -193,6 +198,7 @@ impl Behaviour {
             sub_local_peers: Default::default(),
             sub_invites: Default::default(),
             invites: Default::default(),
+            dial: Default::default(),
         };
         for res in me.backend.frontend().docs() {
             let doc = res?;
@@ -299,6 +305,28 @@ impl Behaviour {
             self.request_lenses(&peer, schema);
         }
         Ok(())
+    }
+
+    fn poll_dial(
+        &mut self,
+        _cx: &mut Context,
+        _params: &mut impl PollParameters,
+    ) -> Poll<
+        NetworkBehaviourAction<
+            <Self as NetworkBehaviour>::OutEvent,
+            <Self as NetworkBehaviour>::ProtocolsHandler,
+        >,
+    > {
+        if let Some(peer) = self.dial.pop_front() {
+            Poll::Ready(NetworkBehaviourAction::Dial {
+                opts: DialOpts::peer_id(peer.to_libp2p().to_peer_id())
+                    .condition(PeerCondition::Disconnected)
+                    .build(),
+                handler: self.new_handler(),
+            })
+        } else {
+            Poll::Pending
+        }
     }
 }
 
@@ -427,7 +455,18 @@ impl NetworkBehaviourEventProcess<ping::Event> for Behaviour {
 }
 
 impl NetworkBehaviourEventProcess<mdns::MdnsEvent> for Behaviour {
-    fn inject_event(&mut self, _event: mdns::MdnsEvent) {
+    fn inject_event(&mut self, event: mdns::MdnsEvent) {
+        if let mdns::MdnsEvent::Discovered(iter) = event {
+            for (peer, _) in iter {
+                if let Ok(peer) = libp2p_peer_id(&peer) {
+                    // TODO: handle becomes active after discovery
+                    if self.backend.active_peer(&peer) {
+                        tracing::info!("dialing active peer {}", peer);
+                        self.dial.push_back(peer);
+                    }
+                }
+            }
+        }
         notify(&mut self.sub_local_peers);
     }
 }

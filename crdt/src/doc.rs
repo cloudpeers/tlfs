@@ -351,6 +351,11 @@ impl Backend {
         self.docs.contains(doc)
     }
 
+    /// Checks if a peer is an active peer.
+    pub fn active_peer(&self, peer: &PeerId) -> bool {
+        self.engine.active_peer(peer)
+    }
+
     /// Applies a remote change received from a peer.
     pub fn join(
         &mut self,
