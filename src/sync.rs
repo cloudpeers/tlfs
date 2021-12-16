@@ -428,8 +428,9 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
                             let schema = Hash::from(*schema);
                             let peer = unwrap!(libp2p_peer_id(&peer));
                             let causal = unwrap!(causal.deserialize(&mut rkyv::Infallible));
-                            let res = self.unjoin_req.remove(&request_id)
-                                .ok_or_else(|| anyhow::anyhow!("received response without request"));
+                            let res = self.unjoin_req.remove(&request_id).ok_or_else(|| {
+                                anyhow::anyhow!("received response without request")
+                            });
                             let doc = unwrap!(res);
                             unwrap!(self.inject_causal(peer, doc, schema, causal));
                         }
