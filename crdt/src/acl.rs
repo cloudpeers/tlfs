@@ -307,7 +307,13 @@ impl Acl {
 
     pub fn active_peer(&self, peer: &PeerId) -> bool {
         for (key, _) in self.0.iter() {
-            let peer2 = Path::new(&key).child().unwrap().first().unwrap().peer().unwrap();
+            let peer2 = Path::new(&key)
+                .child()
+                .unwrap()
+                .first()
+                .unwrap()
+                .peer()
+                .unwrap();
             if *peer == peer2 {
                 return true;
             }
