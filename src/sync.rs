@@ -287,6 +287,7 @@ impl Behaviour {
             causal,
         };
         let delta = Ref::archive(&delta);
+        tracing::debug!("sending broadcast");
         self.broadcast.broadcast(&topic, delta.as_bytes().into());
         Ok(())
     }
@@ -337,17 +338,23 @@ impl NetworkBehaviourEventProcess<BroadcastEvent> for Behaviour {
             Subscribed(peer, topic) => {
                 let peer = unwrap!(libp2p_peer_id(&peer));
                 let doc = DocId::new(topic.as_ref().try_into().unwrap());
+                tracing::debug!("{} subscribed to {}", peer, doc);
                 if unwrap!(self.backend.contains(&doc)) {
                     unwrap!(self.request_unjoin(&peer, doc));
                 }
             }
             Received(peer, topic, msg) => {
+                tracing::debug!("received broadcast");
                 let peer = unwrap!(libp2p_peer_id(&peer));
                 let doc = DocId::new(topic.as_ref().try_into().unwrap());
                 let delta = unwrap!(unwrap!(Ref::<Delta>::checked(&msg)).to_owned());
                 unwrap!(self.inject_causal(peer, doc, delta.schema.into(), delta.causal));
             }
-            Unsubscribed(_peer, _topic) => {}
+            Unsubscribed(peer, topic) => {
+                let peer = unwrap!(libp2p_peer_id(&peer));
+                let doc = DocId::new(topic.as_ref().try_into().unwrap());
+                tracing::debug!("{} unsubscribed from {}", peer, doc);
+            }
         }
     }
 }
@@ -362,7 +369,7 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
                     request,
                     channel,
                 } => {
-                    tracing::debug!("{:?}", request.as_ref());
+                    tracing::debug!("req {:?}", request.as_ref());
                     use ArchivedSyncRequest as SyncRequest;
                     match request.as_ref() {
                         SyncRequest::Invite(doc, schema) => {
@@ -398,7 +405,7 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
                     request_id,
                     response,
                 } => {
-                    tracing::debug!("{:?}", response.as_ref());
+                    tracing::debug!("resp {:?}", response.as_ref());
                     use ArchivedSyncResponse::*;
                     match response.as_ref() {
                         Invite => {}
@@ -421,7 +428,9 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
                             let schema = Hash::from(*schema);
                             let peer = unwrap!(libp2p_peer_id(&peer));
                             let causal = unwrap!(causal.deserialize(&mut rkyv::Infallible));
-                            let doc = self.unjoin_req.remove(&request_id).unwrap();
+                            let res = self.unjoin_req.remove(&request_id)
+                                .ok_or_else(|| anyhow::anyhow!("received response without request"));
+                            let doc = unwrap!(res);
                             unwrap!(self.inject_causal(peer, doc, schema, causal));
                         }
                     }
