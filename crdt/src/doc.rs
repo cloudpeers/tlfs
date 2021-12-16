@@ -359,6 +359,9 @@ impl Backend {
         causal_schema: &Hash,
         mut causal: Causal,
     ) -> Result<()> {
+        if causal.is_empty() {
+            return Ok(());
+        }
         let doc_schema = self.docs.schema(doc)?;
         let doc_lenses = self.registry.get(&doc_schema.as_ref().hash.into()).unwrap();
         let lenses = self
