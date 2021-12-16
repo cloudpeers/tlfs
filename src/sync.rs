@@ -105,7 +105,10 @@ impl RequestResponseCodec for SyncCodec {
         self.buffer.clear();
         io.read_to_end(&mut self.buffer).await?;
         Ref::checked(&self.buffer).map_err(|err| {
-            io::Error::new(io::ErrorKind::Other, format!("read_request: {} {:?}", err, &self.buffer))
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("read_request: {} {:?}", err, &self.buffer),
+            )
         })
     }
 
@@ -116,7 +119,10 @@ impl RequestResponseCodec for SyncCodec {
         self.buffer.clear();
         io.read_to_end(&mut self.buffer).await?;
         Ref::checked(&self.buffer).map_err(|err| {
-            io::Error::new(io::ErrorKind::Other, format!("read_response: {} {:?}", err, &self.buffer))
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("read_response: {} {:?}", err, &self.buffer),
+            )
         })
     }
 
@@ -260,7 +266,7 @@ impl Behaviour {
         let mut peers = vec![];
         if let Some(iter) = self.broadcast.peers(&topic) {
             for peer in iter {
-                if let Ok(peer) = libp2p_peer_id(&peer) {
+                if let Ok(peer) = libp2p_peer_id(peer) {
                     peers.push(peer);
                 }
             }
@@ -416,7 +422,7 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
                             self.buffer.retain(|(schema, doc, peer, causal)| {
                                 if *schema == schema2 {
                                     if let Err(err) =
-                                        self.backend.join(&peer, &doc, &schema, causal.clone())
+                                        self.backend.join(peer, doc, schema, causal.clone())
                                     {
                                         tracing::error!("{}", err);
                                     }
