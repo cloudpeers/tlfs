@@ -13,7 +13,7 @@ use vec_collections::radix_tree::{AbstractRadixTree, AbstractRadixTreeMut, IterK
 
 #[derive(Clone, Default, Eq, PartialEq, Archive, Deserialize, Serialize)]
 #[archive(bound(serialize = "__S: rkyv::ser::ScratchSpace + rkyv::ser::Serializer"))]
-#[archive_attr(derive(Debug, CheckBytes))]
+#[archive_attr(derive(CheckBytes))]
 #[archive_attr(check_bytes(
     bound = "__C: rkyv::validation::ArchiveContext, <__C as rkyv::Fallible>::Error: std::error::Error"
 ))]
@@ -74,9 +74,37 @@ impl FromIterator<PathBuf> for DotStore {
     }
 }
 
+impl std::fmt::Debug for DotStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut m = f.debug_map();
+        for p in self.iter() {
+            let path = p.as_path();
+            m.entry(&path.dot(), &path);
+        }
+        m.finish()
+    }
+}
+
+impl ArchivedDotStore {
+    pub fn iter(&self) -> impl Iterator<Item = PathBuf> + '_ {
+        self.0.iter().map(|path| Path::new(&path.0).to_owned())
+    }
+}
+
+impl std::fmt::Debug for ArchivedDotStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut m = f.debug_map();
+        for p in self.iter() {
+            let path = p.as_path();
+            m.entry(&path.dot(), &path);
+        }
+        m.finish()
+    }
+}
+
 /// Represents the state of a crdt.
 #[derive(Clone, Default, Eq, PartialEq, Archive, Deserialize, Serialize)]
-#[archive_attr(derive(Debug, CheckBytes))]
+#[archive_attr(derive(CheckBytes))]
 #[repr(C)]
 pub struct CausalContext {
     /// Store dots. These are the dots in the store.
@@ -126,10 +154,19 @@ impl std::fmt::Debug for CausalContext {
     }
 }
 
+impl std::fmt::Debug for ArchivedCausalContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct("CausalContext")
+            .field("store", &self.store)
+            .field("expired", &self.expired)
+            .finish()
+    }
+}
+
 /// Represents a state transition of a crdt. Multiple state transitions can be combined
 /// together into an atomic transaction.
 #[derive(Clone, Eq, PartialEq, Archive, Deserialize, Serialize, Default)]
-#[archive_attr(derive(Debug, CheckBytes))]
+#[archive_attr(derive(CheckBytes))]
 #[repr(C)]
 pub struct Causal {
     pub(crate) store: DotStore,
@@ -225,14 +262,12 @@ impl std::fmt::Debug for Causal {
     }
 }
 
-impl std::fmt::Debug for DotStore {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut m = f.debug_map();
-        for p in self.iter() {
-            let path = p.as_path();
-            m.entry(&path.dot(), &path);
-        }
-        m.finish()
+impl std::fmt::Debug for ArchivedCausal {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct("Causal")
+            .field("store", &self.store)
+            .field("expired", &self.expired)
+            .finish()
     }
 }
 
