@@ -74,6 +74,18 @@ impl<T: Archive> AsRef<Archived<T>> for Ref<T> {
     }
 }
 
+impl<T: Archive> From<&Vec<u8>> for Ref<T> {
+    fn from(bytes: &Vec<u8>) -> Self {
+        Self::from(bytes.as_slice())
+    }
+}
+
+impl<T: Archive> From<&[u8]> for Ref<T> {
+    fn from(bytes: &[u8]) -> Self {
+        Self::new(bytes.into())
+    }
+}
+
 impl<T> From<Ref<T>> for Arc<[u8]> {
     fn from(r: Ref<T>) -> Self {
         r.bytes
