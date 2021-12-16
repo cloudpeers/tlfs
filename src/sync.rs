@@ -249,6 +249,17 @@ impl Behaviour {
     pub fn subscribe(&mut self, doc: &DocId) {
         let topic = Topic::new(doc.as_ref());
         self.broadcast.subscribe(topic);
+        let mut peers = vec![];
+        if let Some(iter) = self.broadcast.peers(&topic) {
+            for peer in iter {
+                if let Ok(peer) = libp2p_peer_id(&peer) {
+                    peers.push(peer);
+                }
+            }
+        }
+        for peer in peers {
+            unwrap!(self.request_unjoin(&peer, *doc));
+        }
     }
 
     pub fn invite(&mut self, peer_id: &PeerId, doc: DocId, schema: String) -> RequestId {

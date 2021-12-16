@@ -147,6 +147,11 @@ impl Causal {
         &self.expired
     }
 
+    /// Returns true if there are no dots.
+    pub fn is_empty(&self) -> bool {
+        self.store.is_empty() && self.expired.is_empty()
+    }
+
     /// Computes the [`CausalContext`] of this transaction.
     pub fn ctx(&self) -> CausalContext {
         let mut ctx = CausalContext::new();
