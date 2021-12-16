@@ -375,13 +375,19 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent> for Behaviour {
                     match response.as_ref() {
                         Invite => {}
                         Lenses(lenses) => {
-                            let schema = unwrap!(self.backend.registry().register(lenses));
-                            for i in 0..self.buffer.len() {
-                                if self.buffer[i].0 == schema {
-                                    let (schema, doc, peer, causal) = self.buffer.remove(i);
-                                    unwrap!(self.backend.join(&peer, &doc, &schema, causal));
+                            let schema2 = unwrap!(self.backend.registry().register(lenses));
+                            self.buffer.retain(|(schema, doc, peer, causal)| {
+                                if *schema == schema2 {
+                                    if let Err(err) =
+                                        self.backend.join(&peer, &doc, &schema, causal.clone())
+                                    {
+                                        tracing::error!("{}", err);
+                                    }
+                                    false
+                                } else {
+                                    true
                                 }
-                            }
+                            });
                         }
                         Unjoin(schema, causal) => {
                             let schema = Hash::from(*schema);
