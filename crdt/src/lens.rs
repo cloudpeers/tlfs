@@ -80,11 +80,13 @@ pub enum Lens {
 
 impl Lens {
     /// Wraps the [`Lens`] in a [`Lens::LensIn`].
+    #[must_use]
     pub fn lens_in(self, prop: &str) -> Self {
         Self::LensIn(prop.into(), Box::new(self))
     }
 
     /// Wraps the [`Lens`] in a [`Lens::LensMapValue`].
+    #[must_use]
     pub fn lens_map_value(self) -> Self {
         Self::LensMapValue(Box::new(self))
     }
@@ -135,6 +137,7 @@ pub enum LensRef<'a> {
 
 impl<'a> LensRef<'a> {
     /// Reverse the [`ArchivedLens`].
+    #[must_use]
     pub fn reverse(self) -> Self {
         match self {
             Self::Make(kind) => Self::Destroy(kind),
@@ -151,6 +154,7 @@ impl<'a> LensRef<'a> {
     }
 
     /// Reverses the [`ArchivedLens`] if `rev` is true.
+    #[must_use]
     pub fn maybe_reverse(self, rev: bool) -> Self {
         if rev {
             self.reverse()
