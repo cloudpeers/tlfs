@@ -50,3 +50,6 @@ tracing-android = "0.1.6"
 
 [dev-dependencies]
 async-std = { version = "1.10.0", features = ["attributes"] }
+
+[patch.crates-io]
+libp2p = { git = "https://github.com/cloudpeers/rust-libp2p", branch = "tlfs" }
