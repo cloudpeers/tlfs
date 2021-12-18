@@ -14,15 +14,15 @@ jobs:
         - target: x86_64-unknown-linux-gnu
           host: ubuntu-latest
           file: tlfsc
-          tar: tar
+          tar: tar --zstd
         - target: x86_64-apple-darwin
           host: macos-latest
           file: tlfsc
-          tar: gtar
-       # - target: x86_64-pc-windows-msvc
-       #   host: windows-latest
-       #   file: tlfsc.exe
-       #   tar: "\"C:\\Program Files\\Git\\usr\\bin\\tar.exe\""
+          tar: gtar --zstd
+        - target: x86_64-pc-windows-msvc
+          host: windows-latest
+          file: tlfsc.exe
+          tar: "\"C:\\Program Files\\Git\\usr\\bin\\tar.exe\" -I zstd"
     runs-on: ${{ matrix.platform.host }}
     steps:
     - name: Checkout sources
@@ -37,13 +37,15 @@ jobs:
 
     - name: Create artefact
       working-directory: target/release
-      run: ${{ matrix.platform.tar }} --zstd -cf tlfsc.${{ matrix.platform.target }}.tar.zst ${{ matrix.platform.file }}
+      shell: bash
+      run: ${{ matrix.platform.tar }} -cf tlfsc.${{ matrix.platform.target }}.tar.zst ${{ matrix.platform.file }}
 
     - name: Upload tlfsc
       working-directory: target/release
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         TAG: ${{ github.event.release.tag_name }}
+      shell: bash
       run: gh release upload $TAG tlfsc.${{ matrix.platform.target }}.tar.zst -R $GITHUB_REPOSITORY
 
   libtlfs:
@@ -54,15 +56,15 @@ jobs:
         - target: x86_64-unknown-linux-gnu
           host: ubuntu-latest
           file: libtlfs.so
-          tar: tar
+          tar: tar --zstd
         - target: x86_64-apple-darwin
           host: macos-latest
           file: libtlfs.dylib
-          tar: gtar
-        #- target: x86_64-pc-windows-msvc
-        #  host: windows-latest
-        #  file: libtlfs.dll
-        #  tar: "\"C:\\Program Files\\Git\\usr\\bin\\tar.exe\""
+          tar: gtar --zstd
+        - target: x86_64-pc-windows-msvc
+          host: windows-latest
+          file: tlfs.dll
+          tar: "\"C:\\Program Files\\Git\\usr\\bin\\tar.exe\" -I zstd"
         - target: aarch64-linux-android
           host: ubuntu-latest
           file: libtlfs.so
@@ -100,11 +102,13 @@ jobs:
 
     - name: Create artefact
       working-directory: target/${{ matrix.platform.target }}/release
-      run: ${{ matrix.platform.tar }} --zstd -cf libtlfs.${{ matrix.platform.target }}.tar.zst ${{ matrix.platform.file }}
+      shell: bash
+      run: ${{ matrix.platform.tar }} -cf libtlfs.${{ matrix.platform.target }}.tar.zst ${{ matrix.platform.file }}
 
     - name: Upload tlfs
       working-directory: target/${{ matrix.platform.target }}/release
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         TAG: ${{ github.event.release.tag_name }}
+      shell: bash
       run: gh release upload $TAG libtlfs.${{ matrix.platform.target }}.tar.zst -R $GITHUB_REPOSITORY
