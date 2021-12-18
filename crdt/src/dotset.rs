@@ -96,6 +96,7 @@ impl DotSet {
     }
 
     /// Returns a new [`DotSet`] containing all [`Dot`]s not in [`ArchivedDotSet`].
+    #[must_use]
     pub fn difference(&self, other: &ArchivedDotSet) -> DotSet {
         self.iter()
             .filter(|dot| !other.0.contains_key(dot))
@@ -104,6 +105,7 @@ impl DotSet {
     }
 
     /// Returns a new [`DotSet`] containing all [`Dot`]s in [`DotSet`].
+    #[must_use]
     pub fn intersection(&self, other: &Self) -> DotSet {
         self.iter()
             .filter(|dot| other.contains(dot))

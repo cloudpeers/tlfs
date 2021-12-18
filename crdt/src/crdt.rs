@@ -212,6 +212,7 @@ impl Causal {
     }
 
     /// Returns the difference of a transaction and a [`CausalContext`].
+    #[must_use]
     pub fn unjoin(&self, ctx: &CausalContext) -> Self {
         let mut expired = DotStore::new();
         for buf in self.expired.iter() {
@@ -328,6 +329,8 @@ impl Crdt {
     }
 
     pub fn scan_path(&self, path: Path) -> impl Iterator<Item = IterKey<u8>> {
+        // ensures that it has a static lifetime.
+        #[allow(clippy::unnecessary_to_owned)]
         self.store.scan_prefix(path.as_ref().to_vec())
     }
 
