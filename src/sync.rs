@@ -27,6 +27,7 @@ use std::{
     io,
     pin::Pin,
     task::{Context, Poll},
+    time::Duration,
 };
 use tlfs_crdt::{Backend, Causal, CausalContext, DocId, Hash, Keypair, PeerId, Ref};
 
@@ -198,8 +199,17 @@ impl Behaviour {
                 vec![(SyncProtocol, ProtocolSupport::Full)],
                 RequestResponseConfig::default(),
             ),
-            mdns: mdns::Mdns::new(mdns::MdnsConfig::default()).await?,
-            ping: ping::Behaviour::new(ping::Config::new().with_keep_alive(true)),
+            mdns: mdns::Mdns::new(mdns::MdnsConfig {
+                query_interval: Duration::from_secs(10),
+                ..Default::default()
+            })
+            .await?,
+            ping: ping::Behaviour::new(
+                ping::Config::new()
+                    .with_keep_alive(true)
+                    .with_interval(Duration::from_secs(3))
+                    .with_timeout(Duration::from_secs(1)),
+            ),
             unjoin_req: Default::default(),
             buffer: Default::default(),
             broadcast: Broadcast::new(BroadcastConfig::default()),
