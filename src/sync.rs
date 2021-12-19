@@ -7,8 +7,10 @@ use futures::{
     io::{AsyncRead, AsyncWrite},
     prelude::*,
 };
+#[cfg(not(target_family = "wasm"))]
+use libp2p::mdns;
 use libp2p::{
-    mdns, ping,
+    ping,
     request_response::{
         self, ProtocolName, ProtocolSupport, RequestId, RequestResponse, RequestResponseCodec,
         RequestResponseConfig,
@@ -173,6 +175,7 @@ pub struct Behaviour {
     req: RequestResponse<SyncCodec>,
     broadcast: Broadcast,
     ping: ping::Behaviour,
+    #[cfg(not(target_family = "wasm"))]
     mdns: mdns::Mdns,
     #[behaviour(ignore)]
     unjoin_req: FnvHashMap<RequestId, DocId>,
@@ -199,6 +202,7 @@ impl Behaviour {
                 vec![(SyncProtocol, ProtocolSupport::Full)],
                 RequestResponseConfig::default(),
             ),
+            #[cfg(not(target_family = "wasm"))]
             mdns: mdns::Mdns::new(mdns::MdnsConfig {
                 query_interval: Duration::from_secs(10),
                 ..Default::default()
@@ -239,10 +243,13 @@ impl Behaviour {
     }
 
     pub fn local_peers(&self) -> BTreeSet<PeerId> {
-        self.mdns
+        #[cfg(not(target_family = "wasm"))]
+        return self
+            .mdns
             .discovered_nodes()
             .filter_map(|peer| libp2p_peer_id(peer).ok())
-            .collect()
+            .collect();
+        Default::default()
     }
 
     pub fn subscribe_local_peers(&mut self, ch: mpsc::Sender<()>) {
@@ -482,6 +489,7 @@ impl NetworkBehaviourEventProcess<ping::Event> for Behaviour {
     fn inject_event(&mut self, _event: ping::Event) {}
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl NetworkBehaviourEventProcess<mdns::MdnsEvent> for Behaviour {
     fn inject_event(&mut self, event: mdns::MdnsEvent) {
         if let mdns::MdnsEvent::Discovered(iter) = event {

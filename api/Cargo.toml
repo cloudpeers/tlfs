@@ -12,10 +12,15 @@ default = ["capi", "futures"]
 capi = []
 
 [build-dependencies]
-ffi-gen = "0.1.5"
+ffi-gen = { version = "0.1.5" }
 
 [dependencies]
 anyhow = "1.0.51"
 ffi-gen-macro = "0.1.2"
 futures = { version = "0.3.17", optional = true }
 tlfs = { version = "0.1.0", path = ".." }
+tlfs-crdt = { path = "../crdt" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2.3", features = ["js"] }
+wasm-bindgen = "0.2.78"

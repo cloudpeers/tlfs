@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "api",
-    "cloud-relay",
+    #"cloud-relay",
     "crdt",
     "tlfsc",
     ".",
@@ -35,6 +35,7 @@ version = "0.41.0"
 default-features = false
 features = [
     "mdns",
+    "mplex",
     "noise",
     "ping",
     "request-response",
@@ -42,14 +43,29 @@ features = [
     "yamux",
 ]
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+libp2p-webrtc = "0.2.0"
+tracing-wasm = "0.2.1"
+wasm-bindgen-futures = "0.4.28"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies.libp2p]
+version = "0.41"
+default-features = false
+features = [
+    "wasm-bindgen",
+    "wasm-ext-websocket"
+]
+
+[dev-dependencies]
+async-std = { version = "1.10.0", features = ["attributes"] }
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 async-global-executor = "2.0.2"
 
 [target.'cfg(target_os = "android")'.dependencies]
 tracing-android = "0.1.6"
 
-[dev-dependencies]
-async-std = { version = "1.10.0", features = ["attributes"] }
-
 [patch.crates-io]
 libp2p = { git = "https://github.com/cloudpeers/rust-libp2p", branch = "tlfs" }
+libp2p-webrtc = { git = "https://github.com/wngr/libp2p-webrtc", branch = "ffi-gen" }
+ffi-gen = { git = "https://github.com/cloudpeers/ffi-gen", branch = "ow/wasm-bindgen" }
