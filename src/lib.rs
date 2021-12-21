@@ -32,40 +32,33 @@ pub struct Sdk {
     frontend: Frontend,
     peer: PeerId,
     swarm: mpsc::UnboundedSender<Command>,
+    #[cfg(not(target_family = "wasm"))]
+    _task: async_global_executor::Task<()>,
 }
 
 impl Sdk {
     /// Creates a new persistent [`Sdk`] instance.
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(target_family = "wasm"))]
     pub async fn persistent(db: &std::path::Path, package: &[u8]) -> Result<Self> {
-        let (sdk, driver) = Self::new(
+        Self::new(
             std::sync::Arc::new(tlfs_crdt::FileStorage::new(db)),
             package,
         )
-        .await?;
-        async_global_executor::spawn::<_, ()>(driver).detach();
-
-        Ok(sdk)
+        .await
     }
 
     /// Create a new in-memory [`Sdk`] instance.
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(target_family = "wasm"))]
     pub async fn memory(package: &[u8]) -> Result<Self> {
-        let (sdk, driver) = Self::new(
+        Self::new(
             std::sync::Arc::new(tlfs_crdt::MemStorage::default()),
             package,
         )
-        .await?;
-        async_global_executor::spawn::<_, ()>(driver).detach();
-
-        Ok(sdk)
+        .await
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    async fn new(
-        storage: std::sync::Arc<dyn tlfs_crdt::Storage>,
-        package: &[u8],
-    ) -> Result<(Self, impl Future<Output = ()>)> {
+    #[cfg(not(target_family = "wasm"))]
+    async fn new(storage: std::sync::Arc<dyn tlfs_crdt::Storage>, package: &[u8]) -> Result<Self> {
         use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
         tracing_log::LogTracer::init().ok();
         let env = std::env::var(EnvFilter::DEFAULT_ENV)
@@ -113,7 +106,7 @@ impl Sdk {
         peer: PeerId,
         transport: Boxed<(libp2p::PeerId, StreamMuxerBox)>,
         listen_on: impl Iterator<Item = Multiaddr>,
-    ) -> Result<(Self, impl Future<Output = ()>)> {
+    ) -> Result<Self> {
         let behaviour = Behaviour::new(backend).await?;
         let mut swarm = Swarm::new(transport, behaviour, peer.to_libp2p().to_peer_id());
         for i in listen_on {
@@ -195,14 +188,16 @@ impl Sdk {
             Poll::Pending
         });
 
-        Ok((
-            Self {
-                frontend,
-                peer,
-                swarm: tx,
-            },
-            driver,
-        ))
+        #[cfg(not(target_family = "wasm"))]
+        let _task = async_global_executor::spawn(driver);
+
+        Ok(Self {
+            frontend,
+            peer,
+            swarm: tx,
+            #[cfg(not(target_family = "wasm"))]
+            _task,
+        })
     }
 
     /// Returns the [`PeerId`] of this [`Sdk`].
