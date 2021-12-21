@@ -146,13 +146,11 @@ impl Sdk {
                         swarm.behaviour_mut().subscribe_local_peers(ch);
                     }
                     Command::ConnectedPeers(ch) => {
-                        /*let peers = swarm
+                        let peers = swarm
                             .connected_peers()
                             .filter_map(|peer| libp2p_peer_id(peer).ok())
                             .collect();
-                        ch.send(peers).ok();*/
-                        // TODO: wait for PR and release.
-                        ch.send(vec![]).ok();
+                        ch.send(peers).ok();
                     }
                     Command::SubscribeConnectedPeers(ch) => {
                         sub_connected_peers.push(ch);
