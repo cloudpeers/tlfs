@@ -249,7 +249,8 @@ impl Behaviour {
             .discovered_nodes()
             .filter_map(|peer| libp2p_peer_id(peer).ok())
             .collect();
-        Default::default()
+        #[cfg(target_family = "wasm")]
+        return Default::default();
     }
 
     pub fn subscribe_local_peers(&mut self, ch: mpsc::Sender<()>) {

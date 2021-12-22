@@ -32,48 +32,30 @@ pub struct Sdk {
     frontend: Frontend,
     peer: PeerId,
     swarm: mpsc::UnboundedSender<Command>,
-}
-
-fn spawn_fut<T>(fut: impl Future<Output = T> + Send + 'static) {
     #[cfg(not(target_family = "wasm"))]
-    async_global_executor::spawn::<_, ()>(async move {
-        fut.await;
-    })
-    .detach();
-    #[cfg(target_family = "wasm")]
-    wasm_bindgen_futures::spawn_local(async move {
-        fut.await;
-    });
+    _task: async_global_executor::Task<()>,
 }
 
 impl Sdk {
     /// Creates a new persistent [`Sdk`] instance.
     pub async fn persistent(db: &std::path::Path, package: &[u8]) -> Result<Self> {
-        let (sdk, driver) = Self::new(
+        Self::new(
             std::sync::Arc::new(tlfs_crdt::FileStorage::new(db)),
             package,
         )
-        .await?;
-        spawn_fut(driver);
-
-        Ok(sdk)
+        .await
     }
 
     /// Create a new in-memory [`Sdk`] instance.
     pub async fn memory(package: &[u8]) -> Result<Self> {
-        let (sdk, driver) = Self::new(
+        Self::new(
             std::sync::Arc::new(tlfs_crdt::MemStorage::default()),
             package,
         )
-        .await?;
-        spawn_fut(driver);
-        Ok(sdk)
+        .await
     }
 
-    async fn new(
-        storage: std::sync::Arc<dyn tlfs_crdt::Storage>,
-        package: &[u8],
-    ) -> Result<(Self, impl Future<Output = ()>)> {
+    async fn new(storage: std::sync::Arc<dyn tlfs_crdt::Storage>, package: &[u8]) -> Result<Self> {
         use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
         tracing_log::LogTracer::init().ok();
         let env = std::env::var(EnvFilter::DEFAULT_ENV)
@@ -144,7 +126,7 @@ impl Sdk {
         peer: PeerId,
         transport: Boxed<(libp2p::PeerId, StreamMuxerBox)>,
         listen_on: impl Iterator<Item = Multiaddr>,
-    ) -> Result<(Self, impl Future<Output = ()>)> {
+    ) -> Result<Self> {
         let behaviour = Behaviour::new(backend).await?;
         let mut swarm = Swarm::new(transport, behaviour, peer.to_libp2p().to_peer_id());
         for i in listen_on {
@@ -152,7 +134,7 @@ impl Sdk {
         }
 
         let (tx, mut rx) = mpsc::unbounded();
-        let driver = poll_fn(move |cx| {
+        let driver = poll_fn::<(), _>(move |cx| {
             let mut sub_addresses = vec![];
             let mut sub_connected_peers = vec![];
             while let Poll::Ready(Some(cmd)) = rx.poll_next_unpin(cx) {
@@ -184,13 +166,11 @@ impl Sdk {
                         swarm.behaviour_mut().subscribe_local_peers(ch);
                     }
                     Command::ConnectedPeers(ch) => {
-                        /*let peers = swarm
+                        let peers = swarm
                             .connected_peers()
                             .filter_map(|peer| libp2p_peer_id(peer).ok())
                             .collect();
-                        ch.send(peers).ok();*/
-                        // TODO: wait for PR and release.
-                        ch.send(vec![]).ok();
+                        ch.send(peers).ok();
                     }
                     Command::SubscribeConnectedPeers(ch) => {
                         sub_connected_peers.push(ch);
@@ -226,14 +206,20 @@ impl Sdk {
             Poll::Pending
         });
 
-        Ok((
-            Self {
-                frontend,
-                peer,
-                swarm: tx,
-            },
-            driver,
-        ))
+        #[cfg(not(target_family = "wasm"))]
+        let _task = async_global_executor::spawn(driver);
+        #[cfg(target_family = "wasm")]
+        wasm_bindgen_futures::spawn_local(async move {
+            driver.await;
+        });
+
+        Ok(Self {
+            frontend,
+            peer,
+            swarm: tx,
+            #[cfg(not(target_family = "wasm"))]
+            _task,
+        })
     }
 
     /// Returns the [`PeerId`] of this [`Sdk`].
