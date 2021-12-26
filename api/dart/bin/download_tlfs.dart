@@ -38,7 +38,7 @@ void download(Artefact artefact, Target target, String out) async {
     tar = 'gtar';
   }
   if (Platform.isWindows) {
-    tar = 'C:\Program Files\Git\usr\bin\tar.exe';
+    tar = 'C:\\Program Files\\Git\\usr\\bin\\tar.exe';
   }
   String zstd = '--zstd';
   if (Platform.isWindows) {
