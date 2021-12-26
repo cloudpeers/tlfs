@@ -33,12 +33,19 @@ void download(Artefact artefact, Target target, String out) async {
       workingDirectory: out);
   stdout.write(result.stdout);
   stderr.write(result.stderr);
-  var tar = 'tar';
+  String tar = 'tar';
   if (Platform.isMacOS) {
     tar = 'gtar';
   }
+  if (Platform.isWindows) {
+    tar = 'C:\Program Files\Git\usr\bin\tar.exe';
+  }
+  String zstd = '--zstd';
+  if (Platform.isWindows) {
+    zstd = '-I zstd';
+  }
   final result2 =
-      await Process.run(tar, ['--zstd', '-xf', asset], workingDirectory: out);
+      await Process.run(tar, [zstd, '-xf', asset], workingDirectory: out);
   stdout.write(result2.stdout);
   stderr.write(result2.stderr);
 }
