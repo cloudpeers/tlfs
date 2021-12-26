@@ -5,7 +5,7 @@ void main(List<String> args) async {
   if (Platform.isWindows) {
     tlfsc = 'build/tlfs/tlfsc.exe';
   }
-  String appname = args[1];
+  String appname = args[0];
   final result = await Process.run(tlfsc, [
     '-i',
     'assets/' + appname + '.tlfs',
