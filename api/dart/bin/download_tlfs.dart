@@ -58,7 +58,7 @@ void main() {
     download(Artefact.tlfsc, Target.macos, 'build/tlfs');
   }
   if (Platform.isWindows) {
-    download(Artefact.tlfsc, Target.macos, 'build/tlfs');
+    download(Artefact.tlfsc, Target.windows, 'build/tlfs');
   }
   download(Artefact.libtlfs, Target.linux, 'build/tlfs/linux');
   download(Artefact.libtlfs, Target.android, 'build/tlfs/android');
