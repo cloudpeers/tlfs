@@ -50,7 +50,7 @@ void main() {
   if (Platform.isMacOS) {
     download(Artefact.tlfsc, Target.macos, 'build/tlfs');
   }
-  if (platform.isWindows) {
+  if (Platform.isWindows) {
     download(Artefact.tlfsc, Target.macos, 'build/tlfs');
   }
   download(Artefact.libtlfs, Target.linux, 'build/tlfs/linux');
