@@ -13,5 +13,5 @@ schema_version = { version ~ "{" ~ rule* ~ "}" }
 schema = { ident ~ "{" ~ schema_version* ~ "}" }
 root = { SOI ~ schema* ~ EOI }
 
-WHITESPACE = _{ " " | "\t" | "\n" }
+WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
 COMMENT = _{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
