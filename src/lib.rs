@@ -57,14 +57,21 @@ impl Sdk {
 
     async fn new(storage: std::sync::Arc<dyn tlfs_crdt::Storage>, package: &[u8]) -> Result<Self> {
         use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
+        // FIXME: replace by tracing feature
         tracing_log::LogTracer::init().ok();
         let env = std::env::var(EnvFilter::DEFAULT_ENV)
             .unwrap_or_else(|_| "tlfs,info,libp2p_swarm".to_owned());
-        let subscriber = tracing_subscriber::FmtSubscriber::builder()
-            .with_span_events(FmtSpan::ACTIVE | FmtSpan::CLOSE)
-            .with_env_filter(EnvFilter::new(env))
-            .with_writer(std::io::stderr)
-            .finish();
+        let subscriber = {
+            let b = tracing_subscriber::FmtSubscriber::builder()
+                .with_span_events(FmtSpan::ACTIVE | FmtSpan::CLOSE)
+                .with_env_filter(EnvFilter::new(env))
+                .with_writer(std::io::stderr);
+
+            #[cfg(target_family = "wasm")]
+            // TODO
+            let b = b.without_time();
+            b.finish()
+        };
         if cfg!(target_os = "android") {
             #[cfg(target_os = "android")]
             use tracing_subscriber::layer::SubscriberExt;
@@ -72,7 +79,7 @@ impl Sdk {
             let subscriber = subscriber.with(tracing_android::layer("com.cloudpeer")?);
             tracing::subscriber::set_global_default(subscriber).ok();
             std::env::set_var("RUST_BACKTRACE", "1");
-        } else if cfg!(target_familiy = "wasm") {
+        } else if cfg!(target_family = "wasm") {
             #[cfg(target_family = "wasm")]
             let subscriber = {
                 use tracing_subscriber::layer::SubscriberExt;

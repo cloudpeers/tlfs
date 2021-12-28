@@ -1015,14 +1015,14 @@ dependencies = [
 
 [[package]]
 name = "ffi-gen"
-version = "0.1.6"
-source = "git+https://github.com/cloudpeers/ffi-gen?branch=ow/wasm-bindgen#8f5a597767b594e3ef39541ca592b1821a28c1c5"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "genco",
  "heck 0.4.0",
  "pest",
  "pest_derive",
+ "wasm-bindgen",
 ]
 
 [[package]]

@@ -26,9 +26,9 @@ libp2p-broadcast = "0.7.0"
 log-panics = "2.0.0"
 rkyv = "0.7.26"
 tlfs-crdt = { version = "0.1.0", path = "crdt" }
-tracing = "0.1.29"
+tracing = { version = "0.1.29", default-features = false }
 tracing-log = "0.1.2"
-tracing-subscriber = { version = "0.3.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.3", default-features = false, features = ["env-filter", "fmt"] }
 
 [dependencies.libp2p]
 version = "0.41.0"
@@ -67,4 +67,5 @@ tracing-android = "0.1.6"
 
 [patch.crates-io]
 libp2p = { git = "https://github.com/cloudpeers/rust-libp2p", branch = "tlfs" }
-ffi-gen = { git = "https://github.com/cloudpeers/ffi-gen", branch = "ow/wasm-bindgen" }
+#ffi-gen = { git = "https://github.com/cloudpeers/ffi-gen", branch = "ow/wasm-bindgen" }
+ffi-gen = { path = "../ffi-gen" }

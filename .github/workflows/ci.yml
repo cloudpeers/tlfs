@@ -84,10 +84,9 @@ jobs:
         LD_LIBRARY_PATH: ../../target/release
       run: flutter test
 
-    # TODO: patch returns
-    #- name: build wasm
-    #  working-directory: api
-    #  run: cargo build --release --target wasm32-unknown-unknown
+    - name: build wasm
+      working-directory: api
+      run: OPTIMIZE=1 ./build-wasm.sh
 
     - name: dart analyzer
       working-directory: api/dart

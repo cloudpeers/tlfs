@@ -8,8 +8,10 @@ OUT=./pkg-wasm-bindgen
 echo "Running cargo build"
 if [ -z "${OPTIMIZE}" ]; then
   FFIGEN=1 cargo build --target wasm32-unknown-unknown
+  MODE=debug
 else
   FFIGEN=1 cargo build --target wasm32-unknown-unknown --release
+  MODE=release
 fi
 
 if [ -d $OUT ]; then
@@ -22,6 +24,11 @@ if ! [ -x "$(command -v wasm-bindgen)" ]; then
   cargo install wasm-bindgen-cli --version $WASMBINDGEN_VERSION
 fi
 
+echo "Patching multivalue returns"
+LIB=../target/wasm32-unknown-unknown/$MODE/tlfs.wasm
+cargo run --target x86_64-unknown-linux-gnu --bin patch-multivalue \
+  -- $LIB
+
 echo "Generating wasm-bindings"
 
 # add supports for Weak References, see [1].
@@ -30,12 +37,9 @@ echo "Generating wasm-bindings"
 #
 # [1]: https://rustwasm.github.io/docs/wasm-bindgen/reference/weak-references.html
 
-if [ -z "${OPTIMIZE}" ]; then
-  MODE=debug
-else
-  MODE=release
-fi
-wasm-bindgen ../target/wasm32-unknown-unknown/$MODE/tlfs.wasm \
+
+  wasm-bindgen \
+  $LIB.multivalue.wasm \
   --out-dir $OUT \
   --out-name local_first \
   --target web \

@@ -3,6 +3,9 @@ name = "tlfs-api"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "patch-multivalue"
+
 [lib]
 crate-type = ["cdylib", "staticlib"]
 name = "tlfs"
@@ -16,6 +19,7 @@ ffi-gen = { version = "0.1.5" }
 
 [dependencies]
 anyhow = "1.0.51"
+ffi-gen = { version = "0.1.5" }
 ffi-gen-macro = "0.1.2"
 futures = { version = "0.3.17", optional = true }
 tlfs = { version = "0.1.0", path = ".." }
