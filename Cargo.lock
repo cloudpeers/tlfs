@@ -310,19 +310,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "asynchronous-codec"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0de5164e5edbf51c45fb8c2d9664ae1c095cce1b265ecf7569093c0d66ef690"
-dependencies = [
- "bytes",
- "futures-sink",
- "futures-util",
- "memchr",
- "pin-project-lite",
-]
-
-[[package]]
 name = "atomic"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1552,7 +1539,6 @@ dependencies = [
  "libp2p-core",
  "libp2p-mdns",
  "libp2p-metrics",
- "libp2p-mplex",
  "libp2p-noise",
  "libp2p-ping",
  "libp2p-request-response",
@@ -1644,23 +1630,6 @@ dependencies = [
  "libp2p-ping",
  "libp2p-swarm",
  "open-metrics-client",
-]
-
-[[package]]
-name = "libp2p-mplex"
-version = "0.31.0"
-source = "git+https://github.com/cloudpeers/rust-libp2p?branch=tlfs#a54c7126479b2aee2c944ddd0de503a06e9c5a92"
-dependencies = [
- "asynchronous-codec",
- "bytes",
- "futures",
- "libp2p-core",
- "log",
- "nohash-hasher",
- "parking_lot",
- "rand 0.7.3",
- "smallvec",
- "unsigned-varint",
 ]
 
 [[package]]
@@ -3404,8 +3373,6 @@ version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d86a8dc7f45e4c1b0d30e43038c38f274e77af056aa5f74b93c2cf9eb3c1c836"
 dependencies = [
- "asynchronous-codec",
- "bytes",
  "futures-io",
  "futures-util",
 ]

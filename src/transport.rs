@@ -39,7 +39,7 @@ fn wasm_transport(identity: identity::Keypair) -> Result<Boxed<(PeerId, StreamMu
 
     use libp2p::{
         core::{self, transport::upgrade},
-        mplex, noise,
+        noise,
         wasm_ext::{ffi, ExtTransport},
         yamux, Transport,
     };
@@ -53,10 +53,7 @@ fn wasm_transport(identity: identity::Keypair) -> Result<Boxed<(PeerId, StreamMu
     Ok(base
         .upgrade(upgrade::Version::V1Lazy)
         .authenticate(noise::NoiseConfig::xx(noise_keys).into_authenticated())
-        .multiplex(core::upgrade::SelectUpgrade::new(
-            yamux::YamuxConfig::default(),
-            mplex::MplexConfig::default(),
-        ))
+        .multiplex(yamux::YamuxConfig::default())
         .timeout(Duration::from_secs(20))
         .boxed())
 }

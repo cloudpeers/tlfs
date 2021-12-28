@@ -35,7 +35,6 @@ version = "0.41.0"
 default-features = false
 features = [
     "mdns",
-    "mplex",
     "noise",
     "ping",
     "request-response",
