@@ -15,7 +15,7 @@ default = ["capi", "futures"]
 capi = []
 
 [build-dependencies]
-ffi-gen = { version = "0.1.5" }
+ffi-gen = { version = "0.1.5", features = ["wasm-bindgen"] }
 
 [dependencies]
 anyhow = "1.0.51"

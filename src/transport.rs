@@ -1,12 +1,8 @@
 use anyhow::Result;
-use libp2p::core::identity;
-use libp2p::core::muxing::StreamMuxerBox;
-use libp2p::core::transport::{Boxed, Transport};
-use libp2p::core::upgrade::Version;
-use libp2p::noise::{Keypair, NoiseConfig, X25519Spec};
-use libp2p::yamux::YamuxConfig;
-use libp2p::PeerId;
-use std::time::Duration;
+use libp2p::{
+    core::{muxing::StreamMuxerBox, transport::Boxed},
+    identity, PeerId,
+};
 
 pub fn transport(keypair: identity::Keypair) -> Result<Boxed<(PeerId, StreamMuxerBox)>> {
     #[cfg(target_arch = "wasm32")]
@@ -17,9 +13,18 @@ pub fn transport(keypair: identity::Keypair) -> Result<Boxed<(PeerId, StreamMuxe
 
 #[cfg(not(target_arch = "wasm32"))]
 fn native_transport(keypair: identity::Keypair) -> Result<Boxed<(PeerId, StreamMuxerBox)>> {
-    use libp2p::tcp::TcpConfig;
+    use std::time::Duration;
+
+    use libp2p::{
+        core::upgrade::Version,
+        noise::{self, NoiseConfig, X25519Spec},
+        tcp::TcpConfig,
+        yamux::YamuxConfig,
+        Transport,
+    };
+
     let tcp = TcpConfig::new().nodelay(true);
-    let key = Keypair::<X25519Spec>::new().into_authentic(&keypair)?;
+    let key = noise::Keypair::<X25519Spec>::new().into_authentic(&keypair)?;
     Ok(tcp
         .upgrade(Version::V1)
         .authenticate(NoiseConfig::xx(key).into_authenticated())
@@ -33,14 +38,10 @@ fn wasm_transport(identity: identity::Keypair) -> Result<Boxed<(PeerId, StreamMu
     use std::time::Duration;
 
     use libp2p::{
-        core::{
-            self,
-            muxing::StreamMuxerBox,
-            transport::{upgrade, Boxed},
-        },
-        identity, mplex, noise,
+        core::{self, transport::upgrade},
+        mplex, noise,
         wasm_ext::{ffi, ExtTransport},
-        yamux, PeerId, Transport,
+        yamux, Transport,
     };
     use libp2p_webrtc::WebRtcTransport;
     let peer_id = PeerId::from(identity.public());
