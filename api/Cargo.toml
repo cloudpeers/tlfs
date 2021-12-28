@@ -2,6 +2,9 @@
 name = "tlfs-api"
 version = "0.1.0"
 edition = "2021"
+description = "tlfs api"
+repository = "https://github.com/cloudpeers/tlfs"
+license = "MIT"
 
 [lib]
 crate-type = ["cdylib", "staticlib"]

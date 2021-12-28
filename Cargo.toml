@@ -11,6 +11,9 @@ members = [
 name = "tlfs"
 version = "0.1.0"
 edition = "2021"
+description = "The Local First SDK"
+repository = "https://github.com/cloudpeers/tlfs"
+license = "MIT"
 
 [profile.release]
 lto = true

@@ -2,6 +2,9 @@
 name = "tlfsc"
 version = "0.1.0"
 edition = "2021"
+description = "tlfs schema compiler"
+repository = "https://github.com/cloudpeers/tlfs"
+license = "MIT"
 
 [dependencies]
 anyhow = "1.0.51"
