@@ -1003,7 +1003,7 @@ dependencies = [
 [[package]]
 name = "ffi-gen"
 version = "0.1.7"
-source = "git+https://github.com/cloudpeers/ffi-gen?branch=ow/wasm-bindgen#0a6db68e6743d0e0df67d5fa0f91d743fc56feba"
+source = "git+https://github.com/cloudpeers/ffi-gen?branch=ow/wasm-bindgen#028d1b54111ef76355e4f82acc7435fea6116ac4"
 dependencies = [
  "anyhow",
  "genco",
