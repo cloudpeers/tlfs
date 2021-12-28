@@ -55,6 +55,7 @@ impl Sdk {
         .await
     }
 
+    #[allow(clippy::if_same_then_else)]
     async fn new(storage: std::sync::Arc<dyn tlfs_crdt::Storage>, package: &[u8]) -> Result<Self> {
         use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
         // FIXME: replace by tracing feature
