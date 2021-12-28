@@ -330,6 +330,7 @@ impl Crdt {
 
     pub fn scan_path(&self, path: Path) -> impl Iterator<Item = IterKey<u8>> {
         // ensures that it has a static lifetime.
+        #[allow(clippy::unnecessary_to_owned)]
         self.store.scan_prefix(path.as_ref().to_vec())
     }
 
