@@ -4,13 +4,16 @@ ffi_gen_macro::ffi_gen!("api/tlfs.rsh");
 
 use anyhow::Result;
 use futures::{Stream, StreamExt};
-use std::path::Path;
 use tlfs::Permission;
 
 pub struct Sdk(tlfs::Sdk);
 
 pub async fn create_persistent(path: &str, package: &[u8]) -> Result<Sdk> {
-    Ok(Sdk(tlfs::Sdk::persistent(Path::new(path), package).await?))
+    Ok(Sdk(tlfs::Sdk::persistent(
+        std::path::Path::new(path),
+        package,
+    )
+    .await?))
 }
 
 pub async fn create_memory(package: &[u8]) -> Result<Sdk> {

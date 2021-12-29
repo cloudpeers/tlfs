@@ -38,7 +38,6 @@ pub struct Sdk {
 
 impl Sdk {
     /// Creates a new persistent [`Sdk`] instance.
-    #[cfg(not(target_family = "wasm"))]
     pub async fn persistent(db: &std::path::Path, package: &[u8]) -> Result<Self> {
         Self::new(
             std::sync::Arc::new(tlfs_crdt::FileStorage::new(db)),
@@ -48,7 +47,6 @@ impl Sdk {
     }
 
     /// Create a new in-memory [`Sdk`] instance.
-    #[cfg(not(target_family = "wasm"))]
     pub async fn memory(package: &[u8]) -> Result<Self> {
         Self::new(
             std::sync::Arc::new(tlfs_crdt::MemStorage::default()),
@@ -57,17 +55,24 @@ impl Sdk {
         .await
     }
 
-    #[cfg(not(target_family = "wasm"))]
+    #[allow(clippy::if_same_then_else)]
     async fn new(storage: std::sync::Arc<dyn tlfs_crdt::Storage>, package: &[u8]) -> Result<Self> {
         use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
+        // FIXME: replace by tracing feature
         tracing_log::LogTracer::init().ok();
         let env = std::env::var(EnvFilter::DEFAULT_ENV)
             .unwrap_or_else(|_| "tlfs,info,libp2p_swarm".to_owned());
-        let subscriber = tracing_subscriber::FmtSubscriber::builder()
-            .with_span_events(FmtSpan::ACTIVE | FmtSpan::CLOSE)
-            .with_env_filter(EnvFilter::new(env))
-            .with_writer(std::io::stderr)
-            .finish();
+        let subscriber = {
+            let b = tracing_subscriber::FmtSubscriber::builder()
+                .with_span_events(FmtSpan::ACTIVE | FmtSpan::CLOSE)
+                .with_env_filter(EnvFilter::new(env))
+                .with_writer(std::io::stderr);
+
+            #[cfg(target_family = "wasm")]
+            // TODO
+            let b = b.without_time();
+            b.finish()
+        };
         if cfg!(target_os = "android") {
             #[cfg(target_os = "android")]
             use tracing_subscriber::layer::SubscriberExt;
@@ -75,9 +80,16 @@ impl Sdk {
             let subscriber = subscriber.with(tracing_android::layer("com.cloudpeer")?);
             tracing::subscriber::set_global_default(subscriber).ok();
             std::env::set_var("RUST_BACKTRACE", "1");
+        } else if cfg!(target_family = "wasm") {
+            #[cfg(target_family = "wasm")]
+            let subscriber = {
+                use tracing_subscriber::layer::SubscriberExt;
+                subscriber.with(tracing_wasm::WASMLayer::default())
+            };
+            tracing::subscriber::set_global_default(subscriber).ok();
         } else {
             tracing::subscriber::set_global_default(subscriber).ok();
-        }
+        };
         log_panics::init();
 
         let backend = Backend::new(storage, package)?;
@@ -88,12 +100,28 @@ impl Sdk {
         tracing::info!("our peer id is: {}", peer);
 
         let transport = transport::transport(keypair.to_libp2p())?;
+        let listen_on = if cfg!(target_family = "wasm") {
+            "/dns4/local1st.net/tcp/443/wss/p2p-webrtc-star"
+                .parse()
+                .unwrap()
+
+            //TODO
+            //        slf.add_external_address(
+            //            signaling_server
+            //                .with(Protocol::P2pWebRtcStar)
+            //                .with(Protocol::P2p(libp2p_peer.into())),
+            //            // TODO
+            //            AddressScore::Infinite,
+            //        )
+        } else {
+            "/ip4/0.0.0.0/tcp/0".parse().unwrap()
+        };
         Self::new_with_transport(
             backend,
             frontend,
             peer,
             transport,
-            std::iter::once("/ip4/0.0.0.0/tcp/0".parse().unwrap()),
+            std::iter::once(listen_on),
         )
         .await
     }
@@ -114,7 +142,7 @@ impl Sdk {
         }
 
         let (tx, mut rx) = mpsc::unbounded();
-        let driver = poll_fn(move |cx| {
+        let driver = poll_fn::<(), _>(move |cx| {
             let mut sub_addresses = vec![];
             let mut sub_connected_peers = vec![];
             while let Poll::Ready(Some(cmd)) = rx.poll_next_unpin(cx) {
@@ -188,6 +216,10 @@ impl Sdk {
 
         #[cfg(not(target_family = "wasm"))]
         let _task = async_global_executor::spawn(driver);
+        #[cfg(target_family = "wasm")]
+        wasm_bindgen_futures::spawn_local(async move {
+            driver.await;
+        });
 
         Ok(Self {
             frontend,

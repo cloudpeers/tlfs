@@ -1,3 +1,6 @@
 dart/lib/tlfs.dart
 js/bindings.js
+js/bindings.mjs
 js/bindings.d.ts
+js/tlfs.wasm
+pkg-wasm-bindgen
