@@ -301,8 +301,8 @@ impl Acl {
         Self(tree)
     }
 
-    pub fn load(storage: Arc<dyn Storage>, name: &str) -> Result<Self> {
-        Ok(Self(BlobMap::load(storage, name)?))
+    pub async fn load(storage: Arc<dyn Storage>, name: &str) -> Result<Self> {
+        Ok(Self(BlobMap::load(storage, name).await?))
     }
 
     pub fn active_peer(&self, peer: &PeerId) -> bool {

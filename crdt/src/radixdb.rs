@@ -8,9 +8,9 @@ use std::{
 
 use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
-    future,
+    future::{self, BoxFuture},
     stream::BoxStream,
-    StreamExt,
+    FutureExt, StreamExt,
 };
 use parking_lot::Mutex;
 use rkyv::{
@@ -181,7 +181,7 @@ pub trait Storage: Send + Sync + 'static {
 
     /// load a file. The callback will get to look at the data and do something with it.
     /// loading a non-existing file is like loading an empty file. It will not create the file.
-    fn load(&self, file: &str, f: Box<dyn FnMut(&[u8]) + '_>) -> io::Result<()>;
+    fn load(&self, file: &str, f: Box<dyn FnMut(&[u8]) + '_>) -> BoxFuture<io::Result<()>>;
 
     /// atomically create a file, overwriting an existing file if it exists.
     fn create(&self, file: &str, data: &[u8]) -> io::Result<()>;
@@ -215,14 +215,18 @@ impl Storage for MemStorage {
         Ok(())
     }
 
-    fn load(&self, file: &str, mut f: Box<dyn FnMut(&[u8]) + '_>) -> std::io::Result<()> {
+    fn load(
+        &self,
+        file: &str,
+        mut f: Box<dyn FnMut(&[u8]) + '_>,
+    ) -> BoxFuture<std::io::Result<()>> {
         let data = self.data.lock();
         if let Some(vec) = data.get(file) {
             f(vec)
         } else {
             f(&[])
         };
-        Ok(())
+        future::ok(()).boxed()
     }
 }
 
@@ -253,13 +257,13 @@ impl Storage for FileStorage {
         Ok(())
     }
 
-    fn load(&self, file: &str, mut f: Box<dyn FnMut(&[u8]) + '_>) -> io::Result<()> {
+    fn load(&self, file: &str, mut f: Box<dyn FnMut(&[u8]) + '_>) -> BoxFuture<io::Result<()>> {
         match std::fs::read(self.base.join(file)) {
             Ok(data) => f(&data),
             Err(e) if e.kind() == io::ErrorKind::NotFound => f(&[]),
-            Err(e) => return Err(e),
+            Err(e) => return future::err(e).boxed(),
         };
-        Ok(())
+        future::ok(()).boxed()
     }
 
     fn create(&self, file: &str, content: &[u8]) -> std::io::Result<()> {
@@ -296,7 +300,7 @@ pub struct RadixDb<K: TKey, V: TValue> {
 }
 
 impl<K: TKey, V: TValue> RadixDb<K, V> {
-    pub fn load(storage: Arc<dyn Storage>, name: impl Into<String>) -> anyhow::Result<Self>
+    pub async fn load(storage: Arc<dyn Storage>, name: impl Into<String>) -> anyhow::Result<Self>
     where
         Archived<K>: Deserialize<K, SharedDeserializeMap2>,
         Archived<V>: Deserialize<V, SharedDeserializeMap2>,
@@ -305,21 +309,23 @@ impl<K: TKey, V: TValue> RadixDb<K, V> {
         let mut tree: anyhow::Result<ArcRadixTree<K, V>> = Ok(Default::default());
         let mut map = Default::default();
         let mut pos = Default::default();
-        storage.load(
-            &name,
-            Box::new(|data| {
-                if !data.is_empty() {
-                    let mut deserializer = SharedDeserializeMap2::default();
-                    let archived: &Archived<ArcRadixTree<K, V>> =
-                        unsafe { archived_root::<ArcRadixTree<K, V>>(data) };
-                    tree = archived
-                        .deserialize(&mut deserializer)
-                        .map_err(|e| anyhow::anyhow!("Error while deserializing: {}", e));
-                    map = deserializer.to_shared_serializer_map(&data[0] as *const u8);
-                    pos = data.len();
-                }
-            }),
-        )?;
+        storage
+            .load(
+                &name,
+                Box::new(|data| {
+                    if !data.is_empty() {
+                        let mut deserializer = SharedDeserializeMap2::default();
+                        let archived: &Archived<ArcRadixTree<K, V>> =
+                            unsafe { archived_root::<ArcRadixTree<K, V>>(data) };
+                        tree = archived
+                            .deserialize(&mut deserializer)
+                            .map_err(|e| anyhow::anyhow!("Error while deserializing: {}", e));
+                        map = deserializer.to_shared_serializer_map(&data[0] as *const u8);
+                        pos = data.len();
+                    }
+                }),
+            )
+            .await?;
         let tree = tree?;
         let mut arcs = Default::default();
         tree.all_arcs(&mut arcs);
@@ -428,8 +434,10 @@ impl std::fmt::Debug for BlobSet {
 }
 
 impl BlobSet {
-    pub fn load(storage: Arc<dyn Storage>, name: &str) -> anyhow::Result<Self> {
-        Ok(Self(Arc::new(Mutex::new(RadixDb::load(storage, name)?))))
+    pub async fn load(storage: Arc<dyn Storage>, name: &str) -> anyhow::Result<Self> {
+        Ok(Self(Arc::new(Mutex::new(
+            RadixDb::load(storage, name).await?,
+        ))))
     }
 
     pub fn flush(&self) -> anyhow::Result<()> {
@@ -487,8 +495,10 @@ impl std::fmt::Debug for BlobMap {
 }
 
 impl BlobMap {
-    pub fn load(storage: Arc<dyn Storage>, name: &str) -> anyhow::Result<Self> {
-        Ok(Self(Arc::new(Mutex::new(RadixDb::load(storage, name)?))))
+    pub async fn load(storage: Arc<dyn Storage>, name: &str) -> anyhow::Result<Self> {
+        Ok(Self(Arc::new(Mutex::new(
+            RadixDb::load(storage, name).await?,
+        ))))
     }
 
     pub fn insert(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> anyhow::Result<()> {

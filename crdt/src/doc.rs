@@ -262,13 +262,13 @@ pub struct Backend {
 
 impl Backend {
     /// Creates a new [`Backend`] from a radixdb storage.
-    pub fn new(storage: Arc<dyn Storage>, package: &[u8]) -> Result<Self> {
+    pub async fn new(storage: Arc<dyn Storage>, package: &[u8]) -> Result<Self> {
         let registry = Registry::new(package)?;
-        let docs = Docs::new(BlobMap::load(storage.clone(), "docs")?);
-        let acl = Acl::new(BlobMap::load(storage.clone(), "acl")?);
+        let docs = Docs::new(BlobMap::load(storage.clone(), "docs").await?);
+        let acl = Acl::new(BlobMap::load(storage.clone(), "acl").await?);
         let crdt = Crdt::new(
-            BlobSet::load(storage.clone(), "store")?,
-            BlobSet::load(storage, "expired")?,
+            BlobSet::load(storage.clone(), "store").await?,
+            BlobSet::load(storage, "expired").await?,
             acl.clone(),
         );
         let engine = Engine::new(acl)?;
@@ -308,14 +308,15 @@ impl Backend {
     }
 
     /// Creates a new in memory [`Backend`].
-    pub fn memory(package: &[u8]) -> Result<Self> {
-        Self::new(Arc::new(MemStorage::default()), package)
+    pub async fn memory(package: &[u8]) -> Result<Self> {
+        Self::new(Arc::new(MemStorage::default()), package).await
     }
 
     /// Creates a new in-memory backend for testing purposes.
     #[cfg(test)]
     #[allow(clippy::ptr_arg)]
     pub fn test(packages: &str) -> Result<Self> {
+        use async_std::task::block_on;
         use tracing_subscriber::fmt::format::FmtSpan;
         use tracing_subscriber::EnvFilter;
 
@@ -330,7 +331,7 @@ impl Backend {
         log_panics::init();
         let packages = tlfsc::compile_lenses(packages)?;
         let packages = Ref::archive(&packages);
-        Self::memory(packages.as_bytes())
+        block_on(Self::memory(packages.as_bytes()))
     }
 
     /// Returns a reference to the lens registry.

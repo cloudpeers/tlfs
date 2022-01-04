@@ -92,7 +92,7 @@ impl Sdk {
         };
         log_panics::init();
 
-        let backend = Backend::new(storage, package)?;
+        let backend = Backend::new(storage, package).await?;
         let frontend = backend.frontend();
 
         let keypair = frontend.default_keypair()?;
