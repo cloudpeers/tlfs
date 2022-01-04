@@ -21,6 +21,12 @@ rkyv = { version = "0.7.26", features = ["validation"] }
 smallvec = "1.7.0"
 tracing = { version = "0.1.29", default-features = false }
 vec-collections = { version = "0.4.3", features = ["radixtree", "rkyv", "rkyv_validated"] }
+js-sys = { optional = true, version = "0.3.55" }
+wasm-bindgen-futures = { optional = true, version = "0.4.28" }
+web-sys = { optional = true, version = "0.3.55", features = ['DomException', 'Cache', 'CacheStorage', 'CacheQueryOptions', 'Window', 'Request', 'Response'] }
+
+[features]
+browser = ['web-sys', 'js-sys', 'wasm-bindgen-futures']
 
 [dev-dependencies]
 async-std = { version = "1.10.0", features = ["attributes"] }

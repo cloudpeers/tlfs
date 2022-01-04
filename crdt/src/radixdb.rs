@@ -28,6 +28,12 @@ use rkyv::{
 use vec_collections::radix_tree::{
     AbstractRadixTree, AbstractRadixTreeMut, ArcRadixTree, IterKey, TKey, TValue,
 };
+#[cfg(feature = "browser")]
+use {
+    js_sys::{Array, ArrayBuffer, Uint8Array},
+    wasm_bindgen_futures::JsFuture,
+    web_sys::{CacheQueryOptions, DomException, Request, Response},
+};
 
 use crate::Ref;
 
@@ -181,7 +187,7 @@ pub trait Storage: Send + Sync + 'static {
 
     /// load a file. The callback will get to look at the data and do something with it.
     /// loading a non-existing file is like loading an empty file. It will not create the file.
-    fn load(&self, file: &str, f: Box<dyn FnMut(&[u8]) + '_>) -> BoxFuture<io::Result<()>>;
+    fn load(&self, file: &str) -> BoxFuture<io::Result<Vec<u8>>>;
 
     /// atomically create a file, overwriting an existing file if it exists.
     fn create(&self, file: &str, data: &[u8]) -> io::Result<()>;
@@ -215,18 +221,10 @@ impl Storage for MemStorage {
         Ok(())
     }
 
-    fn load(
-        &self,
-        file: &str,
-        mut f: Box<dyn FnMut(&[u8]) + '_>,
-    ) -> BoxFuture<std::io::Result<()>> {
+    fn load(&self, file: &str) -> BoxFuture<std::io::Result<Vec<u8>>> {
         let data = self.data.lock();
-        if let Some(vec) = data.get(file) {
-            f(vec)
-        } else {
-            f(&[])
-        };
-        future::ok(()).boxed()
+        let res = data.get(file).map(|x| x.to_vec()).unwrap_or_default();
+        future::ok(res).boxed()
     }
 }
 
@@ -257,13 +255,13 @@ impl Storage for FileStorage {
         Ok(())
     }
 
-    fn load(&self, file: &str, mut f: Box<dyn FnMut(&[u8]) + '_>) -> BoxFuture<io::Result<()>> {
-        match std::fs::read(self.base.join(file)) {
-            Ok(data) => f(&data),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => f(&[]),
+    fn load(&self, file: &str) -> BoxFuture<io::Result<Vec<u8>>> {
+        let res = match std::fs::read(self.base.join(file)) {
+            Ok(data) => data.clone(),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
             Err(e) => return future::err(e).boxed(),
         };
-        future::ok(()).boxed()
+        future::ok(res).boxed()
     }
 
     fn create(&self, file: &str, content: &[u8]) -> std::io::Result<()> {
@@ -282,6 +280,114 @@ impl Storage for FileStorage {
             }
             Err(e) => return Err(e),
         }
+        Ok(())
+    }
+}
+
+#[cfg(feature = "browser")]
+#[derive(Debug)]
+struct Chunk {
+    name: String,
+    data: Vec<u8>,
+}
+
+#[cfg(feature = "browser")]
+#[derive(Debug)]
+pub struct CacheFileStore {
+    cache: web_sys::Cache,
+    chunks: Mutex<Vec<Chunk>>,
+}
+
+#[cfg(feature = "browser")]
+impl CacheFileStore {
+    pub async fn new(name: &str) -> Result<Self, DomException> {
+        let window = web_sys::window().expect("unable to get window");
+        let caches = window.caches()?;
+        let cache = web_sys::Cache::from(JsFuture::from(caches.open(name)).await?);
+        Ok(Self {
+            cache,
+            chunks: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// synchronous append
+    pub fn append_sync(&self, name: String, data: Vec<u8>) {
+        self.chunks.lock().push(Chunk { name, data });
+    }
+
+    pub async fn flush(&self) -> Result<(), DomException> {
+        let mut to_flush = Vec::new();
+        std::mem::swap(&mut to_flush, self.chunks.lock().as_mut());
+        if let Err(e) = self.batch_write(&mut to_flush).await {
+            // flush failed, we have to insert the chunks at the start so we can try again next time.
+            self.chunks.lock().splice(0..0, to_flush);
+            Err(e)
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn load_to_vec(&self, name: &str) -> Result<Vec<u8>, DomException> {
+        let responses = JsFuture::from(
+            self.cache
+                .match_all_with_str_and_options(name, CacheQueryOptions::new().ignore_search(true)),
+        )
+        .await?;
+        let mut res = Vec::new();
+        for response in Array::from(&responses).iter() {
+            let response = Response::from(response);
+            let ab = ArrayBuffer::from(JsFuture::from(response.array_buffer()?).await?);
+            let buf = Uint8Array::new(&ab);
+            res.extend(&buf.to_vec());
+        }
+        Ok(res)
+    }
+
+    pub async fn mv(&self, from: &str, to: &str) -> Result<(), DomException> {
+        // load the entire file
+        let mut content = self.load_to_vec(from).await?;
+        let req = Request::new_with_str(&to)?;
+        let res = Response::new_with_opt_u8_array(Some(&mut content))?;
+        // once we start deleting stuff, we can't abort anymore. We are committed.
+        JsFuture::from(
+            self.cache
+                .delete_with_str_and_options(to, CacheQueryOptions::new().ignore_search(true)),
+        )
+        .await
+        .expect("deletion not possible!");
+        JsFuture::from(
+            self.cache
+                .delete_with_str_and_options(from, CacheQueryOptions::new().ignore_search(true)),
+        )
+        .await
+        .expect("deletion not possible!");
+        JsFuture::from(self.cache.put_with_request(&req, &res))
+            .await
+            .unwrap();
+        Ok(())
+    }
+
+    async fn batch_write(&self, chunks: &mut [Chunk]) -> Result<(), DomException> {
+        let tuples = chunks
+            .iter_mut()
+            .map(|chunk| {
+                let text = format!("{}", chunk.name);
+                let request = Request::new_with_str(&text)?;
+                let response = Response::new_with_opt_u8_array(Some(&mut chunk.data))?;
+                Ok((request, response))
+            })
+            .collect::<Result<Vec<_>, DomException>>()?;
+        // insert them one by one to be sure the order is preserved
+        // according to the docs, insertion order is preserved. But I am not sure if that is the
+        // case if you have multiple insert requests in parallel.
+        for (req, res) in tuples {
+            JsFuture::from(self.cache.put_with_request(&req, &res)).await?;
+        }
+        // let futures = tuples
+        //     .into_iter()
+        //     .map(|(req, res)| JsFuture::from(self.cache.put_with_request(&req, &res)))
+        //     .collect::<Vec<_>>();
+        // let _responses = future::try_join_all(futures).await?;
         Ok(())
     }
 }
@@ -309,23 +415,17 @@ impl<K: TKey, V: TValue> RadixDb<K, V> {
         let mut tree: anyhow::Result<ArcRadixTree<K, V>> = Ok(Default::default());
         let mut map = Default::default();
         let mut pos = Default::default();
-        storage
-            .load(
-                &name,
-                Box::new(|data| {
-                    if !data.is_empty() {
-                        let mut deserializer = SharedDeserializeMap2::default();
-                        let archived: &Archived<ArcRadixTree<K, V>> =
-                            unsafe { archived_root::<ArcRadixTree<K, V>>(data) };
-                        tree = archived
-                            .deserialize(&mut deserializer)
-                            .map_err(|e| anyhow::anyhow!("Error while deserializing: {}", e));
-                        map = deserializer.to_shared_serializer_map(&data[0] as *const u8);
-                        pos = data.len();
-                    }
-                }),
-            )
-            .await?;
+        let data = storage.load(&name).await?;
+        if !data.is_empty() {
+            let mut deserializer = SharedDeserializeMap2::default();
+            let archived: &Archived<ArcRadixTree<K, V>> =
+                unsafe { archived_root::<ArcRadixTree<K, V>>(&data) };
+            tree = archived
+                .deserialize(&mut deserializer)
+                .map_err(|e| anyhow::anyhow!("Error while deserializing: {}", e));
+            map = deserializer.to_shared_serializer_map(&data[0] as *const u8);
+            pos = data.len();
+        }
         let tree = tree?;
         let mut arcs = Default::default();
         tree.all_arcs(&mut arcs);
