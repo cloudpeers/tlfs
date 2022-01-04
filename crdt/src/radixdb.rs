@@ -171,7 +171,7 @@ pub trait AbstractRadixDb<K: TKey, V: TValue> {
 
 /// Trait for radixdb storage
 ///
-/// basically supports append and rename
+/// basically supports append and create
 pub trait Storage: Send + Sync + 'static {
     /// appends to a file. Should only return when the data is safely on disk (flushed)!
     /// appending will usually be done in large chunks.
@@ -183,9 +183,8 @@ pub trait Storage: Send + Sync + 'static {
     /// loading a non-existing file is like loading an empty file. It will not create the file.
     fn load(&self, file: &str, f: Box<dyn FnMut(&[u8]) + '_>) -> io::Result<()>;
 
-    /// atomically move a file. target will be atomically overwritten.
-    /// if the source file does not exist, the target file will be deleted.
-    fn mv(&self, from: &str, to: &str) -> io::Result<()>;
+    /// atomically create a file, overwriting an existing file if it exists.
+    fn create(&self, file: &str, data: &[u8]) -> io::Result<()>;
 }
 
 /// A memory based storage implementation.
@@ -195,6 +194,14 @@ pub struct MemStorage {
 }
 
 impl Storage for MemStorage {
+    fn create(&self, file: &str, content: &[u8]) -> std::io::Result<()> {
+        let mut data = self.data.lock();
+        let mut vec = AlignedVec::with_capacity(content.len());
+        vec.extend_from_slice(content);
+        data.insert(file.to_owned(), vec);
+        Ok(())
+    }
+
     fn append(&self, file: &str, chunk: &[u8]) -> std::io::Result<()> {
         if !chunk.is_empty() {
             let mut data = self.data.lock();
@@ -215,22 +222,6 @@ impl Storage for MemStorage {
         } else {
             f(&[])
         };
-        Ok(())
-    }
-
-    fn mv(&self, from: &str, to: &str) -> std::io::Result<()> {
-        if from != to {
-            let mut data = self.data.lock();
-            if let Some(vec) = data.remove(from) {
-                if !vec.is_empty() {
-                    data.insert(to.to_owned(), vec);
-                } else {
-                    data.remove(to);
-                }
-            } else {
-                data.remove(to);
-            }
-        }
         Ok(())
     }
 }
@@ -271,17 +262,21 @@ impl Storage for FileStorage {
         Ok(())
     }
 
-    fn mv(&self, from: &str, to: &str) -> std::io::Result<()> {
-        if from != to {
-            let from = self.base.join(from);
-            let to = self.base.join(to);
-            match fs::rename(from, &to) {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    fs::remove_file(to)?;
-                }
-                Err(e) => return Err(e),
+    fn create(&self, file: &str, content: &[u8]) -> std::io::Result<()> {
+        let tmp = format!("{}.tmp", file);
+        let from = self.base.join(tmp);
+        let to = self.base.join(file);
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&from)?;
+        file.write_all(content)?;
+        match fs::rename(from, &to) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                fs::remove_file(to)?;
             }
+            Err(e) => return Err(e),
         }
         Ok(())
     }
@@ -381,10 +376,8 @@ where
         // disables copy on write for these nodes.
         let mut arcs = BTreeMap::default();
         self.tree.all_arcs(&mut arcs);
-        // store the new file and the new arcs
-        let tmp = format!("{}.tmp", self.name);
-        self.storage.append(&tmp, &file)?;
-        self.storage.mv(&tmp, &self.name)?;
+        // store the new file and the new arcs. This is atomic, so if it fails the old file will be unchanged.
+        self.storage.create(&self.name, &file)?;
         self.pos = file.len();
         self.serializers = Some((map, arcs));
         self.notify();
