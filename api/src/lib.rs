@@ -21,7 +21,7 @@ pub async fn create_memory(package: &[u8]) -> Result<Sdk> {
 }
 
 impl Sdk {
-    pub fn get_peerid(&self) -> String {
+    pub fn get_peer_id(&self) -> String {
         self.0.peer_id().to_string()
     }
 

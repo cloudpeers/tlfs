@@ -130,7 +130,7 @@ fn create_memory(package: &[u8]) -> Future<Result<Sdk>>;
 /// Main entry point for `tlfs`.
 object Sdk {
     /// Returns the peer id of this sdk.
-    fn get_peerid() -> string;
+    fn get_peer_id() -> string;
 
     /// Adds a new multiaddr for a peer id.
     fn add_address(peer_id: &string, addr: &string) -> Result<()>;
