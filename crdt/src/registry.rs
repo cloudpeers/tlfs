@@ -112,6 +112,8 @@ impl Registry {
             let lenses = Ref::new(package.lenses().into());
             let hash = blake3::hash(lenses.as_bytes());
             let name = package.name().into();
+            tracing::info!("Loaded package {}", name);
+            tracing::debug!("Lenses {:#?}", lenses);
             table.insert(name, hash);
             expanded.insert(hash.into(), Arc::new(Expanded::new(lenses)?));
         }

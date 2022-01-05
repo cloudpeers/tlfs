@@ -1125,9 +1125,9 @@ dependencies = [
 
 [[package]]
 name = "ffi-gen"
-version = "0.1.8"
+version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef84110575fc34eb29565a562c44ee8f6bdb94363605ccc361d048dc409b84ad"
+checksum = "87b481bfe9609326ba0c6f9dadc9e9d44f446aff3c86707444db037633ef0f0e"
 dependencies = [
  "anyhow",
  "genco",
