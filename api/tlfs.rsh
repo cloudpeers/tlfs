@@ -185,6 +185,19 @@ object Cursor {
     /// Returns a deep copy of the cursor.
     fn clone() -> Cursor;
 
+    /// TODO
+    fn points_at_value() -> bool;
+    /// TODO
+    fn points_at_array() -> bool;
+    /// TODO
+    fn points_at_struct() -> bool;
+    /// TODO
+    fn points_at_table() -> bool;
+    /// TODO
+    fn value_type() -> Option<string>;
+    /// TODO
+    fn keys() -> Result<Iterator<string>>;
+
     /// Returns if a flag is enabled.
     fn flag_enabled() -> Result<bool>;
     /// Enables a flag.
