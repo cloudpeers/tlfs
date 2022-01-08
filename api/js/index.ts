@@ -1,5 +1,5 @@
 import wbindgen from "../pkg-wasm-bindgen/local_first.js"
-import { Api, Cursor, Doc, Sdk } from "./bindings.js"
+import { Api, Causal, Cursor, Doc, Sdk } from "./bindings.js"
 
 let API: Api;
 
@@ -91,6 +91,44 @@ const get = <T>(doc: Doc, cursor_?: Cursor) => (target: T, p: string | symbol, r
   }
 
 }
+
+const setValue = (cursor: Cursor, value: any): Causal => {
+  switch (cursor.valueType()) {
+    case null:
+    case "null":
+      throw new Error("Not pointing at value type")
+
+    case "bool":
+      if (Boolean(value)) {
+        return cursor.flagEnable()
+      } else {
+        return cursor.flagDisable()
+      }
+
+    case "Reg<bool>":
+
+      return cursor.regAssignBool(Boolean(value))
+
+    case "Reg<u64>":
+
+
+      return cursor.regAssignU64(BigInt(value))
+
+
+    case "Reg<i64>":
+
+      return cursor.regAssignI64(BigInt(value))
+
+    case "Reg<string>":
+
+      return cursor.regAssignStr(value.toString())
+
+    default: {
+      throw new Error("unreachable")
+    }
+  }
+}
+
 const mkProxy = <T extends object>(doc: Doc, cursor_?: Cursor): T => {
 
   return new Proxy<T>({} as T, {
@@ -145,56 +183,74 @@ const mkProxy = <T extends object>(doc: Doc, cursor_?: Cursor): T => {
 
       traverse(cursor, p)
 
+      let causal: Causal | undefined;
+      // TODO: fix brute force approach
       if (Array.isArray(value)) {
-        // TODO
-      } else if (typeof value == 'object') {
-
-        // TODO
-      } else {
-        let causal;
-        switch (cursor.valueType()) {
-          case null:
-          case "null": {
-            throw new Error("Not pointing at value type")
-          }
-          case "bool": {
-            if (Boolean(value)) {
-              causal = cursor.flagEnable()
-            } else {
-              causal = cursor.flagDisable()
-            }
-            break;
-          }
-          case "Reg<bool>":
-            {
-              causal = cursor.regAssignBool(Boolean(value))
-              break;
-            }
-          case "Reg<u64>":
-
-            {
-              causal = cursor.regAssignU64(BigInt(value))
-              break;
-            }
-
-          case "Reg<i64>":
-            {
-              causal = cursor.regAssignI64(BigInt(value))
-
-              break;
-            }
-          case "Reg<string>":
-            {
-              causal = cursor.regAssignStr(value.toString())
-              break;
-            }
-          default: {
-            throw new Error("unreachable")
+        // overwrite complete array
+        for (let index = 0; index < cursor.arrayLength(); index++) {
+          const here = cursor.clone()
+          here.arrayIndex(index)
+          const c = here.arrayRemove()
+          if (causal) {
+            causal.join(c)
+          } else {
+            causal = c
           }
         }
-        doc.applyCausal(causal)
+        value.forEach((v, idx) => {
+          const here = cursor.clone()
+          here.arrayIndex(idx)
+          const c = setValue(here, v)
+          if (causal) {
+            causal.join(c)
+          } else {
+            causal = c
+          }
+        })
+
+      } else if (typeof value == 'object') {
+        // delete complete object, if table
+        if (cursor.pointsAtTable()) {
+          for (const k in cursor.keys()) {
+            const here = cursor.clone()
+            here.mapKeyStr(k)
+            const c = here.mapRemove()
+            if (causal) {
+              causal.join(c)
+            } else {
+              causal = c
+            }
+          }
+        }
+
+        // add
+        Object.entries(value).forEach(([k, v]) => {
+          const here = cursor.clone()
+          if (here.pointsAtTable()) {
+            here.mapKeyStr(k)
+          } else {
+            here.structField(k)
+          }
+          const c = setValue(here, v)
+          if (causal) {
+            causal.join(c)
+          } else {
+            causal = c
+          }
+        })
+
+
+      } else {
+        // leaf value
+        causal = setValue(cursor, value)
       }
-      return true
+
+      if (causal) {
+        doc.applyCausal(causal)
+        return true
+      } else {
+        return false
+      }
     }
     //    setPrototypeOf?(target: T, v: object | null): boolean,
 
