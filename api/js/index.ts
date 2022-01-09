@@ -4,27 +4,7 @@ import { Api, Causal, Cursor, Doc, Sdk } from "./bindings.js"
 
 let API: Api;
 
-/**
- * todoapp {
-    0.1.0 {
-        .: Struct
-        .title: MVReg<String>
-        .tasks: Array
-        .tasks.[]: Struct
-        .tasks.[].title: MVReg<String>
-        .tasks.[].complete: EWFlag
-    }
-}
-cargo run --target x86_64-unknown-linux-gnu -- --input ../api/dart/test/todoapp.tlfs --output /dev/stdout | base64 -w0
- */
-let pkg = Array.from(
-  atob(
-    "AAIDAAAAAAAAAAAAAAAAAAAAAAAABQAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAACAAAAOj///8AAAAAAAAAAAAAAAACAAAAdGl0bGUAAAUAAAAAAAAAAAgAAADo////AAAAAAAAAAAAAAAAAAIDAAAAAAAAAAAAAAAAAAAAAAAHAAAAdGl0bGUAAAXg////AAAAAAgAAADo////AAAAAAAAAAAAAAAAY29tcGxldGUCAAAACAAAAPT///8AAAAAAAAAAAgAAADo////AAAAAAAAAAAAAAAAY29tcGxldGUAAQAAAAAAAAAAAAAAAAAAAAAAAAcAAAAIAAAA4P///+D///8AAAAACAAAAOj///8AAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAIAAAB0aXRsZQAABQAAAAAAAAAABwAAAHRpdGxlAAAFpP7//wAAAAACAAAAdGFza3MAAAUAAAAAAAAAAAcAAAB0YXNrcwAABZD+//8AAAAABwAAAHRhc2tzAAAFpP7//wAAAAAHAAAAdGFza3MAAAW4/v//AAAAAAcAAAB0YXNrcwAABeD+//8AAAAABwAAAHRhc2tzAAAF/P7//wAAAAAHAAAAdGFza3MAAAUs////AAAAADj///8KAAAAdG9kb2FwcAcKAAAA/P3///gBAADs////AQAAAA=="
-  ),
-  (c) => c.charCodeAt(0)
-)
-
-const init = async () => {
+const init = async (pkg: number[]) => {
   if (API) {
     return await API.createMemory(pkg);
   }
@@ -43,9 +23,9 @@ const init = async () => {
 class LocalFirst {
   public sdk!: Sdk;
 
-  static async create() {
+  static async create(pkg: number[]) {
     const w = new LocalFirst();
-    w.sdk = await init();
+    w.sdk = await init(pkg);
     return w;
   }
 
@@ -258,16 +238,16 @@ const mkProxy = <T extends object>(doc: Doc, cursor_?: Cursor): T => {
 
 }
 
-const start = async () => {
-  let localfirst = await LocalFirst.create();
-  let w = window as any;
-
-  w.localfirst = localfirst;
-  console.log("Peer ID:", localfirst.sdk.getPeerId())
-
-
-  //  w.doc = localfirst.proxy(localfirst.sdk.api.)
-}
-start();
+//const start = async () => {
+//  let localfirst = await LocalFirst.create();
+//  let w = window as any;
+//
+//  w.localfirst = localfirst;
+//  console.log("Peer ID:", localfirst.sdk.getPeerId())
+//
+//
+//  //  w.doc = localfirst.proxy(localfirst.sdk.api.)
+//}
+//start();
 export default LocalFirst;
 export * from './bindings'

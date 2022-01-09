@@ -52,6 +52,7 @@ impl<'a> Cursor<'a> {
         self.crdt.can(peer, perm, self.path.as_path())
     }
 
+    /// Return the current schema.
     pub fn schema(&self) -> &'a Archived<Schema> {
         self.schema
     }
@@ -132,7 +133,6 @@ impl<'a> Cursor<'a> {
 
     /// If the cursor points to a Struct or a Table, returns an iterator of all existing keys.
     pub fn keys(&self) -> Result<Vec<String>> {
-        tracing::debug!("keys, {:?}", self.schema);
         match self.schema {
             ArchivedSchema::Array(_) => {
                 let len = self.len().unwrap_or(0);
@@ -156,10 +156,7 @@ impl<'a> Cursor<'a> {
                     })
                     .collect::<Result<Vec<_>>>()
             }
-            ArchivedSchema::Struct(s) => {
-                tracing::debug!("struct keys, {:?}", s.keys().collect::<Vec<_>>());
-                Ok(s.keys().map(|x| x.to_string()).collect())
-            }
+            ArchivedSchema::Struct(s) => Ok(s.keys().map(|x| x.to_string()).collect()),
             _ => Ok(vec![]),
         }
     }
