@@ -1,3 +1,4 @@
+import { default as wasmbin } from "../pkg-wasm-bindgen/local_first_bg.wasm"
 import wbindgen from "../pkg-wasm-bindgen/local_first.js"
 import { Api, Causal, Cursor, Doc, Sdk } from "./bindings.js"
 
@@ -28,7 +29,8 @@ const init = async () => {
     return await API.createMemory(pkg);
   }
   else {
-    const x = await wbindgen();
+    //const x = await wbindgen("../pkg-wasm-bindgen/local_first_bg.wasm");
+    const x = await wbindgen(wasmbin)
 
     API = new Api();
     // @ts-ignore
@@ -256,15 +258,16 @@ const mkProxy = <T extends object>(doc: Doc, cursor_?: Cursor): T => {
 
 }
 
-//const start = async () => {
-//  let localfirst = await LocalFirst.create();
-//  let w = window as any;
-//
-//  w.localfirst = localfirst;
-//  console.log("Peer ID:", localfirst.sdk.getPeerId())
-//
-//
-//  //  w.doc = localfirst.proxy(localfirst.sdk.api.)
-//}
-//start();
+const start = async () => {
+  let localfirst = await LocalFirst.create();
+  let w = window as any;
+
+  w.localfirst = localfirst;
+  console.log("Peer ID:", localfirst.sdk.getPeerId())
+
+
+  //  w.doc = localfirst.proxy(localfirst.sdk.api.)
+}
+start();
 export default LocalFirst;
+export * from './bindings'

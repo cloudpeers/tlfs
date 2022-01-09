@@ -2,10 +2,12 @@
   "name": "tlfs",
   "version": "0.1.0",
   "description": "The local first SDK",
-  "main": "bindings.js",
+  "main": "lib/index.js",
+  "module": "lib/index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "tsc"
+    "build": "rimraf lib && tsc --emitDeclarationOnly --outDir lib && node esbuild.config.js",
+    "prepublish": "npm run build"
   },
   "repository": {
     "type": "git",
@@ -16,19 +18,23 @@
     "sdk"
   ],
   "author": "cloudpeer",
-  "license": "ISC",
-  "types": "./bindings.d.ts",
+  "license": "MIT",
+  "types": "lib/index.d.ts",
+  "files": ["lib/"],
   "bugs": {
     "url": "https://github.com/cloudpeers/tlfs/issues"
   },
   "homepage": "https://github.com/cloudpeers/tlfs#readme",
   "devDependencies": {
+    "esbuild": "^0.14.11",
+    "esbuild-node-externals": "^1.4.1",
     "eslint-config-prettier": "^8.3.0",
     "eslint-plugin-prettier": "^4.0.0",
     "jest": "^27.4.5",
     "jest-puppeteer": "^3.9.0",
     "prettier": "^2.5.1",
     "puppeteer": "^1.20.0",
+    "rimraf": "^3.0.2",
     "typescript": "^4.5.4"
   }
 }

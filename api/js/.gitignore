@@ -1,3 +1,5 @@
 dist
 index.js
 node_modules
+*.tgz
+lib
