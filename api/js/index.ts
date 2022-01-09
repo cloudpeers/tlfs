@@ -38,11 +38,11 @@ const init = async () => {
 
 };
 
-class Wrapper {
+class LocalFirst {
   public sdk!: Sdk;
 
   static async create() {
-    const w = new Wrapper();
+    const w = new LocalFirst();
     w.sdk = await init();
     return w;
   }
@@ -51,6 +51,7 @@ class Wrapper {
     return mkProxy<T>(doc)
   }
 }
+
 const traverse = (cursor: Cursor, p: any) => {
   if (cursor.pointsAtArray()) {
     cursor.arrayIndex(Number(p));
@@ -145,23 +146,21 @@ const mkProxy = <T extends object>(doc: Doc, cursor_?: Cursor): T => {
 
       if (cursor.pointsAtValue()) {
         switch (cursor.valueType()) {
-          case "null": { return undefined; }
-          case "bool": { return cursor.flagEnabled() }
+          case "null": return undefined
+          case "bool": return cursor.flagEnabled()
           case "Reg<bool>":
-            { return Array.from(cursor.regBools())[0] }
+            return Array.from(cursor.regBools())[0]
           case "Reg<u64>":
-            { return Array.from(cursor.regU64s())[0] }
+            return Array.from(cursor.regU64s())[0]
           case "Reg<i64>":
-            { return Array.from(cursor.regI64s())[0] }
+            return Array.from(cursor.regI64s())[0]
           case "Reg<string>":
-            { return Array.from(cursor.regStrs())[0] }
+            return Array.from(cursor.regStrs())[0]
         }
       } else {
-
         // return new object if not at a leaf
         return mkProxy(doc, cursor.clone())
       }
-
     },
     getOwnPropertyDescriptor(target: T, p: string | symbol): PropertyDescriptor | undefined {
       // TODO: check `p`
@@ -184,7 +183,7 @@ const mkProxy = <T extends object>(doc: Doc, cursor_?: Cursor): T => {
       traverse(cursor, p)
 
       let causal: Causal | undefined;
-      // TODO: fix brute force approach
+      // TODO: fix brute force
       if (Array.isArray(value)) {
         // overwrite complete array
         for (let index = 0; index < cursor.arrayLength(); index++) {
@@ -253,30 +252,19 @@ const mkProxy = <T extends object>(doc: Doc, cursor_?: Cursor): T => {
       }
     }
     //    setPrototypeOf?(target: T, v: object | null): boolean,
-
-
   })
 
 }
 
-class DocProxy {
-  doc: Doc
-
-  constructor(doc: Doc) {
-    this.doc = doc
-  }
-  mutate<T>(fn: (_: T) => void) { }
-}
-
-const start = async () => {
-  let localfirst = await Wrapper.create();
-  let w = window as any;
-
-  w.localfirst = localfirst;
-  console.log("Peer ID:", localfirst.sdk.getPeerId())
-
-
-  //  w.doc = localfirst.proxy(localfirst.sdk.api.)
-}
-start();
-export default Wrapper;
+//const start = async () => {
+//  let localfirst = await LocalFirst.create();
+//  let w = window as any;
+//
+//  w.localfirst = localfirst;
+//  console.log("Peer ID:", localfirst.sdk.getPeerId())
+//
+//
+//  //  w.doc = localfirst.proxy(localfirst.sdk.api.)
+//}
+//start();
+export default LocalFirst;
