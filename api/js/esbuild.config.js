@@ -30,7 +30,7 @@ let wasmPlugin = {
 require('esbuild').build({
   entryPoints: ['index.ts'],
   bundle: true,
-  minify: false,
+  minify: true,
   outfile: 'lib/index.js',
   plugins: [wasmPlugin],
   platform: 'browser',
