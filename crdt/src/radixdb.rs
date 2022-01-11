@@ -207,6 +207,14 @@ impl Storage for MemStorage {
         Ok(())
     }
 
+    fn set(&self, file: &str, content: &[u8]) -> std::io::Result<()> {
+        let mut data = self.data.lock();
+        let mut entry = AlignedVec::new();
+        entry.extend_from_slice(content);
+        data.insert(file.to_owned(), entry);
+        Ok(())
+    }
+
     fn load(&self, file: &str, mut f: Box<dyn FnMut(&[u8]) + '_>) -> std::io::Result<()> {
         let data = self.data.lock();
         if let Some(vec) = data.get(file) {
@@ -216,13 +224,128 @@ impl Storage for MemStorage {
         };
         Ok(())
     }
+}
 
-    fn set(&self, file: &str, content: &[u8]) -> std::io::Result<()> {
-        let mut data = self.data.lock();
-        let mut entry = AlignedVec::new();
-        entry.extend_from_slice(content);
-        data.insert(file.to_owned(), entry);
+#[cfg(feature = "browser")]
+mod browser {
+    use js_sys::{Array, ArrayBuffer, Uint8Array};
+    use parking_lot::Mutex;
+    use rkyv::AlignedVec;
+    use std::{collections::BTreeMap, io, sync::Arc};
+    use url::Url;
+    use wasm_bindgen::{prelude::Closure, JsValue};
+    use wasm_bindgen_futures::JsFuture;
+    use web_sys::{Cache, CacheQueryOptions, DomException, Request, Response};
+
+    use crate::Storage;
+
+    #[derive(Debug)]
+    pub struct CacheFileStore {
+        cache: web_sys::Cache,
+        data: Arc<Mutex<BTreeMap<String, AlignedVec>>>,
+    }
+
+    unsafe impl Send for CacheFileStore {}
+
+    unsafe impl Sync for CacheFileStore {}
+
+    async fn load(cache: &Cache, name: &str) -> Result<AlignedVec, DomException> {
+        let responses = JsFuture::from(
+            cache
+                .match_all_with_str_and_options(name, CacheQueryOptions::new().ignore_search(true)),
+        )
+        .await?;
+        let mut res = AlignedVec::new();
+        for response in Array::from(&responses).iter() {
+            let response = Response::from(response);
+            let ab = ArrayBuffer::from(JsFuture::from(response.array_buffer()?).await?);
+            let data = Uint8Array::new(&ab).to_vec();
+            res.extend_from_slice(&data);
+        }
+        Ok(res)
+    }
+
+    /// fire writing to a cache, without waiting for completion
+    fn fire_write(
+        cache: &Cache,
+        name: &str,
+        content: &[u8],
+    ) -> std::result::Result<(), DomException> {
+        let mut content = content.to_vec();
+        let req = Request::new_with_str(name)?;
+        let res = Response::new_with_opt_u8_array(Some(&mut content))?;
+        // this is a js promise, not a rust future. So it will fire immediately.
+        // I assume that subsequent writes to the same file will be ordered.
+        let _promise = cache.put_with_request(&req, &res);
         Ok(())
+    }
+
+    /// Convert a DomException to a std::io::Error
+    fn dom_to_io(e: DomException) -> io::Error {
+        io::Error::new(io::ErrorKind::Other, e.name())
+    }
+
+    impl CacheFileStore {
+        pub async fn new(name: &str) -> std::result::Result<CacheFileStore, DomException> {
+            let window = web_sys::window().expect("unable to get window");
+            let caches = window.caches()?;
+            let cache = web_sys::Cache::from(JsFuture::from(caches.open(name)).await?);
+            let keys = JsFuture::from(cache.keys()).await?;
+            // set of distinct names
+            let names = Array::from(&keys)
+                .iter()
+                .map(|req| Request::from(req).url())
+                .filter_map(|url| {
+                    Url::parse(&url)
+                        .ok()
+                        .and_then(|x| x.path().strip_prefix("/").map(|x| x.to_string()))
+                })
+                .collect::<Vec<String>>();
+            let mut data = BTreeMap::new();
+            for name in names {
+                let content = load(&cache, &name).await?;
+                data.insert(name, content);
+            }
+            Ok(Self {
+                data: Arc::new(Mutex::new(data)),
+                cache,
+            })
+        }
+    }
+
+    impl Storage for CacheFileStore {
+        fn append(&self, file: &str, chunk: &[u8]) -> std::io::Result<()> {
+            if !chunk.is_empty() {
+                let mut data = self.data.lock();
+                let vec = if let Some(vec) = data.get_mut(file) {
+                    vec
+                } else {
+                    data.entry(file.to_owned()).or_default()
+                };
+                vec.extend_from_slice(chunk);
+                fire_write(&self.cache, file, &vec).map_err(dom_to_io)?;
+            }
+            Ok(())
+        }
+
+        fn set(&self, file: &str, content: &[u8]) -> std::io::Result<()> {
+            let mut data = self.data.lock();
+            let mut entry = AlignedVec::new();
+            entry.extend_from_slice(content);
+            data.insert(file.to_owned(), entry);
+            fire_write(&self.cache, file, &content).map_err(dom_to_io)?;
+            Ok(())
+        }
+
+        fn load(&self, file: &str, mut f: Box<dyn FnMut(&[u8]) + '_>) -> std::io::Result<()> {
+            let data = self.data.lock();
+            if let Some(vec) = data.get(file) {
+                f(vec)
+            } else {
+                f(&[])
+            };
+            Ok(())
+        }
     }
 }
 
