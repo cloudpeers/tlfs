@@ -233,7 +233,6 @@ mod browser {
     use rkyv::AlignedVec;
     use std::{collections::BTreeMap, io, sync::Arc};
     use url::Url;
-    use wasm_bindgen::{prelude::Closure, JsValue};
     use wasm_bindgen_futures::JsFuture;
     use web_sys::{Cache, CacheQueryOptions, DomException, Request, Response};
 
@@ -298,7 +297,7 @@ mod browser {
                 .filter_map(|url| {
                     Url::parse(&url)
                         .ok()
-                        .and_then(|x| x.path().strip_prefix("/").map(|x| x.to_string()))
+                        .and_then(|x| x.path().strip_prefix('/').map(|x| x.to_string()))
                 })
                 .collect::<Vec<String>>();
             let mut data = BTreeMap::new();
@@ -323,7 +322,7 @@ mod browser {
                     data.entry(file.to_owned()).or_default()
                 };
                 vec.extend_from_slice(chunk);
-                fire_write(&self.cache, file, &vec).map_err(dom_to_io)?;
+                fire_write(&self.cache, file, vec).map_err(dom_to_io)?;
             }
             Ok(())
         }
@@ -333,7 +332,7 @@ mod browser {
             let mut entry = AlignedVec::new();
             entry.extend_from_slice(content);
             data.insert(file.to_owned(), entry);
-            fire_write(&self.cache, file, &content).map_err(dom_to_io)?;
+            fire_write(&self.cache, file, content).map_err(dom_to_io)?;
             Ok(())
         }
 
