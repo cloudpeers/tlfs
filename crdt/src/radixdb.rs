@@ -179,13 +179,12 @@ pub trait Storage: Send + Sync + 'static {
     /// appending an empty chunk is a noop.
     fn append(&self, file: &str, chunk: &[u8]) -> io::Result<()>;
 
+    /// atomically set the content of a file
+    fn set(&self, file: &str, data: &[u8]) -> io::Result<()>;
+
     /// load a file. The callback will get to look at the data and do something with it.
     /// loading a non-existing file is like loading an empty file. It will not create the file.
     fn load(&self, file: &str, f: Box<dyn FnMut(&[u8]) + '_>) -> io::Result<()>;
-
-    /// atomically move a file. target will be atomically overwritten.
-    /// if the source file does not exist, the target file will be deleted.
-    fn mv(&self, from: &str, to: &str) -> io::Result<()>;
 }
 
 /// A memory based storage implementation.
@@ -218,19 +217,11 @@ impl Storage for MemStorage {
         Ok(())
     }
 
-    fn mv(&self, from: &str, to: &str) -> std::io::Result<()> {
-        if from != to {
-            let mut data = self.data.lock();
-            if let Some(vec) = data.remove(from) {
-                if !vec.is_empty() {
-                    data.insert(to.to_owned(), vec);
-                } else {
-                    data.remove(to);
-                }
-            } else {
-                data.remove(to);
-            }
-        }
+    fn set(&self, file: &str, content: &[u8]) -> std::io::Result<()> {
+        let mut data = self.data.lock();
+        let mut entry = AlignedVec::new();
+        entry.extend_from_slice(content);
+        data.insert(file.to_owned(), entry);
         Ok(())
     }
 }
@@ -262,27 +253,30 @@ impl Storage for FileStorage {
         Ok(())
     }
 
+    fn set(&self, file: &str, data: &[u8]) -> std::io::Result<()> {
+        let tmp = format!("{}.tmp", file);
+        let mut tmp_file = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(self.base.join(&tmp))?;
+        tmp_file.write_all(data)?;
+        tmp_file.flush()?;
+        let from = self.base.join(tmp);
+        let to = self.base.join(file);
+        match fs::rename(&from, &to) {
+            Ok(()) => {}
+            Err(e) => return Err(e),
+        }
+        Ok(())
+    }
+
     fn load(&self, file: &str, mut f: Box<dyn FnMut(&[u8]) + '_>) -> io::Result<()> {
         match std::fs::read(self.base.join(file)) {
             Ok(data) => f(&data),
             Err(e) if e.kind() == io::ErrorKind::NotFound => f(&[]),
             Err(e) => return Err(e),
         };
-        Ok(())
-    }
-
-    fn mv(&self, from: &str, to: &str) -> std::io::Result<()> {
-        if from != to {
-            let from = self.base.join(from);
-            let to = self.base.join(to);
-            match fs::rename(from, &to) {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    fs::remove_file(to)?;
-                }
-                Err(e) => return Err(e),
-            }
-        }
         Ok(())
     }
 }
@@ -382,9 +376,7 @@ where
         let mut arcs = BTreeMap::default();
         self.tree.all_arcs(&mut arcs);
         // store the new file and the new arcs
-        let tmp = format!("{}.tmp", self.name);
-        self.storage.append(&tmp, &file)?;
-        self.storage.mv(&tmp, &self.name)?;
+        self.storage.set(&self.name, &file)?;
         self.pos = file.len();
         self.serializers = Some((map, arcs));
         self.notify();
