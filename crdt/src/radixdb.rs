@@ -292,6 +292,7 @@ mod cache_storage {
     use js_sys::{Array, ArrayBuffer, Uint8Array};
     use std::{
         collections::{BTreeMap, VecDeque},
+        convert::TryFrom,
         io,
     };
     use wasm_bindgen::JsValue;
@@ -389,22 +390,18 @@ mod cache_storage {
                 CacheQueryOptions::new().ignore_search(true),
             ))
             .await?;
-            let mut parts = Vec::new();
+            let mut res = Vec::new();
+            // we rely on the responses to be ordered by insertion order, as promised in the Cache documentation
+            // https://developer.mozilla.org/en-US/docs/Web/API/Cache/keys
+            // "The requests are returned in the same order that they were inserted."
+            //
+            // I tried using the response url to sort the blocks, but it is not set.
             for response in Array::from(&responses).iter() {
                 let response = Response::from(response);
-                if let Some(to) = parse_query(&response.url()) {
-                    let ab = ArrayBuffer::from(JsFuture::from(response.array_buffer()?).await?);
-                    let data = Uint8Array::new(&ab).to_vec();
-                    parts.push((to, data));
-                }
+                let ab = ArrayBuffer::from(JsFuture::from(response.array_buffer()?).await?);
+                let data = Uint8Array::new(&ab).to_vec();
+                res.extend_from_slice(&data);
             }
-            parts.sort_by_key(|(to, _)| *to);
-            // todo: check for holes?
-            let res = parts
-                .into_iter()
-                .map(|(_, value)| value)
-                .flat_map(|data| data)
-                .collect();
             drop(offsets);
             Ok(res)
         }
