@@ -3997,6 +3997,7 @@ dependencies = [
  "tracing-log",
  "tracing-subscriber",
  "vec-collections",
+ "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
 ]

@@ -6,9 +6,10 @@ use std::{
     sync::Arc,
 };
 
+use crate::Ref;
 use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
-    future::{self, BoxFuture},
+    future::{self, BoxFuture, LocalBoxFuture},
     stream::BoxStream,
     FutureExt, StreamExt,
 };
@@ -28,14 +29,6 @@ use rkyv::{
 use vec_collections::radix_tree::{
     AbstractRadixTree, AbstractRadixTreeMut, ArcRadixTree, IterKey, TKey, TValue,
 };
-#[cfg(feature = "browser")]
-use {
-    js_sys::{Array, ArrayBuffer, Uint8Array},
-    wasm_bindgen_futures::JsFuture,
-    web_sys::{CacheQueryOptions, DomException, Request, Response},
-};
-
-use crate::Ref;
 
 /// The difference between a tree at one point in time `v0` and at a later point in time `v1`.
 ///
@@ -161,7 +154,7 @@ pub trait AbstractRadixDb<K: TKey, V: TValue> {
     fn tree(&self) -> &ArcRadixTree<K, V>;
     fn tree_mut(&mut self) -> &mut ArcRadixTree<K, V>;
     fn flush(&mut self) -> anyhow::Result<()>;
-    fn vacuum(&mut self) -> anyhow::Result<()>;
+    fn vacuum(&mut self) -> LocalBoxFuture<anyhow::Result<()>>;
     fn watch(&mut self) -> futures::channel::mpsc::UnboundedReceiver<ArcRadixTree<K, V>>;
     fn watch_prefix(&mut self, prefix: Vec<K>) -> BoxStream<'static, Diff<K, V>> {
         let tree = self.tree().clone();
@@ -185,12 +178,12 @@ pub trait Storage: Send + Sync + 'static {
     /// appending an empty chunk is a noop.
     fn append(&self, file: &str, chunk: &[u8]) -> io::Result<()>;
 
+    /// atomically create a file, overwriting an existing file if it exists.
+    fn create(&self, file: String, data: Vec<u8>) -> BoxFuture<io::Result<()>>;
+
     /// load a file. The callback will get to look at the data and do something with it.
     /// loading a non-existing file is like loading an empty file. It will not create the file.
-    fn load(&self, file: &str) -> BoxFuture<io::Result<Vec<u8>>>;
-
-    /// atomically create a file, overwriting an existing file if it exists.
-    fn create(&self, file: &str, data: &[u8]) -> io::Result<()>;
+    fn load(&self, file: String) -> BoxFuture<io::Result<Vec<u8>>>;
 }
 
 /// A memory based storage implementation.
@@ -200,12 +193,12 @@ pub struct MemStorage {
 }
 
 impl Storage for MemStorage {
-    fn create(&self, file: &str, content: &[u8]) -> std::io::Result<()> {
+    fn create(&self, file: String, content: Vec<u8>) -> BoxFuture<std::io::Result<()>> {
         let mut data = self.data.lock();
         let mut vec = AlignedVec::with_capacity(content.len());
-        vec.extend_from_slice(content);
+        vec.extend_from_slice(&content);
         data.insert(file.to_owned(), vec);
-        Ok(())
+        future::ok(()).boxed()
     }
 
     fn append(&self, file: &str, chunk: &[u8]) -> std::io::Result<()> {
@@ -221,9 +214,9 @@ impl Storage for MemStorage {
         Ok(())
     }
 
-    fn load(&self, file: &str) -> BoxFuture<std::io::Result<Vec<u8>>> {
+    fn load(&self, file: String) -> BoxFuture<std::io::Result<Vec<u8>>> {
         let data = self.data.lock();
-        let res = data.get(file).map(|x| x.to_vec()).unwrap_or_default();
+        let res = data.get(&file).map(|x| x.to_vec()).unwrap_or_default();
         future::ok(res).boxed()
     }
 }
@@ -243,6 +236,27 @@ impl FileStorage {
     }
 }
 
+impl FileStorage {
+    fn create0(&self, file: String, content: Vec<u8>) -> std::io::Result<()> {
+        let tmp = format!("{}.tmp", file);
+        let from = self.base.join(tmp);
+        let to = self.base.join(file);
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&from)?;
+        file.write_all(&content)?;
+        match fs::rename(from, &to) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                fs::remove_file(to)?;
+            }
+            Err(e) => return Err(e),
+        }
+        Ok(())
+    }
+}
+
 impl Storage for FileStorage {
     fn append(&self, file: &str, chunk: &[u8]) -> io::Result<()> {
         if !chunk.is_empty() {
@@ -255,7 +269,7 @@ impl Storage for FileStorage {
         Ok(())
     }
 
-    fn load(&self, file: &str) -> BoxFuture<io::Result<Vec<u8>>> {
+    fn load(&self, file: String) -> BoxFuture<io::Result<Vec<u8>>> {
         let res = match std::fs::read(self.base.join(file)) {
             Ok(data) => data.clone(),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
@@ -264,131 +278,190 @@ impl Storage for FileStorage {
         future::ok(res).boxed()
     }
 
-    fn create(&self, file: &str, content: &[u8]) -> std::io::Result<()> {
-        let tmp = format!("{}.tmp", file);
-        let from = self.base.join(tmp);
-        let to = self.base.join(file);
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&from)?;
-        file.write_all(content)?;
-        match fs::rename(from, &to) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                fs::remove_file(to)?;
-            }
-            Err(e) => return Err(e),
+    fn create(&self, file: String, content: Vec<u8>) -> BoxFuture<std::io::Result<()>> {
+        let res = self.create0(file, content);
+        future::ready(res).boxed()
+    }
+}
+
+#[cfg(feature = "browser")]
+mod cache_storage {
+
+    use super::Storage;
+    use futures::{future::BoxFuture, FutureExt, TryFutureExt};
+    use js_sys::{Array, ArrayBuffer, Uint8Array};
+    use std::{
+        collections::{BTreeMap, VecDeque},
+        io,
+    };
+    use wasm_bindgen::JsValue;
+    use wasm_bindgen_futures::JsFuture;
+    use web_sys::{CacheQueryOptions, DomException, Request, Response};
+
+    #[derive(Debug)]
+    struct Chunk {
+        name: String,
+        data: Vec<u8>,
+    }
+
+    #[derive(Debug)]
+    pub struct CacheFileStore {
+        cache: web_sys::Cache,
+        chunks: parking_lot::Mutex<VecDeque<Chunk>>,
+        offsets: futures::lock::Mutex<BTreeMap<String, u32>>,
+    }
+
+    unsafe impl Send for CacheFileStore {}
+
+    unsafe impl Sync for CacheFileStore {}
+
+    impl CacheFileStore {
+        pub async fn new(name: &str) -> Result<Self, DomException> {
+            let window = web_sys::window().expect("unable to get window");
+            let caches = window.caches()?;
+            let cache = web_sys::Cache::from(JsFuture::from(caches.open(name)).await?);
+            Ok(Self {
+                cache,
+                chunks: parking_lot::Mutex::new(Default::default()),
+                offsets: futures::lock::Mutex::new(Default::default()),
+            })
         }
-        Ok(())
-    }
-}
 
-#[cfg(feature = "browser")]
-#[derive(Debug)]
-struct Chunk {
-    name: String,
-    data: Vec<u8>,
-}
+        /// synchronous append
+        fn append0(&self, name: String, data: Vec<u8>) {
+            self.chunks.lock().push_back(Chunk { name, data });
+        }
 
-#[cfg(feature = "browser")]
-#[derive(Debug)]
-pub struct CacheFileStore {
-    cache: web_sys::Cache,
-    chunks: Mutex<Vec<Chunk>>,
-}
-
-#[cfg(feature = "browser")]
-impl CacheFileStore {
-    pub async fn new(name: &str) -> Result<Self, DomException> {
-        let window = web_sys::window().expect("unable to get window");
-        let caches = window.caches()?;
-        let cache = web_sys::Cache::from(JsFuture::from(caches.open(name)).await?);
-        Ok(Self {
-            cache,
-            chunks: Mutex::new(Vec::new()),
-        })
-    }
-
-    /// synchronous append
-    pub fn append_sync(&self, name: String, data: Vec<u8>) {
-        self.chunks.lock().push(Chunk { name, data });
-    }
-
-    pub async fn flush(&self) -> Result<(), DomException> {
-        let mut to_flush = Vec::new();
-        std::mem::swap(&mut to_flush, self.chunks.lock().as_mut());
-        if let Err(e) = self.batch_write(&mut to_flush).await {
-            // flush failed, we have to insert the chunks at the start so we can try again next time.
-            self.chunks.lock().splice(0..0, to_flush);
-            Err(e)
-        } else {
+        async fn create0(&self, file: String, mut data: Vec<u8>) -> Result<(), DomException> {
+            let len = u32::try_from(data.len()).unwrap();
+            let mut offsets = self.offsets.lock().await;
+            self.chunks.lock().retain(|x| x.name != file);
+            JsFuture::from(
+                self.cache.delete_with_str_and_options(
+                    &file,
+                    CacheQueryOptions::new().ignore_search(true),
+                ),
+            )
+            .await
+            .expect("deletion not possible!");
+            let req = create_request(&file, len)?;
+            let res = Response::new_with_opt_u8_array(Some(&mut data))?;
+            JsFuture::from(self.cache.put_with_request(&req, &res))
+                .await
+                .expect("insertion not possible");
+            offsets.insert(file, len);
+            drop(offsets);
             Ok(())
         }
+
+        pub async fn flush(&self) -> Result<(), DomException> {
+            let mut offsets = self.offsets.lock().await;
+            while let Some(mut chunk) = self.chunks.lock().pop_front() {
+                let offset = if let Some(offset) = offsets.get(&chunk.name) {
+                    *offset
+                } else {
+                    let offset = max_offset_from_keys(&self.cache, &chunk.name).await?;
+                    offsets.insert(chunk.name.clone(), offset);
+                    offset
+                };
+                let to = offset + u32::try_from(chunk.data.len()).unwrap();
+                let req = create_request(&chunk.name, to)?;
+                let res = Response::new_with_opt_u8_array(Some(&mut chunk.data))?;
+                match JsFuture::from(self.cache.put_with_request(&req, &res)).await {
+                    Ok(_) => {
+                        offsets.insert(chunk.name, to);
+                    }
+                    Err(e) => {
+                        // that did not work, put back the chunk
+                        self.chunks.lock().push_front(chunk);
+                        Err(e)?
+                    }
+                }
+            }
+            drop(offsets);
+            Ok(())
+        }
+
+        async fn load0(&self, name: String) -> Result<Vec<u8>, DomException> {
+            let offsets = self.offsets.lock().await;
+            let responses = JsFuture::from(self.cache.match_all_with_str_and_options(
+                &name,
+                CacheQueryOptions::new().ignore_search(true),
+            ))
+            .await?;
+            let mut parts = Vec::new();
+            for response in Array::from(&responses).iter() {
+                let response = Response::from(response);
+                if let Some(to) = parse_query(&response.url()) {
+                    let ab = ArrayBuffer::from(JsFuture::from(response.array_buffer()?).await?);
+                    let data = Uint8Array::new(&ab).to_vec();
+                    parts.push((to, data));
+                }
+            }
+            parts.sort_by_key(|(to, _)| *to);
+            // todo: check for holes?
+            let res = parts
+                .into_iter()
+                .map(|(_, value)| value)
+                .flat_map(|data| data)
+                .collect();
+            drop(offsets);
+            Ok(res)
+        }
     }
 
-    async fn load_to_vec(&self, name: &str) -> Result<Vec<u8>, DomException> {
-        let responses = JsFuture::from(
-            self.cache
-                .match_all_with_str_and_options(name, CacheQueryOptions::new().ignore_search(true)),
+    async fn max_offset_from_keys(cache: &web_sys::Cache, name: &str) -> Result<u32, DomException> {
+        let keys = JsFuture::from(
+            cache.keys_with_str_and_options(name, CacheQueryOptions::new().ignore_search(true)),
         )
         .await?;
-        let mut res = Vec::new();
-        for response in Array::from(&responses).iter() {
-            let response = Response::from(response);
-            let ab = ArrayBuffer::from(JsFuture::from(response.array_buffer()?).await?);
-            let buf = Uint8Array::new(&ab);
-            res.extend(&buf.to_vec());
+        let mut offset = 0;
+        for key in Array::from(&keys).iter() {
+            if let Some(to) = parse_query(&Request::from(key).url()) {
+                offset = offset.max(to);
+            }
         }
-        Ok(res)
+        Ok(offset)
     }
 
-    pub async fn mv(&self, from: &str, to: &str) -> Result<(), DomException> {
-        // load the entire file
-        let mut content = self.load_to_vec(from).await?;
-        let req = Request::new_with_str(&to)?;
-        let res = Response::new_with_opt_u8_array(Some(&mut content))?;
-        // once we start deleting stuff, we can't abort anymore. We are committed.
-        JsFuture::from(
-            self.cache
-                .delete_with_str_and_options(to, CacheQueryOptions::new().ignore_search(true)),
-        )
-        .await
-        .expect("deletion not possible!");
-        JsFuture::from(
-            self.cache
-                .delete_with_str_and_options(from, CacheQueryOptions::new().ignore_search(true)),
-        )
-        .await
-        .expect("deletion not possible!");
-        JsFuture::from(self.cache.put_with_request(&req, &res))
-            .await
-            .unwrap();
-        Ok(())
+    /// Convert a DomException to a std::io::Error
+    fn dom_to_io(e: DomException) -> io::Error {
+        io::Error::new(io::ErrorKind::Other, e.name())
     }
 
-    async fn batch_write(&self, chunks: &mut [Chunk]) -> Result<(), DomException> {
-        let tuples = chunks
-            .iter_mut()
-            .map(|chunk| {
-                let text = format!("{}", chunk.name);
-                let request = Request::new_with_str(&text)?;
-                let response = Response::new_with_opt_u8_array(Some(&mut chunk.data))?;
-                Ok((request, response))
-            })
-            .collect::<Result<Vec<_>, DomException>>()?;
-        // insert them one by one to be sure the order is preserved
-        // according to the docs, insertion order is preserved. But I am not sure if that is the
-        // case if you have multiple insert requests in parallel.
-        for (req, res) in tuples {
-            JsFuture::from(self.cache.put_with_request(&req, &res)).await?;
+    /// Create a request for a chunk for file `file`, ending at `to` (exclusive)
+    fn create_request(file: &str, to: u32) -> Result<Request, JsValue> {
+        Request::new_with_str(&format!("{}?{:016x}", file, to))
+    }
+
+    /// given an url, extract and parse the query part as a hex number
+    fn parse_query(url: &str) -> Option<u32> {
+        if let Some(query) = url.split('?').nth(1) {
+            if let Ok(to) = u32::from_str_radix(query, 16) {
+                Some(to)
+            } else {
+                None
+            }
+        } else {
+            None
         }
-        // let futures = tuples
-        //     .into_iter()
-        //     .map(|(req, res)| JsFuture::from(self.cache.put_with_request(&req, &res)))
-        //     .collect::<Vec<_>>();
-        // let _responses = future::try_join_all(futures).await?;
-        Ok(())
+    }
+
+    impl Storage for CacheFileStore {
+        fn append(&self, file: &str, chunk: &[u8]) -> io::Result<()> {
+            self.append0(file.to_owned(), chunk.to_vec());
+            Ok(())
+        }
+
+        fn create(&self, file: String, data: Vec<u8>) -> BoxFuture<io::Result<()>> {
+            let res = self.create0(file, data).map_err(dom_to_io).boxed_local();
+            unsafe { std::mem::transmute(res) }
+        }
+
+        fn load(&self, file: String) -> BoxFuture<io::Result<Vec<u8>>> {
+            let res = self.load0(file).map_err(dom_to_io).boxed_local();
+            unsafe { std::mem::transmute(res) }
+        }
     }
 }
 
@@ -415,7 +488,7 @@ impl<K: TKey, V: TValue> RadixDb<K, V> {
         let mut tree: anyhow::Result<ArcRadixTree<K, V>> = Ok(Default::default());
         let mut map = Default::default();
         let mut pos = Default::default();
-        let data = storage.load(&name).await?;
+        let data = storage.load(name.clone()).await?;
         if !data.is_empty() {
             let mut deserializer = SharedDeserializeMap2::default();
             let archived: &Archived<ArcRadixTree<K, V>> =
@@ -452,20 +525,12 @@ type MySerializer<'a> = CompositeSerializer<
     SharedSerializeMap2,
 >;
 
-impl<K, V> AbstractRadixDb<K, V> for RadixDb<K, V>
+impl<K, V> RadixDb<K, V>
 where
     K: TKey + for<'x> Serialize<MySerializer<'x>>,
     V: TValue + for<'x> Serialize<MySerializer<'x>>,
 {
-    fn tree(&self) -> &ArcRadixTree<K, V> {
-        &self.tree
-    }
-
-    fn tree_mut(&mut self) -> &mut ArcRadixTree<K, V> {
-        &mut self.tree
-    }
-
-    fn vacuum(&mut self) -> anyhow::Result<()> {
+    async fn vacuum0(&mut self) -> anyhow::Result<()> {
         // write ourselves to a new file
         let mut file = AlignedVec::new();
         let mut serializer = CompositeSerializer::new(
@@ -483,11 +548,27 @@ where
         let mut arcs = BTreeMap::default();
         self.tree.all_arcs(&mut arcs);
         // store the new file and the new arcs. This is atomic, so if it fails the old file will be unchanged.
-        self.storage.create(&self.name, &file)?;
+        self.storage
+            .create(self.name.clone(), file.to_vec())
+            .await?;
         self.pos = file.len();
         self.serializers = Some((map, arcs));
         self.notify();
         Ok(())
+    }
+}
+
+impl<K, V> AbstractRadixDb<K, V> for RadixDb<K, V>
+where
+    K: TKey + for<'x> Serialize<MySerializer<'x>>,
+    V: TValue + for<'x> Serialize<MySerializer<'x>>,
+{
+    fn tree(&self) -> &ArcRadixTree<K, V> {
+        &self.tree
+    }
+
+    fn tree_mut(&mut self) -> &mut ArcRadixTree<K, V> {
+        &mut self.tree
     }
 
     fn flush(&mut self) -> anyhow::Result<()> {
@@ -516,6 +597,10 @@ where
         let (s, r) = futures::channel::mpsc::unbounded();
         self.watchers.push(s);
         r
+    }
+
+    fn vacuum(&mut self) -> LocalBoxFuture<anyhow::Result<()>> {
+        self.vacuum0().boxed_local()
     }
 }
 
