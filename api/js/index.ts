@@ -1,6 +1,6 @@
 import { default as wasmbin } from "../pkg-wasm-bindgen/local_first_bg.wasm"
 import wbindgen from "../pkg-wasm-bindgen/local_first.js"
-import { Api, Causal, Cursor, Doc, Sdk } from "./bindings.js"
+import { Api, Causal, Cursor, Doc, Sdk } from "./bindings"
 
 let API: Api;
 
