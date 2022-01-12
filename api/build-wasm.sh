@@ -68,7 +68,6 @@ fi
 
 pushd js
 npm i
-npm run build
 PACKAGE=`npm pack --json | jq -r '.[].filename'`
 
 echo "Find your npm package in ./js/$PACKAGE"
