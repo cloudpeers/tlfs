@@ -26,6 +26,7 @@ ed25519-dalek = "1.0.1"
 fnv = "1.0.7"
 futures = "0.3.17"
 libp2p-broadcast = "0.7.0"
+libp2p-webrtc = "0.2.0"
 log-panics = "2.0.0"
 rkyv = "0.7.26"
 tlfs-crdt = { version = "0.1.0", path = "crdt" }
@@ -46,7 +47,6 @@ features = [
 ]
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-libp2p-webrtc = "0.2.0"
 tracing-wasm = "0.2.1"
 wasm-bindgen-futures = "0.4.28"
 
@@ -62,7 +62,7 @@ features = [
 async-std = { version = "1.10.0", features = ["attributes"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-async-global-executor = "2.0.2"
+async-global-executor = { version = "2.0.2", features = ["tokio"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
 tracing-android = "0.1.6"
