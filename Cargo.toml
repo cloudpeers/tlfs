@@ -62,7 +62,7 @@ features = [
 async-std = { version = "1.10.0", features = ["attributes"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-async-global-executor = "2.0.2"
+async-global-executor = { version = "2.0.2", features = ["tokio"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
 tracing-android = "0.1.6"
