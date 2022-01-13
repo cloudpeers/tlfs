@@ -226,8 +226,9 @@ impl Storage for MemStorage {
     }
 }
 
-#[cfg(feature = "browser")]
-mod browser {
+#[cfg(target_arch = "wasm32")]
+pub mod browser {
+    use futures::{future::BoxFuture, FutureExt};
     use js_sys::{Array, ArrayBuffer, Uint8Array};
     use parking_lot::Mutex;
     use rkyv::AlignedVec;
@@ -285,10 +286,17 @@ mod browser {
     }
 
     impl CacheFileStore {
-        pub async fn new(name: &str) -> std::result::Result<CacheFileStore, DomException> {
+        pub fn new(
+            name: String,
+        ) -> BoxFuture<'static, std::result::Result<CacheFileStore, DomException>> {
+            let res = Self::new0(name).boxed_local();
+            unsafe { std::mem::transmute(res) }
+        }
+
+        async fn new0(name: String) -> std::result::Result<CacheFileStore, DomException> {
             let window = web_sys::window().expect("unable to get window");
             let caches = window.caches()?;
-            let cache = web_sys::Cache::from(JsFuture::from(caches.open(name)).await?);
+            let cache = web_sys::Cache::from(JsFuture::from(caches.open(&name)).await?);
             let keys = JsFuture::from(cache.keys()).await?;
             // set of distinct names
             let names = Array::from(&keys)
