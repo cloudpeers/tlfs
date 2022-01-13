@@ -48,11 +48,15 @@ impl Sdk {
 
     /// Create a new in-memory [`Sdk`] instance.
     pub async fn memory(package: &[u8]) -> Result<Self> {
-        Self::new(
-            std::sync::Arc::new(tlfs_crdt::MemStorage::default()),
-            package,
-        )
-        .await
+        #[cfg(target_arch = "wasm32")]
+        let storage = std::sync::Arc::new(
+            tlfs_crdt::CacheFileStore::new("tlfs".to_owned())
+                .await
+                .unwrap(),
+        );
+        #[cfg(not(target_arch = "wasm32"))]
+        let storage = std::sync::Arc::new(tlfs_crdt::MemStorage::default());
+        Self::new(storage, package).await
     }
 
     #[allow(clippy::if_same_then_else)]
