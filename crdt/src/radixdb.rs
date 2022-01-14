@@ -226,7 +226,7 @@ impl Storage for MemStorage {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 pub mod browser {
     use futures::{future::BoxFuture, FutureExt};
     use js_sys::{Array, ArrayBuffer, Uint8Array};
@@ -239,15 +239,18 @@ pub mod browser {
 
     use crate::Storage;
 
+    /// A storage implementation that uses a named, manually managed browser cache for persistence.
+    ///
+    /// Only available in the wasm target family, but will only work when used within a browser, where web_sys is available.
     #[derive(Debug)]
-    pub struct CacheFileStore {
+    pub struct BrowserCacheStorage {
         cache: web_sys::Cache,
         data: Arc<Mutex<BTreeMap<String, AlignedVec>>>,
     }
 
-    unsafe impl Send for CacheFileStore {}
+    unsafe impl Send for BrowserCacheStorage {}
 
-    unsafe impl Sync for CacheFileStore {}
+    unsafe impl Sync for BrowserCacheStorage {}
 
     async fn load(cache: &Cache, name: &str) -> Result<AlignedVec, DomException> {
         let responses = JsFuture::from(
@@ -285,15 +288,19 @@ pub mod browser {
         io::Error::new(io::ErrorKind::Other, e.name())
     }
 
-    impl CacheFileStore {
+    impl BrowserCacheStorage {
+        /// Create a new browser cache storage with the given name.
+        ///
+        /// The name will be the name of the named cache. See https://developer.mozilla.org/en-US/docs/Web/API/Cache.
+        /// The exact way cache entries will be allocated is subject to change.
         pub fn new(
             name: String,
-        ) -> BoxFuture<'static, std::result::Result<CacheFileStore, DomException>> {
+        ) -> BoxFuture<'static, std::result::Result<BrowserCacheStorage, DomException>> {
             let res = Self::new0(name).boxed_local();
             unsafe { std::mem::transmute(res) }
         }
 
-        async fn new0(name: String) -> std::result::Result<CacheFileStore, DomException> {
+        async fn new0(name: String) -> std::result::Result<BrowserCacheStorage, DomException> {
             let window = web_sys::window().expect("unable to get window");
             let caches = window.caches()?;
             let cache = web_sys::Cache::from(JsFuture::from(caches.open(&name)).await?);
@@ -320,7 +327,7 @@ pub mod browser {
         }
     }
 
-    impl Storage for CacheFileStore {
+    impl Storage for BrowserCacheStorage {
         fn append(&self, file: &str, chunk: &[u8]) -> std::io::Result<()> {
             if !chunk.is_empty() {
                 let mut data = self.data.lock();
