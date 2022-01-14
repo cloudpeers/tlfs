@@ -107,12 +107,12 @@ impl RequestResponseCodec for SyncCodec {
     {
         self.buffer.clear();
         io.read_to_end(&mut self.buffer).await?;
-        Ok(Ref::from(&self.buffer)) /*.map_err(|err| {
-                                        io::Error::new(
-                                            io::ErrorKind::Other,
-                                            format!("read_request: {} {:?}", err, &self.buffer),
-                                        )
-                                    })*/
+        Ref::checked(&self.buffer).map_err(|err| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("read_request: {} {:?}", err, &self.buffer),
+            )
+        })
     }
 
     async fn read_response<T>(&mut self, _: &SyncProtocol, io: &mut T) -> io::Result<Self::Response>
@@ -121,12 +121,12 @@ impl RequestResponseCodec for SyncCodec {
     {
         self.buffer.clear();
         io.read_to_end(&mut self.buffer).await?;
-        Ok(Ref::from(&self.buffer)) /*.map_err(|err| {
-                                        io::Error::new(
-                                            io::ErrorKind::Other,
-                                            format!("read_response: {} {:?}", err, &self.buffer),
-                                        )
-                                    })*/
+        Ref::checked(&self.buffer).map_err(|err| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("read_response: {} {:?}", err, &self.buffer),
+            )
+        })
     }
 
     async fn write_request<T>(

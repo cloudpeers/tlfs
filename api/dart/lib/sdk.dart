@@ -11,8 +11,7 @@ Future<tlfs.Sdk> _loadSdk(String appname) async {
   final documentsDirectory = await getApplicationDocumentsDirectory();
   final dbPath = join(documentsDirectory.path, appname, 'db');
   await Directory(dbPath).create(recursive: true);
-  final assetName =
-      'assets/{appname}.tlfs.rkyv'.replaceAll('{appname}', appname);
+  final assetName = 'assets/$appname.tlfs.rkyv';
   final schema = await rootBundle.load(assetName);
   return tlfs.Api.load().createPersistent(dbPath, schema.buffer.asUint8List());
 }
