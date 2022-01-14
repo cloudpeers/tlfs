@@ -179,13 +179,12 @@ pub trait Storage: Send + Sync + 'static {
     /// appending an empty chunk is a noop.
     fn append(&self, file: &str, chunk: &[u8]) -> io::Result<()>;
 
+    /// atomically set the content of a file
+    fn set(&self, file: &str, data: &[u8]) -> io::Result<()>;
+
     /// load a file. The callback will get to look at the data and do something with it.
     /// loading a non-existing file is like loading an empty file. It will not create the file.
     fn load(&self, file: &str, f: Box<dyn FnMut(&[u8]) + '_>) -> io::Result<()>;
-
-    /// atomically move a file. target will be atomically overwritten.
-    /// if the source file does not exist, the target file will be deleted.
-    fn mv(&self, from: &str, to: &str) -> io::Result<()>;
 }
 
 /// A memory based storage implementation.
@@ -208,6 +207,14 @@ impl Storage for MemStorage {
         Ok(())
     }
 
+    fn set(&self, file: &str, content: &[u8]) -> std::io::Result<()> {
+        let mut data = self.data.lock();
+        let mut entry = AlignedVec::new();
+        entry.extend_from_slice(content);
+        data.insert(file.to_owned(), entry);
+        Ok(())
+    }
+
     fn load(&self, file: &str, mut f: Box<dyn FnMut(&[u8]) + '_>) -> std::io::Result<()> {
         let data = self.data.lock();
         if let Some(vec) = data.get(file) {
@@ -217,21 +224,142 @@ impl Storage for MemStorage {
         };
         Ok(())
     }
+}
 
-    fn mv(&self, from: &str, to: &str) -> std::io::Result<()> {
-        if from != to {
-            let mut data = self.data.lock();
-            if let Some(vec) = data.remove(from) {
-                if !vec.is_empty() {
-                    data.insert(to.to_owned(), vec);
-                } else {
-                    data.remove(to);
-                }
-            } else {
-                data.remove(to);
-            }
+#[cfg(target_family = "wasm")]
+pub mod browser {
+    use futures::{future::BoxFuture, FutureExt};
+    use js_sys::{Array, ArrayBuffer, Uint8Array};
+    use parking_lot::Mutex;
+    use rkyv::AlignedVec;
+    use std::{collections::BTreeMap, io, sync::Arc};
+    use url::Url;
+    use wasm_bindgen_futures::JsFuture;
+    use web_sys::{Cache, CacheQueryOptions, DomException, Request, Response};
+
+    use crate::Storage;
+
+    /// A storage implementation that uses a named, manually managed browser cache for persistence.
+    ///
+    /// Only available in the wasm target family, but will only work when used within a browser, where web_sys is available.
+    #[derive(Debug)]
+    pub struct BrowserCacheStorage {
+        cache: web_sys::Cache,
+        data: Arc<Mutex<BTreeMap<String, AlignedVec>>>,
+    }
+
+    unsafe impl Send for BrowserCacheStorage {}
+
+    unsafe impl Sync for BrowserCacheStorage {}
+
+    async fn load(cache: &Cache, name: &str) -> Result<AlignedVec, DomException> {
+        let responses = JsFuture::from(
+            cache
+                .match_all_with_str_and_options(name, CacheQueryOptions::new().ignore_search(true)),
+        )
+        .await?;
+        let mut res = AlignedVec::new();
+        for response in Array::from(&responses).iter() {
+            let response = Response::from(response);
+            let ab = ArrayBuffer::from(JsFuture::from(response.array_buffer()?).await?);
+            let data = Uint8Array::new(&ab).to_vec();
+            res.extend_from_slice(&data);
         }
+        Ok(res)
+    }
+
+    /// fire writing to a cache, without waiting for completion
+    fn fire_write(
+        cache: &Cache,
+        name: &str,
+        content: &[u8],
+    ) -> std::result::Result<(), DomException> {
+        let mut content = content.to_vec();
+        let req = Request::new_with_str(name)?;
+        let res = Response::new_with_opt_u8_array(Some(&mut content))?;
+        // this is a js promise, not a rust future. So it will fire immediately.
+        // I assume that subsequent writes to the same file will be ordered.
+        let _promise = cache.put_with_request(&req, &res);
         Ok(())
+    }
+
+    /// Convert a DomException to a std::io::Error
+    fn dom_to_io(e: DomException) -> io::Error {
+        io::Error::new(io::ErrorKind::Other, e.name())
+    }
+
+    impl BrowserCacheStorage {
+        /// Create a new browser cache storage with the given name.
+        ///
+        /// The name will be the name of the named cache. See https://developer.mozilla.org/en-US/docs/Web/API/Cache.
+        /// The exact way cache entries will be allocated is subject to change.
+        pub fn new(
+            name: String,
+        ) -> BoxFuture<'static, std::result::Result<BrowserCacheStorage, DomException>> {
+            let res = Self::new0(name).boxed_local();
+            unsafe { std::mem::transmute(res) }
+        }
+
+        async fn new0(name: String) -> std::result::Result<BrowserCacheStorage, DomException> {
+            let window = web_sys::window().expect("unable to get window");
+            let caches = window.caches()?;
+            let cache = web_sys::Cache::from(JsFuture::from(caches.open(&name)).await?);
+            let keys = JsFuture::from(cache.keys()).await?;
+            // set of distinct names
+            let names = Array::from(&keys)
+                .iter()
+                .map(|req| Request::from(req).url())
+                .filter_map(|url| {
+                    Url::parse(&url)
+                        .ok()
+                        .and_then(|x| x.path().strip_prefix('/').map(|x| x.to_string()))
+                })
+                .collect::<Vec<String>>();
+            let mut data = BTreeMap::new();
+            for name in names {
+                let content = load(&cache, &name).await?;
+                data.insert(name, content);
+            }
+            Ok(Self {
+                data: Arc::new(Mutex::new(data)),
+                cache,
+            })
+        }
+    }
+
+    impl Storage for BrowserCacheStorage {
+        fn append(&self, file: &str, chunk: &[u8]) -> std::io::Result<()> {
+            if !chunk.is_empty() {
+                let mut data = self.data.lock();
+                let vec = if let Some(vec) = data.get_mut(file) {
+                    vec
+                } else {
+                    data.entry(file.to_owned()).or_default()
+                };
+                vec.extend_from_slice(chunk);
+                fire_write(&self.cache, file, vec).map_err(dom_to_io)?;
+            }
+            Ok(())
+        }
+
+        fn set(&self, file: &str, content: &[u8]) -> std::io::Result<()> {
+            let mut data = self.data.lock();
+            let mut entry = AlignedVec::new();
+            entry.extend_from_slice(content);
+            data.insert(file.to_owned(), entry);
+            fire_write(&self.cache, file, content).map_err(dom_to_io)?;
+            Ok(())
+        }
+
+        fn load(&self, file: &str, mut f: Box<dyn FnMut(&[u8]) + '_>) -> std::io::Result<()> {
+            let data = self.data.lock();
+            if let Some(vec) = data.get(file) {
+                f(vec)
+            } else {
+                f(&[])
+            };
+            Ok(())
+        }
     }
 }
 
@@ -262,27 +390,30 @@ impl Storage for FileStorage {
         Ok(())
     }
 
+    fn set(&self, file: &str, data: &[u8]) -> std::io::Result<()> {
+        let tmp = format!("{}.tmp", file);
+        let mut tmp_file = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(self.base.join(&tmp))?;
+        tmp_file.write_all(data)?;
+        tmp_file.flush()?;
+        let from = self.base.join(tmp);
+        let to = self.base.join(file);
+        match fs::rename(&from, &to) {
+            Ok(()) => {}
+            Err(e) => return Err(e),
+        }
+        Ok(())
+    }
+
     fn load(&self, file: &str, mut f: Box<dyn FnMut(&[u8]) + '_>) -> io::Result<()> {
         match std::fs::read(self.base.join(file)) {
             Ok(data) => f(&data),
             Err(e) if e.kind() == io::ErrorKind::NotFound => f(&[]),
             Err(e) => return Err(e),
         };
-        Ok(())
-    }
-
-    fn mv(&self, from: &str, to: &str) -> std::io::Result<()> {
-        if from != to {
-            let from = self.base.join(from);
-            let to = self.base.join(to);
-            match fs::rename(from, &to) {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    fs::remove_file(to)?;
-                }
-                Err(e) => return Err(e),
-            }
-        }
         Ok(())
     }
 }
@@ -382,9 +513,7 @@ where
         let mut arcs = BTreeMap::default();
         self.tree.all_arcs(&mut arcs);
         // store the new file and the new arcs
-        let tmp = format!("{}.tmp", self.name);
-        self.storage.append(&tmp, &file)?;
-        self.storage.mv(&tmp, &self.name)?;
+        self.storage.set(&self.name, &file)?;
         self.pos = file.len();
         self.serializers = Some((map, arcs));
         self.notify();

@@ -37,8 +37,18 @@ pub struct Sdk {
 }
 
 impl Sdk {
-    /// Creates a new persistent [`Sdk`] instance.
-    pub async fn persistent(db: &std::path::Path, package: &[u8]) -> Result<Self> {
+    /// Creates a new [`Sdk`] instance using browser persistence.
+    #[cfg(target_family = "wasm")]
+    pub async fn browser(name: &str, package: &[u8]) -> Result<Self> {
+        let package = package.to_vec();
+        let name = name.to_owned();
+        let storage = std::sync::Arc::new(tlfs_crdt::BrowserCacheStorage::new(name).await.unwrap());
+        Self::new(storage, &package).await
+    }
+
+    /// Creates a new [`Sdk`] instance using file system persistence.
+    #[cfg(not(target_family = "wasm"))]
+    pub async fn filesystem(db: &std::path::Path, package: &[u8]) -> Result<Self> {
         Self::new(
             std::sync::Arc::new(tlfs_crdt::FileStorage::new(db)),
             package,
@@ -48,11 +58,8 @@ impl Sdk {
 
     /// Create a new in-memory [`Sdk`] instance.
     pub async fn memory(package: &[u8]) -> Result<Self> {
-        Self::new(
-            std::sync::Arc::new(tlfs_crdt::MemStorage::default()),
-            package,
-        )
-        .await
+        let storage = std::sync::Arc::new(tlfs_crdt::MemStorage::default());
+        Self::new(storage, package).await
     }
 
     #[allow(clippy::if_same_then_else)]

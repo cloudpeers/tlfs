@@ -161,3 +161,6 @@ pub use crate::registry::{Expanded, Hash, Package, Registry};
 pub use crate::schema::{ArchivedSchema, PrimitiveKind, Schema};
 pub use crate::subscriber::{Batch, Event, Iter, Subscriber};
 pub use crate::util::Ref;
+
+#[cfg(target_arch = "wasm32")]
+pub use crate::radixdb::browser::BrowserCacheStorage;
