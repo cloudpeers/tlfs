@@ -110,8 +110,9 @@ impl Sdk {
         let mut listen_on = vec!["/dns4/local1st.net/tcp/443/wss/p2p-webrtc-star"
             .parse()
             .unwrap()];
-        if !cfg!(target_family = "wasm") {
-            listen_on.push("/ip4/0.0.0.0/tcp/0".parse().unwrap());
+        //if !cfg!(target_family = "wasm") {
+        //    listen_on.push("/ip4/0.0.0.0/tcp/0".parse().unwrap());
+        //}
 
             //TODO
             //        slf.add_external_address(
@@ -121,7 +122,6 @@ impl Sdk {
             //            // TODO
             //            AddressScore::Infinite,
             //        )
-        }
         Self::new_with_transport(backend, frontend, peer, transport, listen_on.into_iter()).await
     }
 

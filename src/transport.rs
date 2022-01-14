@@ -17,6 +17,7 @@ fn native_transport(keypair: identity::Keypair) -> Result<Boxed<(PeerId, StreamM
 
     use libp2p::{
         core::{self, upgrade::Version},
+        dns::{ResolverConfig, TokioDnsConfig},
         noise::{self, NoiseConfig, X25519Spec},
         tcp::TcpConfig,
         yamux::YamuxConfig,
@@ -27,7 +28,8 @@ fn native_transport(keypair: identity::Keypair) -> Result<Boxed<(PeerId, StreamM
     let peer_id = PeerId::from(keypair.public());
     let webrtc = WebRtcTransport::new(peer_id, vec!["stun:stun.l.google.com:19302"]);
     let tcp = TcpConfig::new().nodelay(true);
-    let transport = core::transport::OrTransport::new(webrtc, tcp);
+    let dns = TokioDnsConfig::custom(tcp, ResolverConfig::cloudflare(), Default::default())?;
+    let transport = core::transport::OrTransport::new(webrtc, dns);
     let key = noise::Keypair::<X25519Spec>::new().into_authentic(&keypair)?;
     Ok(transport
         .upgrade(Version::V1)
