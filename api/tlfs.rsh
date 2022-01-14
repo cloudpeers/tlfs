@@ -122,10 +122,10 @@
 //! protocol. This makes the broadcast protocol sybil resistant and prevents eclipse attacks.
 
 /// Creates a new persistent sdk instance.
-fn create_persistent(path: &string, package: &[u8]) -> Future<Result<Sdk>>;
+fn create_persistent(path: string, package: Vec<u8>) -> Future<Result<Sdk>>;
 
 /// Create a new in-memory sdk instance.
-fn create_memory(package: &[u8]) -> Future<Result<Sdk>>;
+fn create_memory(package: Vec<u8>) -> Future<Result<Sdk>>;
 
 /// Main entry point for `tlfs`.
 object Sdk {
