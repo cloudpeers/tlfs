@@ -3986,6 +3986,7 @@ dependencies = [
  "futures",
  "getrandom 0.2.3",
  "hex",
+ "js-sys",
  "log-panics",
  "parking_lot",
  "proptest",
@@ -3995,7 +3996,11 @@ dependencies = [
  "tracing",
  "tracing-log",
  "tracing-subscriber",
+ "url",
  "vec-collections",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
