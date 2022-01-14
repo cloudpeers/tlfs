@@ -163,4 +163,4 @@ pub use crate::subscriber::{Batch, Event, Iter, Subscriber};
 pub use crate::util::Ref;
 
 #[cfg(target_arch = "wasm32")]
-pub use crate::radixdb::browser::CacheFileStore;
+pub use crate::radixdb::browser::BrowserCacheStorage;

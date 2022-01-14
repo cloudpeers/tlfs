@@ -9,11 +9,11 @@ use tlfs::Permission;
 pub struct Sdk(tlfs::Sdk);
 
 pub async fn create_persistent(path: &str, package: &[u8]) -> Result<Sdk> {
-    Ok(Sdk(tlfs::Sdk::persistent(
-        std::path::Path::new(path),
-        package,
-    )
-    .await?))
+    #[cfg(target_family = "wasm")]
+    let sdk = tlfs::Sdk::browser(path, package).await?;
+    #[cfg(not(target_family = "wasm"))]
+    let sdk = tlfs::Sdk::filesystem(std::path::Path::new(path), package).await?;
+    Ok(Sdk(sdk))
 }
 
 pub async fn create_memory(package: &[u8]) -> Result<Sdk> {
