@@ -1,0 +1,11 @@
+{
+  "parserOptions": {
+        "sourceType": "module",
+        "ecmaVersion": "2015"
+  },
+  "extends": ["prettier"],
+  "plugins": ["prettier"],
+  "rules": {
+    "prettier/prettier": 2 // Means error
+  }
+}

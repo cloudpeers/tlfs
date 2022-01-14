@@ -1,7 +1,7 @@
 #/bin/bash
 set -e
 WASMOPT=./wasm-opt
-WASMOPT_VERSION=101
+WASMOPT_VERSION=104
 WASMBINDGEN_VERSION=0.2.77
 OUT=./pkg-wasm-bindgen
 
@@ -36,45 +36,38 @@ echo "Generating wasm-bindings"
 # automatically, no need to call `.free` in JS.
 #
 # [1]: https://rustwasm.github.io/docs/wasm-bindgen/reference/weak-references.html
-
-
-  wasm-bindgen \
+wasm-bindgen \
   $LIB.multivalue.wasm \
   --out-dir $OUT \
   --out-name local_first \
   --target web \
   --typescript \
   --weak-refs
-#  --reference-types # TODO: wasm-opt crashes with that flag
+#  --reference-types wasm-opt crashes with that flag?
 
-#echo "Generating package.json"
-#cat <<EOF >> $OUT/package.json
-#{
-#  "name": "local-first",
-#  "version": "0.1.0",
-#  "files": [
-#    "local_first_bg.wasm",
-#    "local_first.js",
-#    "local_first.d.ts"
-#  ],
-#  "module": "local_first.js",
-#  "types": "local_first.d.ts",
-#  "sideEffects": false
-#}
-#EOF
-#
-#
-#if [ ! -f $WASMOPT ]; then
-#  echo "Downloading wasm-opt"
-#  wget -qO- \
-#  https://github.com/WebAssembly/binaryen/releases/download/version_$WASMOPT_VERSION/binaryen-version_$WASMOPT_VERSION-x86_64-linux.tar.gz \
-#  | tar xfz - binaryen-version_$WASMOPT_VERSION/bin/wasm-opt -O >> $WASMOPT
-#  chmod +x $WASMOPT
-#fi
-#
-#if [ "${OPTIMIZE}" ]; then
-#  echo "Optimizing wasm bindings with default optimization (this might take some time)"
-#  ./wasm-opt $OUT/local_first_bg.wasm -Oz -g --output $OUT/local_first_bg.opt.wasm
-#fi
-#
-echo "Find your wasm package in $OUT"
+if [ ! -f $WASMOPT ]; then
+  echo "Downloading wasm-opt"
+  wget -qO- \
+  https://github.com/WebAssembly/binaryen/releases/download/version_$WASMOPT_VERSION/binaryen-version_$WASMOPT_VERSION-x86_64-linux.tar.gz \
+  | tar xfz - binaryen-version_$WASMOPT_VERSION/bin/wasm-opt -O >> $WASMOPT
+  chmod +x $WASMOPT
+fi
+
+if [ "${OPTIMIZE}" ]; then
+  echo "Optimizing wasm bindings with default optimization (this might take some time)"
+  ./wasm-opt \
+    $OUT/local_first_bg.wasm \
+    --enable-multivalue \
+    -Oz \
+    -g \
+    --output $OUT/local_first_bg.opt.wasm
+  cp $OUT/local_first_bg.wasm $OUT/local_first_bg_unoptimized.wasm
+  cp $OUT/local_first_bg.opt.wasm $OUT/local_first_bg.wasm
+fi
+
+
+pushd js
+npm i
+PACKAGE=`npm pack --json | jq -r '.[].filename'`
+
+echo "Find your npm package in ./js/$PACKAGE"

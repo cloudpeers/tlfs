@@ -26,6 +26,7 @@ pub struct Cursor<'a> {
     array: SmallVec<[ArrayWrapper; 1]>,
 }
 
+#[allow(clippy::len_without_is_empty)]
 impl<'a> Cursor<'a> {
     /// Creates a new [`Cursor`].
     pub fn new(key: Keypair, id: DocId, schema: &'a Archived<Schema>, crdt: &'a Crdt) -> Self {
@@ -49,6 +50,11 @@ impl<'a> Cursor<'a> {
     /// Checks permissions.
     pub fn can(&self, peer: &PeerId, perm: Permission) -> Result<bool> {
         self.crdt.can(peer, perm, self.path.as_path())
+    }
+
+    /// Return the current schema.
+    pub fn schema(&self) -> &'a Archived<Schema> {
+        self.schema
     }
 
     /// Returns if a flag is enabled.
@@ -122,6 +128,36 @@ impl<'a> Cursor<'a> {
             }))
         } else {
             Err(anyhow!("not a Reg<String>"))
+        }
+    }
+
+    /// If the cursor points to a Struct or a Table, returns an iterator of all existing keys.
+    pub fn keys(&self) -> Result<Vec<String>> {
+        match self.schema {
+            ArchivedSchema::Array(_) => {
+                let len = self.len().unwrap_or(0);
+                Ok((0..len).map(|x| x.to_string()).collect())
+            }
+            ArchivedSchema::Table(_, _) => {
+                let slf = self.path.clone();
+                self.crdt
+                    .scan_path(slf.as_path())
+                    .map(move |p| {
+                        let x = Path::new(&p).strip_prefix(slf.as_path())?;
+                        x.first().context("Empty")
+                    })
+                    .filter_map(|segment| match segment {
+                        Ok(crate::Segment::Bool(b)) => Some(Ok(b.to_string())),
+                        Ok(crate::Segment::U64(n)) => Some(Ok(n.to_string())),
+                        Ok(crate::Segment::I64(n)) => Some(Ok(n.to_string())),
+                        Ok(crate::Segment::Str(s)) => Some(Ok(s)),
+                        Ok(_) => None,
+                        Err(e) => Some(Err(e)),
+                    })
+                    .collect::<Result<Vec<_>>>()
+            }
+            ArchivedSchema::Struct(s) => Ok(s.keys().map(|x| x.to_string()).collect()),
+            _ => Ok(vec![]),
         }
     }
 
@@ -243,11 +279,11 @@ impl<'a> Cursor<'a> {
     }
 
     /// Returns the length of the array.
-    pub fn len(&mut self) -> Result<u32> {
+    pub fn len(&self) -> Result<u32> {
         if let ArchivedSchema::Array(_) = &self.schema {
-            self.path.prim_str(array_util::ARRAY_VALUES);
-            let res = self.count_path(self.path.as_path());
-            self.path.pop();
+            let mut path = self.path.clone();
+            path.prim_str(array_util::ARRAY_VALUES);
+            let res = self.count_path(path.as_path());
             res
         } else {
             anyhow::bail!("not an Array<_>");

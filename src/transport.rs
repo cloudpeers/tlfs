@@ -16,16 +16,22 @@ fn native_transport(keypair: identity::Keypair) -> Result<Boxed<(PeerId, StreamM
     use std::time::Duration;
 
     use libp2p::{
-        core::upgrade::Version,
+        core::{self, upgrade::Version},
+        dns::{ResolverConfig, TokioDnsConfig},
         noise::{self, NoiseConfig, X25519Spec},
         tcp::TcpConfig,
         yamux::YamuxConfig,
         Transport,
     };
+    use libp2p_webrtc::WebRtcTransport;
 
+    let peer_id = PeerId::from(keypair.public());
+    let webrtc = WebRtcTransport::new(peer_id, vec!["stun:stun.l.google.com:19302"]);
     let tcp = TcpConfig::new().nodelay(true);
+    let dns = TokioDnsConfig::custom(tcp, ResolverConfig::cloudflare(), Default::default())?;
+    let transport = core::transport::OrTransport::new(webrtc, dns);
     let key = noise::Keypair::<X25519Spec>::new().into_authentic(&keypair)?;
-    Ok(tcp
+    Ok(transport
         .upgrade(Version::V1)
         .authenticate(NoiseConfig::xx(key).into_authenticated())
         .multiplex(YamuxConfig::default())
@@ -44,6 +50,7 @@ fn wasm_transport(identity: identity::Keypair) -> Result<Boxed<(PeerId, StreamMu
         yamux, Transport,
     };
     use libp2p_webrtc::WebRtcTransport;
+
     let peer_id = PeerId::from(identity.public());
     let webrtc = WebRtcTransport::new(peer_id, vec!["stun:stun.l.google.com:19302"]);
     let ws = ExtTransport::new(ffi::websocket_transport());

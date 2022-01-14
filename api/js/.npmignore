@@ -1,0 +1,10 @@
+.eslintrc
+.prettierrc
+./bindings.d.ts
+./bindings.js
+esbuild.config.js
+index.html
+index.ts
+lib/esbuild.config.d.ts
+lib/out.d.ts
+tsconfig.json

@@ -107,30 +107,22 @@ impl Sdk {
         tracing::info!("our peer id is: {}", peer);
 
         let transport = transport::transport(keypair.to_libp2p())?;
-        let listen_on = if cfg!(target_family = "wasm") {
-            "/dns4/local1st.net/tcp/443/wss/p2p-webrtc-star"
-                .parse()
-                .unwrap()
+        let mut listen_on = vec!["/dns4/local1st.net/tcp/443/wss/p2p-webrtc-star"
+            .parse()
+            .unwrap()];
+        if !cfg!(target_family = "wasm") {
+            listen_on.push("/ip4/0.0.0.0/tcp/0".parse().unwrap());
+        }
 
-            //TODO
-            //        slf.add_external_address(
-            //            signaling_server
-            //                .with(Protocol::P2pWebRtcStar)
-            //                .with(Protocol::P2p(libp2p_peer.into())),
-            //            // TODO
-            //            AddressScore::Infinite,
-            //        )
-        } else {
-            "/ip4/0.0.0.0/tcp/0".parse().unwrap()
-        };
-        Self::new_with_transport(
-            backend,
-            frontend,
-            peer,
-            transport,
-            std::iter::once(listen_on),
-        )
-        .await
+        //TODO
+        //        slf.add_external_address(
+        //            signaling_server
+        //                .with(Protocol::P2pWebRtcStar)
+        //                .with(Protocol::P2p(libp2p_peer.into())),
+        //            // TODO
+        //            AddressScore::Infinite,
+        //        )
+        Self::new_with_transport(backend, frontend, peer, transport, listen_on.into_iter()).await
     }
 
     /// Creates a new [`Sdk`] instance from the given [`Backend`], [`Frontend`] and libp2p

@@ -130,7 +130,7 @@ fn create_memory(package: &[u8]) -> Future<Result<Sdk>>;
 /// Main entry point for `tlfs`.
 object Sdk {
     /// Returns the peer id of this sdk.
-    fn get_peerid() -> string;
+    fn get_peer_id() -> string;
 
     /// Adds a new multiaddr for a peer id.
     fn add_address(peer_id: &string, addr: &string) -> Result<()>;
@@ -184,6 +184,19 @@ object Doc {
 object Cursor {
     /// Returns a deep copy of the cursor.
     fn clone() -> Cursor;
+
+    /// TODO
+    fn points_at_value() -> bool;
+    /// TODO
+    fn points_at_array() -> bool;
+    /// TODO
+    fn points_at_struct() -> bool;
+    /// TODO
+    fn points_at_table() -> bool;
+    /// TODO
+    fn value_type() -> Option<string>;
+    /// TODO
+    fn keys() -> Result<Iterator<string>>;
 
     /// Returns if a flag is enabled.
     fn flag_enabled() -> Result<bool>;

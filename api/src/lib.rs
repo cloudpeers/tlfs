@@ -5,6 +5,7 @@ ffi_gen_macro::ffi_gen!("api/tlfs.rsh");
 use anyhow::Result;
 use futures::{Stream, StreamExt};
 use tlfs::Permission;
+use tlfs_crdt::ArchivedSchema;
 
 pub struct Sdk(tlfs::Sdk);
 
@@ -21,7 +22,7 @@ pub async fn create_memory(package: &[u8]) -> Result<Sdk> {
 }
 
 impl Sdk {
-    pub fn get_peerid(&self) -> String {
+    pub fn get_peer_id(&self) -> String {
         self.0.peer_id().to_string()
     }
 
@@ -136,6 +137,50 @@ impl Doc {
 pub struct Cursor<'a>(tlfs::Cursor<'a>);
 
 impl<'a> Cursor<'a> {
+    pub fn points_at_value(&self) -> bool {
+        matches!(
+            self.0.schema(),
+            ArchivedSchema::Flag | ArchivedSchema::Reg(_)
+        )
+    }
+
+    pub fn value_type(&self) -> Option<String> {
+        if self.points_at_value() {
+            Some(match self.0.schema() {
+                ArchivedSchema::Null => "null".into(),
+                ArchivedSchema::Flag => "bool".into(),
+                ArchivedSchema::Reg(ty) => match ty {
+                    tlfs::PrimitiveKind::Bool => "Reg<bool>",
+                    tlfs::PrimitiveKind::U64 => "Reg<u64>",
+                    tlfs::PrimitiveKind::I64 => "Reg<i64>",
+                    tlfs::PrimitiveKind::Str => "Reg<string>",
+                }
+                .into(),
+                ArchivedSchema::Table(_, _)
+                | ArchivedSchema::Array(_)
+                | ArchivedSchema::Struct(_) => unreachable!(),
+            })
+        } else {
+            None
+        }
+    }
+
+    pub fn keys(&self) -> Result<Vec<String>> {
+        self.0.keys()
+    }
+
+    pub fn points_at_array(&self) -> bool {
+        matches!(self.0.schema(), ArchivedSchema::Array(_))
+    }
+
+    pub fn points_at_table(&self) -> bool {
+        matches!(self.0.schema(), ArchivedSchema::Table(_, _))
+    }
+
+    pub fn points_at_struct(&self) -> bool {
+        matches!(self.0.schema(), ArchivedSchema::Struct(_))
+    }
+
     pub fn flag_enabled(&self) -> Result<bool> {
         self.0.enabled()
     }

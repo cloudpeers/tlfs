@@ -12,7 +12,7 @@ void main() {
     final Uint8List bytes = f.readAsBytesSync();
     final api = Api.load();
     final sdk = await api.createMemory(bytes);
-    final peer = sdk.getPeerid();
+    final peer = sdk.getPeerId();
     print('peer: $peer');
 
     final doc = await sdk.createDoc("todoapp");
