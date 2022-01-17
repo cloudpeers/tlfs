@@ -40,6 +40,7 @@ impl Sdk {
     /// Creates a new [`Sdk`] instance using browser persistence.
     #[cfg(target_family = "wasm")]
     pub async fn browser(name: &str, package: &[u8]) -> Result<Self> {
+        init_tracing();
         let package = package.to_vec();
         let name = name.to_owned();
         let storage = std::sync::Arc::new(tlfs_crdt::BrowserCacheStorage::new(name).await.unwrap());
@@ -49,6 +50,7 @@ impl Sdk {
     /// Creates a new [`Sdk`] instance using file system persistence.
     #[cfg(not(target_family = "wasm"))]
     pub async fn filesystem(db: &std::path::Path, package: &[u8]) -> Result<Self> {
+        init_tracing();
         Self::new(
             std::sync::Arc::new(tlfs_crdt::FileStorage::new(db)),
             package,
@@ -58,47 +60,12 @@ impl Sdk {
 
     /// Create a new in-memory [`Sdk`] instance.
     pub async fn memory(package: &[u8]) -> Result<Self> {
+        init_tracing();
         let storage = std::sync::Arc::new(tlfs_crdt::MemStorage::default());
         Self::new(storage, package).await
     }
 
-    #[allow(clippy::if_same_then_else)]
     async fn new(storage: std::sync::Arc<dyn tlfs_crdt::Storage>, package: &[u8]) -> Result<Self> {
-        use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
-        // FIXME: replace by tracing feature
-        tracing_log::LogTracer::init().ok();
-        let env = std::env::var(EnvFilter::DEFAULT_ENV)
-            .unwrap_or_else(|_| "tlfs,info,libp2p_swarm".to_owned());
-        let subscriber = {
-            let b = tracing_subscriber::FmtSubscriber::builder()
-                .with_span_events(FmtSpan::ACTIVE | FmtSpan::CLOSE)
-                .with_env_filter(EnvFilter::new(env))
-                .with_writer(std::io::stderr);
-
-            #[cfg(target_family = "wasm")]
-            // TODO
-            let b = b.without_time();
-            b.finish()
-        };
-        if cfg!(target_os = "android") {
-            #[cfg(target_os = "android")]
-            use tracing_subscriber::layer::SubscriberExt;
-            #[cfg(target_os = "android")]
-            let subscriber = subscriber.with(tracing_android::layer("com.cloudpeer")?);
-            tracing::subscriber::set_global_default(subscriber).ok();
-            std::env::set_var("RUST_BACKTRACE", "1");
-        } else if cfg!(target_family = "wasm") {
-            #[cfg(target_family = "wasm")]
-            let subscriber = {
-                use tracing_subscriber::layer::SubscriberExt;
-                subscriber.with(tracing_wasm::WASMLayer::default())
-            };
-            tracing::subscriber::set_global_default(subscriber).ok();
-        } else {
-            tracing::subscriber::set_global_default(subscriber).ok();
-        };
-        log_panics::init();
-
         let backend = Backend::new(storage, package)?;
         let frontend = backend.frontend();
 
@@ -364,6 +331,44 @@ impl Sdk {
     pub fn remove_doc(&self, id: &DocId) -> Result<()> {
         self.frontend.remove_doc(id)
     }
+}
+
+#[allow(clippy::if_same_then_else)]
+fn init_tracing() {
+    use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
+    // FIXME: replace by tracing feature
+    tracing_log::LogTracer::init().ok();
+    let env = std::env::var(EnvFilter::DEFAULT_ENV)
+        .unwrap_or_else(|_| "tlfs,info,libp2p_swarm".to_owned());
+    let subscriber = {
+        let b = tracing_subscriber::FmtSubscriber::builder()
+            .with_span_events(FmtSpan::ACTIVE | FmtSpan::CLOSE)
+            .with_env_filter(EnvFilter::new(env))
+            .with_writer(std::io::stderr);
+
+        #[cfg(target_family = "wasm")]
+        // TODO
+        let b = b.without_time();
+        b.finish()
+    };
+    if cfg!(target_os = "android") {
+        #[cfg(target_os = "android")]
+        use tracing_subscriber::layer::SubscriberExt;
+        #[cfg(target_os = "android")]
+        let subscriber = subscriber.with(tracing_android::layer("com.cloudpeer")?);
+        tracing::subscriber::set_global_default(subscriber).ok();
+        std::env::set_var("RUST_BACKTRACE", "1");
+    } else if cfg!(target_family = "wasm") {
+        #[cfg(target_family = "wasm")]
+        let subscriber = {
+            use tracing_subscriber::layer::SubscriberExt;
+            subscriber.with(tracing_wasm::WASMLayer::default())
+        };
+        tracing::subscriber::set_global_default(subscriber).ok();
+    } else {
+        tracing::subscriber::set_global_default(subscriber).ok();
+    };
+    log_panics::init();
 }
 
 /// Document handle.
