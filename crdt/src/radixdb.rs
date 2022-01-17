@@ -296,11 +296,11 @@ pub mod browser {
         pub fn new(
             name: String,
         ) -> BoxFuture<'static, std::result::Result<BrowserCacheStorage, DomException>> {
-            let res = Self::new0(name).boxed_local();
+            let res = Self::new_inner(name).boxed_local();
             unsafe { std::mem::transmute(res) }
         }
 
-        async fn new0(name: String) -> std::result::Result<BrowserCacheStorage, DomException> {
+        async fn new_inner(name: String) -> std::result::Result<BrowserCacheStorage, DomException> {
             tracing::debug!("creating browser cache storage '{}'", name);
             let window = web_sys::window().expect("unable to get window");
             let caches = window.caches()?;
