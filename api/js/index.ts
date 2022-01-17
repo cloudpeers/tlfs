@@ -6,7 +6,7 @@ let API: Api;
 
 const init = async (pkg: number[]) => {
   if (API) {
-    return await API.createMemory(pkg);
+    return await API.createPersistent("tlfs-0.1.0", pkg);
   }
   else {
     //const x = await wbindgen("../pkg-wasm-bindgen/local_first_bg.wasm");
@@ -15,7 +15,7 @@ const init = async (pkg: number[]) => {
     API = new Api();
     // @ts-ignore
     API.initWithInstance({ exports: x });
-    return await API.createMemory(pkg);
+    return await API.createPersistent("tlfs-0.1.0", pkg);
   }
 
 };

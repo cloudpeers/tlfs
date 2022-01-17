@@ -301,6 +301,7 @@ pub mod browser {
         }
 
         async fn new0(name: String) -> std::result::Result<BrowserCacheStorage, DomException> {
+            tracing::debug!("creating browser cache storage '{}'", name);
             let window = web_sys::window().expect("unable to get window");
             let caches = window.caches()?;
             let cache = web_sys::Cache::from(JsFuture::from(caches.open(&name)).await?);
@@ -318,6 +319,7 @@ pub mod browser {
             let mut data = BTreeMap::new();
             for name in names {
                 let content = load(&cache, &name).await?;
+                tracing::debug!("preloading storage {}, {} bytes", name, content.len());
                 data.insert(name, content);
             }
             Ok(Self {
