@@ -5,6 +5,7 @@ use bytecheck::CheckBytes;
 use ed25519_dalek::{PublicKey, Verifier};
 use rkyv::{Archive, Serialize};
 use std::collections::BTreeMap;
+use std::fmt;
 
 /// Kind of a primitive value.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Archive, CheckBytes, Serialize)]
@@ -19,6 +20,17 @@ pub enum PrimitiveKind {
     I64,
     /// Kind of [`String`].
     Str,
+}
+
+impl fmt::Display for PrimitiveKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            PrimitiveKind::Bool => "bool",
+            PrimitiveKind::U64 => "u64",
+            PrimitiveKind::I64 => "i64",
+            PrimitiveKind::Str => "string",
+        })
+    }
 }
 
 impl PrimitiveKind {

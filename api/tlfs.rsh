@@ -185,17 +185,10 @@ object Cursor {
     /// Returns a deep copy of the cursor.
     fn clone() -> Cursor;
 
-    /// TODO
-    fn points_at_value() -> bool;
-    /// TODO
-    fn points_at_array() -> bool;
-    /// TODO
-    fn points_at_struct() -> bool;
-    /// TODO
-    fn points_at_table() -> bool;
-    /// TODO
-    fn value_type() -> Option<string>;
-    /// TODO
+    /// Returns a string representation of the type the cursor points at.
+    fn type_of() -> string;
+    /// If pointing to a `Struct` or a `Table<string, _>`, returns an iterator
+    /// over all keys.
     fn keys() -> Result<Iterator<string>>;
 
     /// Returns if a flag is enabled.

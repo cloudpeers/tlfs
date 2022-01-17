@@ -136,7 +136,28 @@ impl Doc {
 #[derive(Clone)]
 pub struct Cursor<'a>(tlfs::Cursor<'a>);
 
+fn type_of(schema: &ArchivedSchema, max_depth: u8, depth: u8) -> String {
+    if depth > max_depth {
+        return "_".into();
+    }
+    match schema {
+        ArchivedSchema::Null => "null".into(),
+        ArchivedSchema::Flag => "bool".into(),
+        ArchivedSchema::Reg(ty) => format!("Reg<{}>", ty),
+        ArchivedSchema::Table(ks, vs) => {
+            format!("Table<{},{}>", ks, type_of(vs, max_depth, depth + 1))
+        }
+        ArchivedSchema::Array(vs) => format!("Array<{}>", type_of(vs, max_depth, depth + 1)),
+        ArchivedSchema::Struct(_) => "Struct<_>".into(),
+    }
+}
+
 impl<'a> Cursor<'a> {
+    /// If this [`Cursor`] points to a value, returns its type. None otherwise.
+    pub fn type_of(&self) -> String {
+        type_of(self.0.schema(), 8, 0)
+    }
+
     pub fn points_at_value(&self) -> bool {
         matches!(
             self.0.schema(),
