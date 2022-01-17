@@ -4,18 +4,25 @@ import { Api, Causal, Cursor, Doc, Sdk } from "./bindings"
 
 let API: Api;
 
-const init = async (pkg: number[]) => {
+const init = async (appId: string, pkg: number[]) => {
   if (API) {
-    return await API.createPersistent("tlfs-0.1.0", pkg);
+    return await API.createPersistent(appId, pkg);
   }
   else {
-    //const x = await wbindgen("../pkg-wasm-bindgen/local_first_bg.wasm");
+    // There are two ways to load the wasm module:
+    // 1) Keep the wasm as a separate ES module and load/fetch it on demand.
+    // This is a bit more efficient in the browser, but adds burden to library
+    // users when bundling and shipping their app.
+    //      ```
+    //      const x = await wbindgen("../pkg-wasm-bindgen/local_first_bg.wasm");
+    //      ```
+    // 2) Inline the wasm. Easy, works everywhere, is only loaded once anyway:
     const x = await wbindgen(wasmbin)
 
     API = new Api();
     // @ts-ignore
     API.initWithInstance({ exports: x });
-    return await API.createPersistent("tlfs-0.1.0", pkg);
+    return await API.createPersistent(appId, pkg);
   }
 
 };
@@ -23,9 +30,9 @@ const init = async (pkg: number[]) => {
 class LocalFirst {
   public sdk!: Sdk;
 
-  static async create(pkg: number[]) {
+  static async create(appId: string, pkg: number[]) {
     const w = new LocalFirst();
-    w.sdk = await init(pkg);
+    w.sdk = await init(appId, pkg);
     return w;
   }
 
@@ -35,12 +42,13 @@ class LocalFirst {
 }
 
 const traverse = (cursor: Cursor, p: any) => {
-  if (cursor.pointsAtArray()) {
+  const ty = cursor.typeOf()
+  if (pointsAtArray(ty)) {
     cursor.arrayIndex(Number(p));
-  } else if (cursor.pointsAtStruct()) {
+  } else if (pointsAtStruct(ty)) {
     const field = p.toString()
     cursor.structField(field)
-  } else if (cursor.pointsAtTable()) {
+  } else if (pointsAtTable(ty)) {
     const field = p.toString()
     cursor.mapKeyStr(field)
   } else {
@@ -50,13 +58,11 @@ const traverse = (cursor: Cursor, p: any) => {
 
 const get = <T>(doc: Doc, cursor_?: Cursor) => (target: T, p: string | symbol, receiver: any) => {
   const cursor = cursor_ || doc.createCursor()
-  console.log("get", target, p, receiver)
 
   traverse(cursor, p)
-
-  if (cursor.pointsAtValue()) {
-    switch (cursor.valueType()) {
-      case "null": { return undefined; }
+  const ty = cursor.typeOf()
+  if (pointsAtValue(ty)) {
+    switch (cursor.typeOf()) {
       case "bool": { return cursor.flagEnabled() }
       case "Reg<bool>":
         { return Array.from(cursor.regBools())[0] }
@@ -66,6 +72,7 @@ const get = <T>(doc: Doc, cursor_?: Cursor) => (target: T, p: string | symbol, r
         { return Array.from(cursor.regI64s())[0] }
       case "Reg<string>":
         { return Array.from(cursor.regStrs())[0] }
+      default: { return undefined; }
     }
   } else {
     // return new object if not at a leaf
@@ -102,7 +109,7 @@ const setValue = (cursor: Cursor, value: any): Causal => {
 
   } else if (typeof value == 'object') {
     // delete complete object, if table
-    if (cursor.pointsAtTable()) {
+    if (pointsAtTable(cursor.typeOf())) {
       for (const k in cursor.keys()) {
         const here = cursor.clone()
         here.mapKeyStr(k)
@@ -118,10 +125,9 @@ const setValue = (cursor: Cursor, value: any): Causal => {
     // add
     Object.entries(value).forEach(([k, v]) => {
       const here = cursor.clone()
-      if (here.pointsAtTable()) {
+      if (pointsAtTable(here.typeOf())) {
         here.mapKeyStr(k)
       } else {
-        console.log("structField", k)
         here.structField(k)
       }
       const c = setPrimitiveValue(here, v)
@@ -142,10 +148,10 @@ const setValue = (cursor: Cursor, value: any): Causal => {
 
 const setPrimitiveValue = (cursor: Cursor, value: any): Causal => {
 
-  switch (cursor.valueType()) {
+  switch (cursor.typeOf()) {
     case null:
     case "null":
-      throw new Error(`Not pointing at value type: ${cursor.valueType()}`)
+      throw new Error(`Not pointing at value type: ${cursor.typeOf()}`)
     case "bool":
       if (Boolean(value)) {
         return cursor.flagEnable()
@@ -166,6 +172,11 @@ const setPrimitiveValue = (cursor: Cursor, value: any): Causal => {
   }
 }
 
+const pointsAtArray = (ty: string): boolean => ty.startsWith("Array")
+const pointsAtTable = (ty: string): boolean => ty.startsWith("Table")
+const pointsAtStruct = (ty: string): boolean => ty.startsWith("Struct")
+const pointsAtValue = (ty: string): boolean => !(pointsAtArray(ty) || pointsAtTable(ty) || pointsAtStruct(ty))
+
 const mkProxy = <T extends object>(doc: Doc, cursor_?: Cursor): T => {
 
   return new Proxy<T>({} as T, {
@@ -175,22 +186,21 @@ const mkProxy = <T extends object>(doc: Doc, cursor_?: Cursor): T => {
     //    defineProperty?(target: T, p: string | symbol, attributes: PropertyDescriptor): boolean,
     //    deleteProperty?(target: T, p: string | symbol): boolean,
     get(target: T, p: string | symbol, receiver: any) {
+      // TODO:
       switch (p) {
         case Symbol.toPrimitive:
         case "valueOf":
           return undefined
         case "toString": {
-          return function (...args: any[]) {
-            console.log("toString", args)
-            return "LOL"
-          }
+          throw new Error(`Method ${p} not implemented in TLFS proxy. Please file a bug and/or use the document API directly to work around.`)
         }
       }
 
       const cursor = cursor_?.clone() || doc.createCursor()
-      console.log("get", target, p, receiver)
 
-      if (cursor.pointsAtArray()) {
+      const ty = cursor.typeOf()
+
+      if (pointsAtArray(ty)) {
         switch (p) {
           case 'filter': {
             return function (...args: any[]) {
@@ -208,11 +218,9 @@ const mkProxy = <T extends object>(doc: Doc, cursor_?: Cursor): T => {
           case 'push': {
             const c2 = cursor.clone()
             return function (...args: any[]) {
-              console.log("pushing with", c2, args)
               if (args.length > 0) {
                 let causal: Causal | undefined;
                 let arrayLen = c2.arrayLength()
-                console.log("arrayLen", arrayLen)
                 args.forEach((v, idx) => {
 
                   const c = c2.clone()
@@ -233,10 +241,8 @@ const mkProxy = <T extends object>(doc: Doc, cursor_?: Cursor): T => {
           }
           case 'map': {
             return function (...args: any[]) {
-              console.log("map", cursor.arrayLength())
               const arr = new Array(cursor.arrayLength()).fill(undefined).map((_v, idx) => {
                 const x = get(doc, cursor.clone())({}, idx.toString(), undefined)
-                console.log("arr get", idx, x)
                 return x
               }
               )
@@ -248,8 +254,9 @@ const mkProxy = <T extends object>(doc: Doc, cursor_?: Cursor): T => {
       }
       traverse(cursor, p)
 
-      if (cursor.pointsAtValue()) {
-        switch (cursor.valueType()) {
+      const tyAfterTraversal = cursor.typeOf()
+      if (pointsAtValue(tyAfterTraversal)) {
+        switch (tyAfterTraversal) {
           case "null": return undefined
           case "bool": return cursor.flagEnabled()
           case "Reg<bool>":
@@ -270,23 +277,18 @@ const mkProxy = <T extends object>(doc: Doc, cursor_?: Cursor): T => {
       // TODO: check `p`
       const cursor = cursor_?.clone() || doc.createCursor()
       const value = get(doc, cursor)(target, p, undefined)
-      console.log("getOwnPropertDescriptor", target, p, value)
       return { configurable: true, enumerable: true, value }
     },
     //    getPrototypeOf?(target: T): object | null,
     //    has?(target: T, p: string | symbol): boolean,
     //    isExtensible?(target: T): boolean,
     ownKeys(target: T): ArrayLike<string | symbol> {
-
-      console.log("ownKeys", target)
       const cursor = cursor_?.clone() || doc.createCursor()
       return Array.from(cursor.keys())
     },
     //    preventExtensions?(target: T): boolean,
     set(target: T, p: string | symbol, value: any, receiver: any): boolean {
       const cursor = cursor_?.clone() || doc.createCursor()
-      console.log("set", target, p, value, receiver)
-
       traverse(cursor, p)
 
       const causal = setValue(cursor, value)
