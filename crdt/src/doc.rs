@@ -271,6 +271,10 @@ impl Backend {
             BlobSet::load(storage, "expired")?,
             acl.clone(),
         );
+        tracing::debug!("Backend::new");
+        tracing::debug!("docs = {:?}", docs);
+        tracing::debug!("acl = {:?}", acl);
+        tracing::debug!("crdt = {:?}", crdt);
         let engine = Engine::new(acl)?;
         let (tx, rx) = mpsc::unbounded();
         let mut me = Self {

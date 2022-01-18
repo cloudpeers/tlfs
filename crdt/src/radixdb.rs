@@ -274,6 +274,7 @@ pub mod browser {
         name: &str,
         content: &[u8],
     ) -> std::result::Result<(), DomException> {
+        tracing::debug!("firing write to cache, {}, {} bytes", name, content.len());
         let mut content = content.to_vec();
         let req = Request::new_with_str(name)?;
         let res = Response::new_with_opt_u8_array(Some(&mut content))?;
@@ -331,6 +332,7 @@ pub mod browser {
 
     impl Storage for BrowserCacheStorage {
         fn append(&self, file: &str, chunk: &[u8]) -> std::io::Result<()> {
+            tracing::debug!("appening {} bytes to {}", chunk.len(), file);
             if !chunk.is_empty() {
                 let mut data = self.data.lock();
                 let vec = if let Some(vec) = data.get_mut(file) {
@@ -567,7 +569,9 @@ impl std::fmt::Debug for BlobSet {
 
 impl BlobSet {
     pub fn load(storage: Arc<dyn Storage>, name: &str) -> anyhow::Result<Self> {
-        Ok(Self(Arc::new(Mutex::new(RadixDb::load(storage, name)?))))
+        let res = Self(Arc::new(Mutex::new(RadixDb::load(storage, name)?)));
+        tracing::debug!("BlobSet::load({:?})", res);
+        Ok(res)
     }
 
     pub fn flush(&self) -> anyhow::Result<()> {
@@ -626,7 +630,9 @@ impl std::fmt::Debug for BlobMap {
 
 impl BlobMap {
     pub fn load(storage: Arc<dyn Storage>, name: &str) -> anyhow::Result<Self> {
-        Ok(Self(Arc::new(Mutex::new(RadixDb::load(storage, name)?))))
+        let res = Self(Arc::new(Mutex::new(RadixDb::load(storage, name)?)));
+        tracing::debug!("BlobMap::load({:?})", res);
+        Ok(res)
     }
 
     pub fn insert(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> anyhow::Result<()> {

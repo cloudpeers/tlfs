@@ -37,5 +37,12 @@ const start = async () => {
 
 
 	w.doc = localfirst.proxy(await localfirst.sdk.createDoc("todoapp"))
+
+	console.log("1 - title now is " + w.doc.title)
+	w.doc.title = "foo"
+	console.log("2 - title now is " + w.doc.title)
+	w.doc.title = "bar"
+	console.log("3 - title now is " + w.doc.title)
+	w.doc.title = "theend"
 }
 start();
