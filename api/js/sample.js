@@ -29,7 +29,7 @@ const lenses = Array.from(
 )
 import LocalFirst from "./lib/index.js"
 const start = async () => {
-	let localfirst = await LocalFirst.create(lenses);
+	let localfirst = await LocalFirst.create("sample", lenses);
 	let w = window;
 
 	w.localfirst = localfirst;
