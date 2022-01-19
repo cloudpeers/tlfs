@@ -7,13 +7,17 @@ import './tlfs.dart' as tlfs;
 
 /// Opens or creates a db at `~/Documents/{appname}`, loads the schema
 /// package from `assets/{appname}.tlfs.rkyv and initializes the sdk.
-Future<tlfs.Sdk> _loadSdk(String appname) async {
+Future<tlfs.Sdk> _loadSdk(String appname, bool persistent) async {
   final documentsDirectory = await getApplicationDocumentsDirectory();
   final dbPath = join(documentsDirectory.path, appname, 'db');
   await Directory(dbPath).create(recursive: true);
   final assetName = 'assets/$appname.tlfs.rkyv';
   final schema = await rootBundle.load(assetName);
-  return tlfs.Api.load().createPersistent(dbPath, schema.buffer.asUint8List());
+  if (persistent) {
+    return tlfs.Api.load().createPersistent(dbPath, schema.buffer.asUint8List());
+  } else {
+    return tlfs.Api.load().createMemory(schema.buffer.asUint8List());
+  }
 }
 
 class _InheritedSdk extends InheritedWidget {
@@ -29,6 +33,10 @@ class _InheritedSdk extends InheritedWidget {
   bool updateShouldNotify(InheritedWidget oldWidget) => false;
 }
 
+Widget _error(String err) {
+  return _SdkError(err);
+}
+
 /// Sdk widget handles loading the sdk.
 class Sdk extends StatefulWidget {
   /// Creates a new Sdk widget.
@@ -36,19 +44,23 @@ class Sdk extends StatefulWidget {
     Key? key,
     required this.appname,
     required this.child,
-    this.debug = false,
-    this.debugError,
+    this.loading = const _SdkLoading(),
+    this.error = _error,
+    this.persistent = true,
   }) : super(key: key);
 
   /// The name of the app is used when creating an application folder in
   /// the documents directory and when loading the schema from the assets
   /// folder.
   final String appname;
+  /// If data should be persisted.
+  final bool persistent;
   /// Inner widget.
   final Widget child;
-
-  final bool debug;
-  final String? debugError;
+  /// Loading widget.
+  final Widget loading;
+  /// Error widget.
+  final Widget Function(String) error;
 
   @override
   SdkState createState() => SdkState();
@@ -70,11 +82,7 @@ class SdkState extends State<Sdk> {
 
   @override
   initState() {
-    if (widget.debug == true) {
-      _err = widget.debugError;
-      return;
-    }
-    _loadSdk(widget.appname).then((sdk) {
+    _loadSdk(widget.appname, widget.persistent).then((sdk) {
       setState(() {
         _sdk = sdk;
       });
@@ -94,9 +102,9 @@ class SdkState extends State<Sdk> {
         child: widget.child,
       );
     } else if (_err != null) {
-      return _SdkError(msg: _err!);
+      return widget.error(_err!);
     } else {
-      return _SdkLoading();
+      return widget.loading;
     }
   }
 
@@ -110,6 +118,8 @@ class SdkState extends State<Sdk> {
 }
 
 class _SdkLoading extends StatelessWidget {
+  const _SdkLoading() : super();
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -137,10 +147,7 @@ class _SdkLoading extends StatelessWidget {
 }
 
 class _SdkError extends StatelessWidget {
-  const _SdkError({
-    Key? key,
-    required this.msg,
-  }) : super(key: key);
+  const _SdkError(this.msg) : super();
 
   final String msg;
 
