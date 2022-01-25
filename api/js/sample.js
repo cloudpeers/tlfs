@@ -35,14 +35,26 @@ const start = async () => {
 	w.localfirst = localfirst;
 	console.log("Peer ID:", localfirst.sdk.getPeerId())
 
+	// let peers = Array.from(await localfirst.sdk.localPeers());
+	// console.log("peers ", peers)
+
 
 	w.doc = localfirst.proxy(await localfirst.sdk.createDoc("todoapp"))
+	w.doc.title = "title"
 
-	console.log("1 - title now is " + w.doc.title)
-	w.doc.title = "foo"
-	console.log("2 - title now is " + w.doc.title)
-	w.doc.title = "bar"
-	console.log("3 - title now is " + w.doc.title)
-	w.doc.title = "theend"
+	// let docs = Array.from(localfirst.sdk.docs("todoapp"));
+	// let adoc = docs[0];
+	// console.log("a doc=" + adoc)
+	// w.doc = localfirst.sdk.openDoc(adoc)
+	// console.log("doc ", w.doc)
+	// console.log("doc.tasks[0].title ", w.doc.tasks[0].title)
+
+	// console.log("1 - title now is " + w.doc.title)
+	// w.doc.title = "foo"
+	// console.log("2 - title now is " + w.doc.title)
+	// w.doc.title = "bar"
+	// console.log("3 - title now is " + w.doc.title)
+	// w.doc.title = "theend"
+
 }
 start();

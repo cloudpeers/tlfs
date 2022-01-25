@@ -44,7 +44,7 @@ impl Sdk {
         let package = package.to_vec();
         let name = name.to_owned();
         let storage = std::sync::Arc::new(tlfs_crdt::BrowserCacheStorage::new(name).await.unwrap());
-        Self::new(storage, &package).await
+        Ok(Self::new(storage, &package).await?)
     }
 
     /// Creates a new [`Sdk`] instance using file system persistence.
@@ -323,7 +323,7 @@ impl Sdk {
 
     /// Returns a document handle.
     pub fn doc(&self, id: DocId) -> Result<Doc> {
-        let doc = self.frontend.doc(id)?;
+        let doc = self.frontend.doc(id)?;       
         Ok(Doc::new(doc, self.swarm.clone()))
     }
 
