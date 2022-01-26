@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::acl::{Actor, Can, Permission, Policy};
 use crate::crdt::{Causal, Crdt, DotStore};
@@ -588,55 +588,63 @@ impl ArrayWrapper {
         }
     }
 
-    fn new(cursor: &Cursor, mut ix: usize) -> Result<(Self, PathBuf)> {
-        let array_path = cursor.path.clone();
+    fn arr_items(
+        cursor: &Cursor,
+        array_root: PathBuf,
+    ) -> impl Iterator<Item = Result<array_util::ArrayValueEntry>> {
         let array_value_root = {
-            let mut p = array_path.clone();
+            let mut p = array_root.clone();
             p.prim_str(array_util::ARRAY_VALUES);
             p
         };
-        // TODO: use sled's size hint
-        let len = cursor.crdt.scan_path(array_value_root.as_path()).count();
-        let mut iter = cursor.crdt.scan_path(array_value_root.as_path());
+
+        cursor
+            .crdt
+            .scan_path(array_value_root.as_path())
+            .map(move |val| {
+                array_util::ArrayValueEntry::from_path(
+                    Path::new(&val).strip_prefix(array_root.as_path())?,
+                )
+                .context("Reading array data")
+            })
+    }
+
+    fn distinct_arr_items(
+        cursor: &Cursor,
+        array_root: PathBuf,
+    ) -> impl Iterator<Item = Result<(Fraction, u64)>> {
+        let mut scan_state = BTreeMap::default();
+        Self::arr_items(cursor, array_root).filter_map(move |val| match val {
+            Ok(data) => match scan_state.insert(data.pos.clone(), data.uid) {
+                Some(existing) if existing != data.uid => unreachable!(),
+                Some(_) => None,
+                None => Some(Ok((data.pos, data.uid))),
+            },
+            Err(e) => Some(Err(e)),
+        })
+    }
+
+    fn new(cursor: &Cursor, mut ix: usize) -> Result<(Self, PathBuf)> {
+        let array_path = cursor.path.clone();
+
+        let len = Self::distinct_arr_items(cursor, cursor.path.clone()).count();
+        let mut iter = Self::distinct_arr_items(cursor, cursor.path.clone());
 
         ix = ix.min(len);
         let (pos, uid) = if let Some(entry) = iter.nth(ix) {
-            // Existing entry
-            let p_c = cursor.path.clone();
-            let data = array_util::ArrayValueEntry::from_path(
-                Path::new(&entry).strip_prefix(p_c.as_path())?,
-            )
-            .context("Reading array data")?;
-            (data.pos, data.uid)
+            entry?
         } else {
+            let p_c = cursor.path.clone();
             // No entry, find position to insert
             let (left, right) = match ix.checked_sub(1) {
                 Some(s) => {
-                    let p_c = cursor.path.clone();
-                    let mut iter = cursor
-                        .crdt
-                        .scan_path(array_value_root.as_path())
+                    let mut iter = Self::distinct_arr_items(cursor, p_c)
                         .skip(s)
-                        .map(move |iv| -> anyhow::Result<_> {
-                            let meta = array_util::ArrayValueEntry::from_path(
-                                Path::new(&iv).strip_prefix(p_c.as_path())?,
-                            )?;
-                            Ok(meta.pos)
-                        });
+                        .map(|v| v.map(|(p, _)| p));
                     (iter.next(), iter.next())
                 }
                 None => {
-                    let p_c = cursor.path.clone();
-                    let mut iter =
-                        cursor
-                            .crdt
-                            .scan_path(array_value_root.as_path())
-                            .map(move |iv| {
-                                let meta = array_util::ArrayValueEntry::from_path(
-                                    Path::new(&iv).strip_prefix(p_c.as_path())?,
-                                )?;
-                                Ok(meta.pos)
-                            });
+                    let mut iter = Self::distinct_arr_items(cursor, p_c).map(|v| v.map(|(p, _)| p));
 
                     (None, iter.next())
                 }
@@ -683,33 +691,19 @@ impl ArrayWrapper {
         // child tree to all roots with the new position.
 
         let new_pos = {
-            // TODO: use sled's size hint
-            let mut value_path = self.array_path.clone();
-            value_path.prim_str(array_util::ARRAY_VALUES);
-            let len = cursor.crdt.scan_path(value_path.as_path()).count();
+            let len = Self::distinct_arr_items(cursor, self.array_path.clone()).count();
 
             to = to.min(len);
+            let p_c = self.array_path.clone();
             let (left, right) = match to.checked_sub(1) {
                 Some(s) => {
-                    let p_c = self.array_path.clone();
-                    let mut iter = cursor.crdt.scan_path(value_path.as_path()).skip(s).map(
-                        move |iv| -> anyhow::Result<_> {
-                            let meta = array_util::ArrayValueEntry::from_path(
-                                Path::new(&iv).strip_prefix(p_c.as_path())?,
-                            )?;
-                            Ok(meta.pos)
-                        },
-                    );
+                    let mut iter = Self::distinct_arr_items(cursor, p_c)
+                        .skip(s)
+                        .map(|v| v.map(|(p, _)| p));
                     (iter.next(), iter.next())
                 }
                 None => {
-                    let p_c = self.array_path.clone();
-                    let mut iter = cursor.crdt.scan_path(value_path.as_path()).map(move |iv| {
-                        let meta = array_util::ArrayValueEntry::from_path(
-                            Path::new(&iv).strip_prefix(p_c.as_path())?,
-                        )?;
-                        Ok(meta.pos)
-                    });
+                    let mut iter = Self::distinct_arr_items(cursor, p_c).map(|v| v.map(|(p, _)| p));
 
                     (None, iter.next())
                 }
@@ -853,6 +847,7 @@ mod array_util {
     pub(crate) const ARRAY_META: &str = "META";
 
     // <path_to_array>.VALUES.<pos>.<uid>.<value>
+    #[derive(Debug)]
     pub(crate) struct ArrayValueEntry {
         pub(crate) pos: Fraction,
         pub(crate) uid: u64,

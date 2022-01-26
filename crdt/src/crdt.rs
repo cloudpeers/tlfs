@@ -756,10 +756,15 @@ mod tests {
 
         let mut cur = doc.cursor();
         cur.index(0)?.field("title")?;
-        let op = cur.assign_str("something that needs to be done")?;
+        let op = cur.assign_str("first todo")?;
         doc.apply(&op)?;
 
-        assert_eq!(doc.cursor().len()?, 1);
+        let mut cur = doc.cursor();
+        cur.index(1)?.field("title")?;
+        let op = cur.assign_str("second todo")?;
+        doc.apply(&op)?;
+
+        assert_eq!(doc.cursor().len()?, 2);
         let r = doc
             .cursor()
             .index(0)?
@@ -767,13 +772,42 @@ mod tests {
             .strs()?
             .collect::<Result<Vec<_>>>()?;
         assert_eq!(r.len(), 1);
-        assert_eq!(r[0], "something that needs to be done");
+        assert_eq!(r[0], "first todo");
+
+        let mut cur = doc.cursor();
+        cur.index(1)?.field("complete")?;
+        assert!(!cur.enabled()?);
 
         let mut cur = doc.cursor();
         cur.index(0)?.field("complete")?;
         let op = cur.enable()?;
         doc.apply(&op)?;
 
+        let mut cur = doc.cursor();
+        cur.index(0)?.field("complete")?;
+        assert!(cur.enabled()?);
+
+        // second stays disabled
+        let mut cur = doc.cursor();
+        cur.index(1)?.field("complete")?;
+        assert!(!cur.enabled()?);
+
+        for (idx, v) in [(0, "first todo"), (1, "second todo")] {
+            assert_eq!(doc.cursor().len()?, 2);
+            let r = doc
+                .cursor()
+                .index(idx)?
+                .field("title")?
+                .strs()?
+                .collect::<Result<Vec<_>>>()?;
+            assert_eq!(r.len(), 1);
+            assert_eq!(r[0], v);
+        }
+
+        let mut cur = doc.cursor();
+        let op = cur.index(0)?.delete()?;
+        doc.apply(&op)?;
+
         assert_eq!(doc.cursor().len()?, 1);
         let r = doc
             .cursor()
@@ -782,7 +816,16 @@ mod tests {
             .strs()?
             .collect::<Result<Vec<_>>>()?;
         assert_eq!(r.len(), 1);
-        assert_eq!(r[0], "something that needs to be done");
+        assert_eq!(r[0], "second todo");
+
+        let r = doc
+            .cursor()
+            .index(1)?
+            .field("title")?
+            .strs()?
+            .collect::<Result<Vec<_>>>()?;
+        assert!(r.is_empty());
+
         Ok(())
     }
 
