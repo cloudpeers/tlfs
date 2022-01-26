@@ -99,7 +99,7 @@ const setValue = (cursor: Cursor, value: any): Causal => {
     value.forEach((v, idx) => {
       const here = cursor.clone()
       here.arrayIndex(idx)
-      const c = setPrimitiveValue(here, v)
+      const c = setValue(here, v)
       if (causal) {
         causal.join(c)
       } else {
@@ -130,7 +130,7 @@ const setValue = (cursor: Cursor, value: any): Causal => {
       } else {
         here.structField(k)
       }
-      const c = setPrimitiveValue(here, v)
+      const c = setValue(here, v)
       if (causal) {
         causal.join(c)
       } else {
@@ -167,7 +167,8 @@ const setPrimitiveValue = (cursor: Cursor, value: any): Causal => {
     case "Reg<string>":
       return cursor.regAssignStr(value.toString())
     default: {
-      throw new Error("unreachable")
+      throw new Error(`Unknown type: ${cursor.typeOf()}; value: ${value}`)
+
     }
   }
 }
@@ -192,8 +193,14 @@ const mkProxy = <T extends object>(doc: Doc, cursor_?: Cursor): T => {
         case "valueOf":
           return undefined
         case "toString": {
-          throw new Error(`Method ${p} not implemented in TLFS proxy. Please file a bug and/or use the document API directly to work around.`)
+
+          return function () { return 'FIXME' }
+
+
         }
+        //        default:
+        //          throw new Error(`Method ${String(p)} not implemented in TLFS proxy. Please file a bug and/or use the document API directly to work around.`)
+
       }
 
       const cursor = cursor_?.clone() || doc.createCursor()
@@ -204,7 +211,7 @@ const mkProxy = <T extends object>(doc: Doc, cursor_?: Cursor): T => {
         switch (p) {
           case 'filter': {
             return function (...args: any[]) {
-              const arr = new Array(cursor.arrayLength()).map((_v, idx) =>
+              const arr = new Array(cursor.arrayLength()).fill(undefined).map((_v, idx) =>
                 get(doc, cursor.clone())({}, idx.toString(), undefined)
               )
 
