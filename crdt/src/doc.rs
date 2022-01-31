@@ -66,7 +66,7 @@ impl Docs {
     pub fn docs(&self) -> impl Iterator<Item = Result<DocId>> + '_ {
         self.0.iter().filter_map(|(k, _)| {
             if k[32] == 1 {
-                Some(Ok(DocId::new((&k[..32]).try_into().unwrap())))
+                Some(Ok(DocId::new(k[..32].try_into().unwrap())))
             } else {
                 None
             }
@@ -76,7 +76,7 @@ impl Docs {
     pub fn keys(&self) -> impl Iterator<Item = Result<PeerId>> + '_ {
         self.0.iter().filter_map(|(k, _)| {
             if k[32] == 2 {
-                Some(Ok(PeerId::new((&k[..32]).try_into().unwrap())))
+                Some(Ok(PeerId::new(k[..32].try_into().unwrap())))
             } else {
                 None
             }
