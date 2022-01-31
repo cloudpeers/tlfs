@@ -87,7 +87,7 @@ impl Fallible for SharedSerializeMap2 {
 }
 
 impl SharedSerializeRegistry for SharedSerializeMap2 {
-    fn get_shared_ptr(&mut self, value: *const u8) -> Option<usize> {
+    fn get_shared_ptr(&self, value: *const u8) -> Option<usize> {
         self.shared_resolvers.get(&value).copied()
     }
 
