@@ -355,7 +355,7 @@ fn init_tracing() {
         #[cfg(target_os = "android")]
         use tracing_subscriber::layer::SubscriberExt;
         #[cfg(target_os = "android")]
-        let subscriber = subscriber.with(tracing_android::layer("com.cloudpeer")?);
+        let subscriber = subscriber.with(tracing_android::layer("com.cloudpeer").ok());
         tracing::subscriber::set_global_default(subscriber).ok();
         std::env::set_var("RUST_BACKTRACE", "1");
     } else if cfg!(target_family = "wasm") {
