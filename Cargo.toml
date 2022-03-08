@@ -22,6 +22,7 @@ lto = true
 anyhow = "1.0.51"
 async-trait = "0.1.52"
 bytecheck = "0.6.7"
+datachannel = { version = "0.7.4", features = ["static"] }
 ed25519-dalek = "1.0.1"
 fnv = "1.0.7"
 futures = "0.3.17"
