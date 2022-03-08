@@ -192,9 +192,7 @@ jobs:
     - name: Build tlfs (android)
       working-directory: api
       if: contains(matrix.platform.target, 'android')
-      # currently this fails as cargo-apk ignores the [lib] name setting
-      continue-on-error: true
-      run: cargo apk build --release --target ${{ matrix.platform.target }}
+      run: sudo apt-get update && sudo apt-get install -y gcc-multilib && cargo apk build --release --target ${{ matrix.platform.target }}
 
     - name: Create artefact
       working-directory: target/${{ matrix.platform.target }}/release
