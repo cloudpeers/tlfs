@@ -22,12 +22,12 @@ lto = true
 anyhow = "1.0.51"
 async-trait = "0.1.52"
 bytecheck = "0.6.7"
-datachannel = { version = "0.7.4", features = ["static"] }
+datachannel = "0.7.4"
 ed25519-dalek = "1.0.1"
 fnv = "1.0.7"
 futures = "0.3.17"
-libp2p-broadcast = "0.7.0"
-libp2p-webrtc = "0.2.1"
+libp2p-broadcast = "0.9.0"
+libp2p-webrtc = "0.3.0"
 log-panics = "2.0.0"
 rkyv = "0.7.26"
 tlfs-crdt = { version = "0.1.0", path = "crdt" }
@@ -36,7 +36,7 @@ tracing-log = "0.1.2"
 tracing-subscriber = { version = "0.3.3", default-features = false, features = ["env-filter", "fmt"] }
 
 [dependencies.libp2p]
-version = "0.42.0"
+version = "0.43.0"
 default-features = false
 features = [
     "dns-tokio",
@@ -53,7 +53,7 @@ tracing-wasm = "0.2.1"
 wasm-bindgen-futures = "0.4.28"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies.libp2p]
-version = "0.42.0"
+version = "0.43.0"
 default-features = false
 features = [
     "wasm-bindgen",
@@ -68,10 +68,3 @@ async-global-executor = { version = "2.0.2", features = ["tokio"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
 tracing-android = "0.1.6"
-
-[patch.crates-io]
-#wait for new lip2p release
-libp2p = { git = "https://github.com/libp2p/rust-libp2p", branch = "master" }
-#wait for new lip2p release
-libp2p-webrtc = { git = "https://github.com/wngr/libp2p-webrtc", branch = "tlfs" }
-libp2p-broadcast = { git = "https://github.com/cloudpeers/libp2p-broadcast", branch = "tlfs" }

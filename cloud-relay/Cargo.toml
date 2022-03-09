@@ -8,7 +8,7 @@ acme-lib = "0.8.2"
 anyhow = "1.0.51"
 clap = { version = "3.0.0-rc.4", features = ["derive"] }
 hex = "0.4.3"
-libp2p = { version = "0.41.0", features = [
+libp2p = { version = "0.43.0", features = [
   "noise",
   "mplex",
   "pnet",
