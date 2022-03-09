@@ -182,7 +182,7 @@ jobs:
 
     - name: Install cargo apk
       if: contains(matrix.platform.target, 'android')
-      run: cargo install cargo-apk --locked
+      run: cargo install cargo-apk --locked --git https://github.com/rust-windowing/android-ndk-rs/ --branch update-subcommand
 
     - name: Build tlfs
       working-directory: api
