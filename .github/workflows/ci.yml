@@ -109,3 +109,97 @@ jobs:
     - name: npm publish
       working-directory: api/js
       run: npm publish --dry-run
+
+  release-tlfsc:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+        - target: x86_64-unknown-linux-gnu
+          host: ubuntu-latest
+          file: tlfsc
+          tar: tar --zstd
+        - target: x86_64-apple-darwin
+          host: macos-latest
+          file: tlfsc
+          tar: gtar --zstd
+        - target: x86_64-pc-windows-msvc
+          host: windows-latest
+          file: tlfsc.exe
+          tar: "\"C:\\Program Files\\Git\\usr\\bin\\tar.exe\" -I zstd"
+    runs-on: ${{ matrix.platform.host }}
+    steps:
+    - name: Checkout sources
+      uses: actions/checkout@v2
+
+    - name: Install rust toolchain
+      uses: hecrj/setup-rust-action@v1
+
+    - name: Build tlfsc
+      working-directory: tlfsc
+      run: cargo build --release
+
+    - name: Create artefact
+      working-directory: target/release
+      shell: bash
+      run: ${{ matrix.platform.tar }} -cf tlfsc.${{ matrix.platform.target }}.tar.zst ${{ matrix.platform.file }}
+
+  release-libtlfs:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+        - target: x86_64-unknown-linux-gnu
+          host: ubuntu-latest
+          file: libtlfs.so
+          tar: tar --zstd
+        - target: x86_64-apple-darwin
+          host: macos-latest
+          file: libtlfs.dylib
+          tar: gtar --zstd
+        - target: x86_64-pc-windows-msvc
+          host: windows-latest
+          file: tlfs.dll tlfs.dll.lib tlfs.pdb
+          tar: "\"C:\\Program Files\\Git\\usr\\bin\\tar.exe\" -I zstd"
+        - target: aarch64-linux-android
+          host: ubuntu-latest
+          file: libtlfs.so
+          tar: tar --zstd
+        - target: aarch64-apple-ios
+          host: macos-latest
+          file: libtlfs.a
+          tar: gtar --zstd
+    runs-on: ${{ matrix.platform.host }}
+    steps:
+    - name: Checkout sources
+      uses: actions/checkout@v2
+
+    - name: Install rust toolchain
+      uses: hecrj/setup-rust-action@v1
+      with:
+        rust-version: nightly
+        targets: ${{ matrix.platform.target }}
+
+    - name: Install cargo apk
+      if: contains(matrix.platform.target, 'android')
+      run: cargo install cargo-apk --locked --git https://github.com/rust-windowing/android-ndk-rs/ --branch update-subcommand
+
+    - name: Build tlfs
+      working-directory: api
+      if: contains(matrix.platform.target, 'android') == false
+      run: cargo build --release --target ${{ matrix.platform.target }}
+
+    - name: Build tlfs (android)
+      working-directory: api
+      if: contains(matrix.platform.target, 'android')
+      run: sudo apt-get update && sudo apt-get install -y gcc-multilib && cargo apk build --release --target ${{ matrix.platform.target }}
+
+    - name: Create artefact
+      working-directory: target/${{ matrix.platform.target }}/release
+      shell: bash
+      run: mkdir libtlfs && cp ${{ matrix.platform.file }} libtlfs/
+
+    - name: Create artefact
+      working-directory: target/${{ matrix.platform.target }}/release
+      shell: bash
+      run: ${{ matrix.platform.tar }} -cf libtlfs.${{ matrix.platform.target }}.tar.zst libtlfs

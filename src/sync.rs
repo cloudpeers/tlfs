@@ -341,7 +341,7 @@ impl Behaviour {
     ) -> Poll<
         NetworkBehaviourAction<
             <Self as NetworkBehaviour>::OutEvent,
-            <Self as NetworkBehaviour>::ProtocolsHandler,
+            <Self as NetworkBehaviour>::ConnectionHandler,
         >,
     > {
         if let Some(peer) = self.dial.pop_front() {
